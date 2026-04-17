@@ -70,7 +70,7 @@ class CDPBridge:
         except Exception as e:
             log.error("Failed to connect: %s", e)
             log.error("Make sure Chrome is running with --remote-debugging-port=9222")
-            log.error("Run: ./jobpilot/scripts/launch_chrome.sh")
+            log.error("Run: ./scripts/launch_chrome.sh")
             return False
     
     async def disconnect(self):

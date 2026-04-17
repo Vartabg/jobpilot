@@ -92,25 +92,31 @@ class JDParser:
 
         jd = ParsedJD()
 
-        # --- Title ---
-        title_el = await JOB_TITLE.query(self.page)
-        if title_el:
-            jd.title = (await title_el.inner_text()).strip()
+        # --- Title + Company via document.title (most stable source) ---
+        # LinkedIn format: "{Job Title} | {Company} | LinkedIn"
+        # This survives CSS-in-JS class obfuscation.
+        page_title = await self.page.title()
+        match = re.match(r"^(.+?)\s+\|\s+(.+?)\s+\|\s+LinkedIn\s*$", page_title)
+        if match:
+            jd.title = match.group(1).strip()
+            jd.company = match.group(2).strip()
+        else:
+            # Fallback to class-based selectors (older LinkedIn markup)
+            title_el = await JOB_TITLE.query(self.page)
+            if title_el:
+                jd.title = (await title_el.inner_text()).strip()
+            company_el = await COMPANY_NAME.query(self.page)
+            if company_el:
+                jd.company = (await company_el.inner_text()).strip()
 
-        # --- Company ---
-        company_el = await COMPANY_NAME.query(self.page)
-        if company_el:
-            jd.company = (await company_el.inner_text()).strip()
-
-        # --- Raw JD text ---
-        jd_el = await JD_CONTAINER.query(self.page)
-        if not jd_el:
-            log.warning("Could not find JD container on page")
-            # Still cache partial result
+        # --- Raw JD text via text-anchor + class-selector fallback ---
+        jd.raw_text = await self._extract_jd_text()
+        if not jd.raw_text:
+            log.warning(
+                "Could not extract JD text via text anchor or class selectors"
+            )
             self._cache[url] = jd
             return jd
-
-        jd.raw_text = (await jd_el.inner_text()).strip()
 
         # --- Salary ---
         salary_match = _SALARY_PATTERN.search(jd.raw_text)
@@ -142,6 +148,58 @@ class JDParser:
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
+
+    async def _extract_jd_text(self) -> str:
+        """Extract the raw JD body. Text-anchor strategy first, then class selectors.
+
+        LinkedIn moved to scrambled CSS-in-JS class names (2026-04), so we anchor
+        on the stable H2 text "About the job" and grab its container. We keep
+        the class-based fallback for older LinkedIn renderings and test fixtures.
+        """
+        js = r"""
+        () => {
+          const headings = Array.from(document.querySelectorAll('h2, h3'));
+          const about = headings.find(
+            h => /^\s*About the job\s*$/i.test((h.innerText || '').trim())
+          );
+          if (!about) return null;
+
+          // Preferred: parent's next element sibling (observed stable on 2026-04 LinkedIn)
+          const parent = about.parentElement;
+          if (parent && parent.nextElementSibling) {
+            const text = parent.nextElementSibling.innerText || '';
+            if (text.length > 100) return text;
+          }
+
+          // Fallback: H2's own next sibling
+          if (about.nextElementSibling) {
+            const text = about.nextElementSibling.innerText || '';
+            if (text.length > 100) return text;
+          }
+
+          // Last resort: walk up to 4 ancestors and return the first sizable text
+          let node = about;
+          for (let i = 0; i < 4 && node.parentElement; i++) {
+            node = node.parentElement;
+            if ((node.innerText || '').length > 500) {
+              return node.innerText;
+            }
+          }
+          return null;
+        }
+        """
+        try:
+            text = await self.page.evaluate(js)
+            if text and len(text) > 100:
+                return text.strip()
+        except Exception as exc:
+            log.warning(f"JD text-anchor evaluation failed: {exc}")
+
+        jd_el = await JD_CONTAINER.query(self.page)
+        if jd_el:
+            return (await jd_el.inner_text()).strip()
+
+        return ""
 
     @staticmethod
     def _extract_sections(text: str) -> tuple[list[str], list[str]]:

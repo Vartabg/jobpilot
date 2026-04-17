@@ -285,7 +285,7 @@ async def _resume_active_page(
     bridge = await connect_to_chrome(port)
 
     if not bridge:
-        console.print("\n[yellow]💡 Tip: Run ./jobpilot/scripts/launch_chrome.sh first[/yellow]")
+        console.print("\n[yellow]💡 Tip: Run ./scripts/launch_chrome.sh first[/yellow]")
         return False
 
     try:
@@ -321,7 +321,7 @@ async def _score_active_page(port: int) -> bool:
     bridge = await connect_to_chrome(port)
 
     if not bridge:
-        console.print("\n[yellow]💡 Tip: Run ./jobpilot/scripts/launch_chrome.sh first[/yellow]")
+        console.print("\n[yellow]💡 Tip: Run ./scripts/launch_chrome.sh first[/yellow]")
         return False
 
     try:
@@ -471,7 +471,7 @@ async def _start_async(port: int, watch: bool):
     bridge = await connect_to_chrome(port)
 
     if not bridge:
-        console.print("\n[yellow]💡 Tip: Run ./jobpilot/scripts/launch_chrome.sh first[/yellow]")
+        console.print("\n[yellow]💡 Tip: Run ./scripts/launch_chrome.sh first[/yellow]")
         return
 
     # Auto-index resume
