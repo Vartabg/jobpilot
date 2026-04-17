@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+.python-version
+
+# Local data (contains your profile, applications DB, logs — never commit)
+data/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Build artifacts
+dist/
+build/
+*.egg
+wheels/
+
+# Playwright browser state (machine-specific)
+.playwright/

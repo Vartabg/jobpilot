@@ -1,0 +1,22 @@
+#!/bin/bash
+# JobPilot CLI runner
+# Usage: ./jobpilot doctor | ./jobpilot start
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECTS_DIR="$(dirname "$SCRIPT_DIR")"
+VENV_PYTHON="${SCRIPT_DIR}/.venv/bin/python"
+
+if [ ! -f "$VENV_PYTHON" ]; then
+    echo "❌ Virtual environment not found. Run these commands first:"
+    echo "   cd ${SCRIPT_DIR}"
+    echo "   python3 -m venv .venv"
+    echo "   .venv/bin/pip install -e ."
+    exit 1
+fi
+
+# Keep imports stable even when running from inside the repo root.
+export PYTHONPATH="${PROJECTS_DIR}${PYTHONPATH:+:$PYTHONPATH}"
+
+exec "$VENV_PYTHON" -m jobpilot.cli "$@"
