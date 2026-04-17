@@ -1,0 +1,65 @@
+[project]
+name = "jobpilot"
+version = "0.1.0"
+description = "Semi-automated LinkedIn job application copilot with learning capabilities"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [
+    { name = "Garo Vartabedian", email = "garo.vartabed@gmail.com" },
+]
+keywords = ["linkedin", "job-application", "automation", "ats", "resume", "copilot"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business",
+    "Topic :: Utilities",
+]
+
+dependencies = [
+    "playwright>=1.40.0",
+    "requests>=2.31.0",
+    "rich>=13.0.0",
+    "typer>=0.9.0",
+    "pydantic>=2.0.0",
+    "rapidfuzz>=3.0.0",
+    "browser-use>=0.1.0",
+    "langchain-google-genai>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/Vartabg/jobpilot"
+Source = "https://github.com/Vartabg/jobpilot"
+Issues = "https://github.com/Vartabg/jobpilot/issues"
+
+[project.scripts]
+jobpilot = "cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
+
+[tool.hatch.build]
+include = [
+    "*.py",
+    "core/*.py",
+    "ui/*.py",
+    "learning/*.py",
+    "data/*.json",
+    "scripts/*.sh",
+]
