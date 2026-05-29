@@ -14,7 +14,14 @@ from jobpilot.core.config import DATA_DIR
 from jobpilot.core.profile_store import ProfileStore
 from jobpilot.learning.learning_db import LearningDB
 
-_VALID_APPLICATION_STATUSES = {"started", "submitted", "abandoned"}
+# Original schema: started / submitted / abandoned (the in-app `apply` flow).
+# Extended set: applied / rejected / interview — semantically used by the
+# Gmail-backfill path and `jobpilot log` for tracking external/manual flows.
+# All are accepted by the doctor so backfilled rows don't trip warnings.
+_VALID_APPLICATION_STATUSES = {
+    "started", "submitted", "abandoned",
+    "applied", "rejected", "interview",
+}
 
 
 @dataclass
