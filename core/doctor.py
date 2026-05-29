@@ -14,7 +14,14 @@ from jobpilot.core.config import DATA_DIR
 from jobpilot.core.profile_store import ProfileStore
 from jobpilot.learning.learning_db import LearningDB
 
-_VALID_APPLICATION_STATUSES = {"started", "submitted", "abandoned"}
+# Original schema: started / submitted / abandoned (the in-app `apply` flow).
+# Extended set: applied / rejected / interview — semantically used by the
+# Gmail-backfill path and `jobpilot log` for tracking external/manual flows.
+# All are accepted by the doctor so backfilled rows don't trip warnings.
+_VALID_APPLICATION_STATUSES = {
+    "started", "submitted", "abandoned",
+    "applied", "rejected", "interview",
+}
 
 
 @dataclass
@@ -116,9 +123,11 @@ def _check_applications(
         infos.append(f"Applications tracked: {total} total, {submitted} submitted.")
 
         with sqlite3.connect(str(db_path)) as conn:
+            valid_statuses = tuple(sorted(_VALID_APPLICATION_STATUSES))
+            placeholders = ", ".join("?" * len(valid_statuses))
             invalid_rows = conn.execute(
-                "SELECT DISTINCT status FROM applications WHERE status NOT IN (?, ?, ?)",
-                tuple(sorted(_VALID_APPLICATION_STATUSES)),
+                f"SELECT DISTINCT status FROM applications WHERE status NOT IN ({placeholders})",
+                valid_statuses,
             ).fetchall()
             invalid_statuses = [str(row[0]) for row in invalid_rows if row[0]]
             if invalid_statuses:
