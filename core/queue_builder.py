@@ -144,7 +144,7 @@ SENIOR_BUREAUCRAT_KILLS = (
     "director", "vp ", "head of", "vice president",
     "manager,", "manager -",
 )
-# Lived/moat industries (Navy electronics → field service → AV → AI builder).
+# Lived/moat industries.
 # Tag at scan time since we don't fetch JD text. Add entries when curating
 # portals.json. Industries in HIGH_MOAT below get full vertical-moat points.
 MOAT_COMPANY_TAGS = {
