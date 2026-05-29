@@ -101,6 +101,40 @@ class ApplicationTracker:
         ).fetchone()
         return row["status"] if row else None
 
+    def has_applied_to_company(self, company: str) -> bool:
+        """Case-insensitive dedup at the company level.
+
+        URL-based dedup misses cases where the same company is on a different
+        board, posts a slightly different role, or where backfilled rows use
+        synthetic URLs (e.g. `gmail-backfill://...`). Company-level dedup
+        catches those for sourcing-time filtering.
+        """
+        if not company or not company.strip():
+            return False
+        row = self._get_conn().execute(
+            "SELECT 1 FROM applications WHERE LOWER(company) = LOWER(?) LIMIT 1",
+            (company.strip(),),
+        ).fetchone()
+        return row is not None
+
+    def company_status(self, company: str) -> Optional[str]:
+        """Latest application status for a company (rejected > applied > queued)."""
+        if not company or not company.strip():
+            return None
+        # Prefer rejected if any row is rejected (dead ground signal); else applied.
+        rows = self._get_conn().execute(
+            "SELECT status FROM applications WHERE LOWER(company) = LOWER(?)",
+            (company.strip(),),
+        ).fetchall()
+        if not rows:
+            return None
+        statuses = {r["status"] for r in rows}
+        if "rejected" in statuses:
+            return "rejected"
+        if "applied" in statuses or "submitted" in statuses:
+            return "applied"
+        return next(iter(statuses), None)
+
     def mark_started(self, url: str, title: str = "", company: str = ""):
         """Record that an application was started."""
         normalized = self._normalize_url(url)

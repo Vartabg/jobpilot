@@ -118,6 +118,10 @@ jobpilot start            Connect to Chrome and get help filling out application
 jobpilot doctor           Check that everything is working correctly
 jobpilot history          See your application history
 jobpilot stats            See your application stats
+jobpilot queue            Build a scored, deduped queue of fresh jobs across multiple companies
+jobpilot log              Mark a manual application so it's tracked alongside JobPilot-assisted ones
+jobpilot psyche           Show your work-style profile and how it's scoring real jobs
+jobpilot answer           Save and reuse the answers you write for application questions
 ```
 
 ---

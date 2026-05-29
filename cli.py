@@ -467,25 +467,15 @@ def start(
 
 async def _start_async(port: int, watch: bool):
     """Bootstrap services, wire events, delegate to engine."""
-    console.print("\n[cyan]Connecting to Chrome...[/cyan]")
+    console.print("\n[cyan]Launching browser...[/cyan]")
     bridge = await connect_to_chrome(port)
 
     if not bridge:
-        console.print("\n[yellow]💡 Tip: Run ./scripts/launch_chrome.sh first[/yellow]")
+        console.print("\n[red]Failed to launch browser. Check logs above.[/red]")
         return
 
     # Auto-index resume
     _check_and_index_resume()
-
-    # Inject overlays
-    from jobpilot.ui.ghost_overlay import GhostOverlay
-    from jobpilot.ui.chat_overlay import ChatOverlay
-
-    overlay = GhostOverlay(bridge.page)
-    await overlay.inject()
-
-    chat_overlay = ChatOverlay(bridge.page)
-    await chat_overlay.inject()
 
     # Wire event bus
     events = EventBus()
@@ -495,8 +485,8 @@ async def _start_async(port: int, watch: bool):
     engine = ApplicationEngine(
         bridge=bridge,
         events=events,
-        overlay=overlay,
-        chat_overlay=chat_overlay,
+        overlay=None,
+        chat_overlay=None,
         profile_store=get_profile_store(),
         question_matcher=get_question_matcher(),
         action_recorder=get_action_recorder(),
@@ -710,6 +700,166 @@ def history(
 
 
 @app.command()
+def serve(
+    host: str = typer.Option("0.0.0.0", help="Bind address"),
+    port: int = typer.Option(8766, help="Port"),
+):
+    """Start the remote dashboard (access from phone via Tailscale)."""
+    from jobpilot.core.server import run_server, get_tailscale_ip, get_local_ip
+
+    ts_ip = get_tailscale_ip()
+    lan_ip = get_local_ip()
+
+    console.print(Panel.fit(
+        f"[bold cyan]🚀 JobPilot Remote Dashboard[/bold cyan]\n"
+        + (f"[bold green]Tailscale:[/bold green]  http://{ts_ip}:{port}\n" if ts_ip else "[yellow]Tailscale not detected — start it with `tailscale up`[/yellow]\n")
+        + f"[bold]LAN:[/bold]        http://{lan_ip}:{port}\n"
+        + f"[dim]Local:       http://127.0.0.1:{port}[/dim]\n"
+        + f"\n[dim]Open the Tailscale URL on your phone to apply remotely.[/dim]\n"
+        + f"[dim]Keep this terminal open. Ctrl+C to stop.[/dim]",
+        border_style="cyan",
+        title="Mobile Access",
+    ))
+
+    run_server(host=host, port=port)
+
+
+@app.command()
+def queue(
+    refresh: bool = typer.Option(False, "--refresh", "-r", help="Re-scan all portals and rebuild queue"),
+    limit: int = typer.Option(50, "--limit", "-n", help="Max jobs to queue"),
+    open_dashboard: bool = typer.Option(True, "--open/--no-open", help="Open dashboard in browser after building"),
+    fresh: bool = typer.Option(False, "--fresh", help="Show only roles you haven't applied to / been rejected from (dedup vs applications.db)"),
+    as_json: bool = typer.Option(False, "--json", help="Emit the queue (filtered) as JSON to stdout. Suppresses dashboard + console table. For piping into other tools/agents."),
+):
+    """Scan ATS boards, score jobs, and open the apply dashboard."""
+    from jobpilot.core.queue_builder import build_queue, load_queue, save_queue
+    import subprocess
+    from dataclasses import asdict
+
+    dashboard_path = Path(__file__).parent / "ui" / "dashboard.html"
+
+    # JSON mode: emit raw queue (respecting --fresh and --limit) and exit.
+    # Designed for cross-agent / scripting use without dashboard/UI side effects.
+    if as_json:
+        if refresh or not (Path(__file__).parent / "data" / "queue.json").exists():
+            jobs = build_queue(limit=limit)
+            save_queue(jobs)
+        else:
+            jobs = load_queue()
+        view = [j for j in jobs if j.status == "queued"] if fresh else jobs
+        view = view[:limit]
+        console.print_json(data=[asdict(j) for j in view])
+        return
+
+    if not refresh and (Path(__file__).parent / "data" / "queue.json").exists():
+        jobs = load_queue()
+        queued = [j for j in jobs if j.status == "queued"]
+        console.print(f"[cyan]Loaded existing queue: {len(queued)} jobs ready to apply[/cyan]")
+        console.print(f"[dim]Run with --refresh to re-scan portals[/dim]")
+    else:
+        console.print("[cyan]Scanning ATS boards (this takes ~30 seconds)...[/cyan]")
+        jobs = build_queue(limit=limit)
+        if not jobs:
+            console.print("[yellow]No jobs found. Check data/portals.json and your internet connection.[/yellow]")
+            raise typer.Exit(1)
+        save_queue(jobs)
+        console.print(f"[green]✓ Built queue: {len(jobs)} jobs across tech + field ops[/green]")
+
+        from rich.table import Table
+        view_jobs = [j for j in jobs if j.status == "queued"] if fresh else jobs
+        if fresh:
+            filtered = len(jobs) - len(view_jobs)
+            console.print(f"[dim]--fresh: hiding {filtered} already-applied/rejected jobs[/dim]")
+        table = Table(title="Top 10 Fresh Jobs" if fresh else "Top 10 Jobs")
+        table.add_column("Score", style="cyan", width=6)
+        table.add_column("Company", style="white", max_width=18)
+        table.add_column("Role", style="green", max_width=38)
+        table.add_column("Track", style="magenta", width=10)
+        table.add_column("Status", style="yellow", width=10)
+        table.add_column("ID", style="dim", width=8)
+        for j in view_jobs[:10]:
+            table.add_row(str(j.fit_score), j.company, j.title, j.track, j.status, j.id)
+        console.print(table)
+
+    if open_dashboard and dashboard_path.exists():
+        subprocess.run(["open", str(dashboard_path)], check=False)
+        console.print(f"[green]✓ Dashboard opened — click ⚡ Apply Now on any job[/green]")
+    elif not dashboard_path.exists():
+        console.print(f"[yellow]Dashboard not found at {dashboard_path}[/yellow]")
+
+
+@app.command()
+def apply(
+    job_id: str = typer.Argument(..., help="Job ID from the queue (shown in dashboard or 'jobpilot queue')"),
+    port: int = typer.Option(9222, help="Chrome debugging port"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be filled without filling"),
+):
+    """Auto-fill a job application. Stops before submit — you approve."""
+    from jobpilot.core.queue_builder import get_job, update_job_status
+    from jobpilot.core.form_filler import fill_application
+
+    job = get_job(job_id)
+    if not job:
+        console.print(f"[red]Job '{job_id}' not found in queue. Run 'jobpilot queue' first.[/red]")
+        raise typer.Exit(1)
+
+    if job.status == "applied":
+        console.print(f"[yellow]Already applied to {job.title} @ {job.company}[/yellow]")
+        if not typer.confirm("Apply again anyway?"):
+            raise typer.Exit(0)
+
+    console.print(Panel.fit(
+        f"[bold cyan]{job.title}[/bold cyan]\n"
+        f"[white]{job.company}[/white]  •  {job.location}\n"
+        f"[dim]{job.url}[/dim]\n"
+        f"[bold]Fit Score: {job.fit_score}/100[/bold]  •  Track: {job.track}",
+        border_style="cyan",
+        title="Applying to",
+    ))
+
+    if dry_run:
+        console.print("[dim]Dry run — no form filling. Pass without --dry-run to apply.[/dim]")
+        raise typer.Exit(0)
+
+    profile = get_profile_store().load()
+
+    console.print("[cyan]Starting LLM form filler...[/cyan]")
+    console.print("[dim]Chrome will navigate to the job page. Watch it fill the form.[/dim]")
+    console.print("[yellow]⚠  It will STOP before submitting. You approve in this terminal.[/yellow]\n")
+
+    result = asyncio.run(fill_application(
+        job_url=job.url,
+        job_title=job.title,
+        company=job.company,
+        profile=profile,
+        cdp_port=port,
+    ))
+
+    if not result.success:
+        console.print(f"[red]Form filler failed: {result.error}[/red]")
+        raise typer.Exit(1)
+
+    console.print("\n[bold green]✓ Form filled. Review what was filled:[/bold green]")
+    for f in result.filled_fields:
+        console.print(f"  [green]•[/green] {f}")
+
+    console.print("\n[bold yellow]Review the form in Chrome now.[/bold yellow]")
+    console.print("Make any corrections in the browser, then come back here.\n")
+
+    confirmed = typer.confirm("Everything looks good? Submit the application?", default=False)
+
+    if confirmed:
+        console.print("[cyan]Go to Chrome and click the Submit button.[/cyan]")
+        console.print("[dim](JobPilot never auto-submits — that's your call.)[/dim]")
+        input("Press Enter once you've submitted in Chrome...")
+        update_job_status(job_id, "applied")
+        console.print("[bold green]🎊 Marked as applied! Keep going.[/bold green]")
+    else:
+        console.print("[dim]Not submitted. Job stays in queue.[/dim]")
+
+
+@app.command()
 def report(
     csv_export: bool = typer.Option(False, "--csv", help="Export to CSV file"),
     days: int = typer.Option(7, "--days", "-d", help="Number of days to include"),
@@ -795,6 +945,308 @@ def review(
             break
 
     console.print("\n[green]✓ Review complete[/green]")
+
+
+answer_app = typer.Typer(help="Manage paste-ready application answers (save / copy / list / show).")
+app.add_typer(answer_app, name="answer")
+
+
+def _answers_dir() -> Path:
+    """Root for stored answers: projects/jobpilot/data/answers/."""
+    from jobpilot.core.config import DATA_DIR
+    p = DATA_DIR / "answers"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def _answer_path(company: str, question: str) -> Path:
+    """`data/answers/<company-slug>/<question-slug>.txt`. Slugs are lowercase, dash-separated."""
+    import re as _re
+    def slug(s: str) -> str:
+        return _re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-") or "untitled"
+    return _answers_dir() / slug(company) / f"{slug(question)}.txt"
+
+
+def _verify_ascii(path: Path) -> Optional[str]:
+    """Return None if file is pure ASCII; else a sample of offending chars."""
+    try:
+        raw = path.read_bytes()
+    except Exception as exc:
+        return f"unreadable ({exc})"
+    bad = sorted({b for b in raw if b > 127})
+    if not bad:
+        return None
+    return f"non-ASCII bytes: {bad[:10]}"
+
+
+@answer_app.command("save")
+def answer_save(
+    company: str = typer.Argument(..., help="Company slug (e.g. 'extend')"),
+    question: str = typer.Argument(..., help="Question slug (e.g. 'q1-vetnav')"),
+    from_file: Optional[Path] = typer.Option(None, "--from-file", "-f", help="Source text file (overrides --text)"),
+    text: Optional[str] = typer.Option(None, "--text", "-t", help="Inline answer text"),
+    pbcopy: bool = typer.Option(True, "--pbcopy/--no-pbcopy", help="Also load to clipboard after saving"),
+):
+    """Save a paste-ready answer to `data/answers/<company>/<question>.txt`.
+
+    Auto-verifies pure ASCII so the paste won't carry em-dashes / curly quotes
+    that ATS forms render as AI-usage tells. Optionally pbcopies in one step.
+    """
+    import shutil
+    import subprocess as _sp
+
+    if from_file is None and not text:
+        console.print("[red]Provide --from-file <path> or --text '...'.[/red]")
+        raise typer.Exit(1)
+
+    target = _answer_path(company, question)
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    if from_file is not None:
+        if not from_file.exists():
+            console.print(f"[red]Source file not found: {from_file}[/red]")
+            raise typer.Exit(1)
+        shutil.copyfile(from_file, target)
+    else:
+        target.write_text(text or "")
+
+    issue = _verify_ascii(target)
+    if issue:
+        console.print(f"[yellow]⚠ {target.name} contains {issue} — paste-quality risk; clean and re-save.[/yellow]")
+    chars = len(target.read_text())
+    words = len(target.read_text().split())
+    console.print(f"[green]✓ Saved[/green] {target.relative_to(_answers_dir().parent.parent)} · {chars} chars · {words} words")
+
+    if pbcopy:
+        if shutil.which("pbcopy"):
+            _sp.run(["pbcopy"], input=target.read_bytes(), check=True)
+            console.print(f"[cyan]→ on clipboard. Cmd+V in the field, then Enter where you want paragraph breaks.[/cyan]")
+        else:
+            console.print("[yellow]pbcopy not found — clipboard skipped (non-macOS?).[/yellow]")
+
+
+@answer_app.command("copy")
+def answer_copy(
+    company: str = typer.Argument(..., help="Company slug"),
+    question: str = typer.Argument(..., help="Question slug"),
+):
+    """Load a saved answer onto your clipboard. `jobpilot answer copy extend q1-vetnav`."""
+    import shutil
+    import subprocess as _sp
+
+    target = _answer_path(company, question)
+    if not target.exists():
+        # Try fuzzy: list anything matching either token
+        hits = list(_answers_dir().rglob("*.txt"))
+        suggestions = [str(h.relative_to(_answers_dir())) for h in hits
+                       if company.lower() in str(h).lower() or question.lower() in str(h).lower()]
+        console.print(f"[red]Not found:[/red] {target}")
+        if suggestions:
+            console.print("[dim]Did you mean one of:[/dim]")
+            for s in suggestions[:8]:
+                console.print(f"  [dim]{s}[/dim]")
+        raise typer.Exit(1)
+
+    if not shutil.which("pbcopy"):
+        console.print("[yellow]pbcopy not found — printing to stdout instead.[/yellow]")
+        console.print(target.read_text())
+        return
+
+    _sp.run(["pbcopy"], input=target.read_bytes(), check=True)
+    chars = len(target.read_text())
+    console.print(f"[cyan]✓ on clipboard[/cyan] · {target.name} · {chars} chars")
+    console.print(f"[dim]Cmd+V in the field, then Enter where you want paragraph breaks.[/dim]")
+
+
+@answer_app.command("list")
+def answer_list(
+    company: Optional[str] = typer.Argument(None, help="Optional: filter to one company"),
+):
+    """List saved answers, grouped by company."""
+    from rich.table import Table
+    root = _answers_dir()
+    rows: list[tuple[str, str, int, str]] = []
+    for path in sorted(root.rglob("*.txt")):
+        comp = path.parent.name
+        if company and company.lower() != comp.lower():
+            continue
+        chars = len(path.read_text())
+        ts = path.stat().st_mtime
+        from datetime import datetime as _dt
+        rows.append((comp, path.stem, chars, _dt.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M")))
+
+    if not rows:
+        console.print("[yellow]No saved answers yet.[/yellow]")
+        return
+
+    table = Table(title="Saved answers", show_header=True, header_style="bold")
+    table.add_column("Company", style="cyan")
+    table.add_column("Question", style="green")
+    table.add_column("Chars", style="dim", justify="right")
+    table.add_column("Updated", style="dim")
+    for r in rows:
+        table.add_row(r[0], r[1], str(r[2]), r[3])
+    console.print(table)
+    console.print(f"[dim]Copy any of these with: jobpilot answer copy <company> <question>[/dim]")
+
+
+@answer_app.command("show")
+def answer_show(
+    company: str = typer.Argument(...),
+    question: str = typer.Argument(...),
+):
+    """Print a saved answer to stdout (for piping or inspection)."""
+    target = _answer_path(company, question)
+    if not target.exists():
+        console.print(f"[red]Not found: {target}[/red]")
+        raise typer.Exit(1)
+    console.print(target.read_text())
+
+
+@app.command()
+def psyche(
+    sample: bool = typer.Option(True, "--sample/--no-sample",
+                                help="Show the top scoring breakdown for current queue.json"),
+):
+    """View your work-style profile + how it's scoring real jobs.
+
+    Reads `data/psyche_profile.json`. Edit that file directly to retune.
+    Fork it for your own preferences — JobPilot's psycho-fit dimension
+    (15 of 100 total points) is driven entirely by what's in there.
+    """
+    from jobpilot.core.queue_builder import (
+        _load_psyche_profile, _score_psyche_fit, _load_portal_notes,
+        MOAT_COMPANY_TAGS, PSYCHE_PROFILE_PATH,
+    )
+    from rich.panel import Panel
+    from rich.table import Table
+
+    profile = _load_psyche_profile()
+    user = profile.get("user", "(unset)")
+    dims = profile.get("dimensions", {}) or {}
+
+    console.print(Panel.fit(
+        f"[bold]Psyche profile:[/bold] {user}\n"
+        f"[dim]{PSYCHE_PROFILE_PATH}[/dim]",
+        title="🧠 jobpilot psyche",
+    ))
+
+    if dims:
+        dim_table = Table(title="Dimensions", show_header=True, header_style="bold")
+        dim_table.add_column("Dimension", style="cyan")
+        dim_table.add_column("Value", style="white")
+        for k, v in dims.items():
+            dim_table.add_row(k, str(v))
+        console.print(dim_table)
+
+    loved = profile.get("loved_signals", {}) or {}
+    hated = profile.get("hated_signals", {}) or {}
+    sig_table = Table(title="Signal counts", show_header=True, header_style="bold")
+    sig_table.add_column("Bucket", style="cyan")
+    sig_table.add_column("Loved", style="green")
+    sig_table.add_column("Hated", style="red")
+    for bucket in ("title", "company_or_note", "industry"):
+        sig_table.add_row(
+            bucket,
+            f"{len(loved.get(bucket, []) or [])} tokens",
+            f"{len(hated.get(bucket, []) or [])} tokens",
+        )
+    console.print(sig_table)
+
+    if not sample:
+        return
+
+    queue_path = Path(__file__).parent / "data" / "queue.json"
+    if not queue_path.exists():
+        console.print("[yellow]No queue.json yet — run `jobpilot queue --refresh` first to see scoring in action.[/yellow]")
+        return
+
+    queue = json.loads(queue_path.read_text())
+    queue.sort(key=lambda j: -j.get("psyche_score", 0))
+    top = queue[:8]
+    sample_table = Table(title="Top 8 by Psycho-fit (live queue)", show_header=True, header_style="bold")
+    sample_table.add_column("Psy", style="magenta", width=4)
+    sample_table.add_column("Total", style="cyan", width=6)
+    sample_table.add_column("Company", style="white", max_width=18)
+    sample_table.add_column("Role", style="green", max_width=42)
+    sample_table.add_column("Status", style="yellow", width=10)
+    for j in top:
+        sample_table.add_row(
+            str(j.get("psyche_score", 0)),
+            str(j.get("fit_score", 0)),
+            j["company"],
+            j["title"][:42],
+            j["status"],
+        )
+    console.print(sample_table)
+    console.print(
+        f"[dim]Edit {PSYCHE_PROFILE_PATH} and re-run `jobpilot queue --refresh` "
+        f"to see scoring shift.[/dim]"
+    )
+
+
+@app.command()
+def log(
+    company: str = typer.Argument(..., help="Company name (used for dedup)"),
+    title: str = typer.Option("", "--title", "-t", help="Role title"),
+    url: str = typer.Option("", "--url", "-u", help="Apply URL (used as primary dedup key)"),
+    status: str = typer.Option("applied", "--status", "-s",
+                               help="applied | submitted | rejected | interview | abandoned"),
+    date: Optional[str] = typer.Option(None, "--date", "-d", help="ISO date (defaults to today)"),
+):
+    """Log an application to the tracker.
+
+    Closes the gap where manual/external applies (Ashby, Lever direct, etc.)
+    don't auto-write to applications.db, so subsequent `queue --fresh` runs
+    correctly dedup them. Idempotent on URL.
+    """
+    import sqlite3
+    import re
+    from datetime import datetime
+    from jobpilot.core.config import DATA_DIR
+
+    db_path = DATA_DIR / "applications.db"
+    if not db_path.exists():
+        console.print(f"[red]applications.db not found at {db_path}[/red]")
+        raise typer.Exit(1)
+
+    applied_at = (date or datetime.now().date().isoformat())
+    now_iso = datetime.now().isoformat()
+    slug = re.sub(r"[^a-z0-9]+", "-", f"{company}-{title or 'role'}".lower()).strip("-")
+    job_url = url.strip() or f"manual-log://{slug}/{applied_at}"
+
+    conn = sqlite3.connect(str(db_path))
+    try:
+        # Cross-source idempotency: same conceptual application can land via
+        # different URL prefixes (gmail-backfill:// vs manual-log:// vs the
+        # real ATS URL). Match on (company, title) case-insensitively in
+        # addition to exact URL.
+        existing = conn.execute(
+            """SELECT id, status FROM applications
+               WHERE job_url = ?
+                  OR (LOWER(company) = LOWER(?) AND LOWER(COALESCE(job_title,'')) = LOWER(COALESCE(?,'')))
+               LIMIT 1""",
+            (job_url, company, title),
+        ).fetchone()
+        if existing:
+            conn.execute(
+                "UPDATE applications SET status = ?, updated_at = ? WHERE id = ?",
+                (status, now_iso, existing[0]),
+            )
+            console.print(f"[yellow]↻ Updated existing entry to status='{status}'[/yellow]")
+        else:
+            conn.execute(
+                """INSERT INTO applications
+                   (job_url, job_title, company, applied_at, status, step_reached, fields_filled, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (job_url, title, company, applied_at, status, "manual-log", "", now_iso),
+            )
+            console.print(f"[green]✓ Logged: {company} — {title or '(role)'} [{status}][/green]")
+        conn.commit()
+        total = conn.execute("SELECT COUNT(*) FROM applications").fetchone()[0]
+        console.print(f"[dim]tracker now: {total} rows[/dim]")
+    finally:
+        conn.close()
 
 
 if __name__ == "__main__":

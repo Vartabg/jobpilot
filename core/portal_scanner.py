@@ -96,11 +96,21 @@ class PortalScanner:
             if self.keywords and not matched:
                 continue
 
+            # Prefer the direct Greenhouse board URL (has the apply form).
+            # Company-custom absolute_url often wraps the form in the company's
+            # own marketing shell (e.g. mongodb.com/careers/job/?gh_jid=...),
+            # which our form filler can't penetrate.
+            job_id = item.get("id")
+            if job_id:
+                direct_url = f"https://boards.greenhouse.io/{board_token}/jobs/{job_id}"
+            else:
+                direct_url = item.get("absolute_url", "").strip()
+
             jobs.append(
                 PortalJob(
                     company=company_name,
                     title=title,
-                    url=item.get("absolute_url", "").strip(),
+                    url=direct_url,
                     location=location,
                     portal="greenhouse",
                     matched_keywords=matched,
@@ -139,33 +149,39 @@ class PortalScanner:
         return jobs
 
     def scan_ashby_board(self, org_slug: str, *, label: str = "") -> list[PortalJob]:
-        """Parse job links from a public Ashby board page."""
-        url = f"https://jobs.ashbyhq.com/{org_slug}"
+        """Read jobs from Ashby's public posting JSON API.
+
+        Modern Ashby boards (`jobs.ashbyhq.com/{slug}`) are SPAs — the static
+        HTML has no job anchors to scrape. The posting JSON API is the
+        canonical public source.
+        """
+        url = f"https://api.ashbyhq.com/posting-api/job-board/{org_slug}"
         response = requests.get(url, timeout=self.timeout)
         response.raise_for_status()
-        html = response.text
+        payload: dict[str, Any] = response.json()
 
         jobs: list[PortalJob] = []
         company_name = label or org_slug.replace("-", " ").title()
-        link_re = re.compile(r'href="(?P<url>https://jobs\.ashbyhq\.com/[^"]+)"[^>]*>(?P<title>[^<]{3,120})</a>', re.IGNORECASE)
-
-        seen: set[str] = set()
-        for match in link_re.finditer(html):
-            title = self._strip_html(match.group("title"))
-            href = match.group("url")
-            if href in seen:
-                continue
-            seen.add(href)
-
-            matched = self._matched_keywords(title, company_name, "")
+        for item in payload.get("jobs", []):
+            title = str(item.get("title", "")).strip()
+            location = str(item.get("locationName", "")).strip()
+            matched = self._matched_keywords(title, company_name, location)
             if self.keywords and not matched:
                 continue
+
+            # Prefer the public job page URL; fall back to apply URL.
+            href = str(item.get("jobUrl") or item.get("applyUrl") or "").strip()
+            if not href:
+                job_id = item.get("id")
+                if job_id:
+                    href = f"https://jobs.ashbyhq.com/{org_slug}/{job_id}"
 
             jobs.append(
                 PortalJob(
                     company=company_name,
                     title=title,
                     url=href,
+                    location=location,
                     portal="ashby",
                     matched_keywords=matched,
                 )
