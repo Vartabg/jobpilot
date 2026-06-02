@@ -22,6 +22,34 @@ _STOPWORDS = {
 }
 
 
+# ── Supreme-pin alignment filter ──────────────────────────────────
+# See ~/.claude/projects/-Users-vartny-AI-Workspace/memory/feedback_jesus_is_the_standard.md
+# Refused categories: state-military / mass-surveillance / state-deportation / kill-chain integrations.
+_REFUSED_COMPANIES = frozenset({
+    "palantir",  # Mass-surveillance, ICE-targeting, Project Maven kill-chain AI
+})
+
+# Title-keyword refusal — federal-customer-named roles regardless of company
+_REFUSED_TITLE_KEYWORDS = frozenset({
+    "federal civilian",
+    "government technology",
+    "national security",
+    "state and local government",
+    "us government",
+    "us govt",
+    "department of defense",
+    "department of homeland",
+    "public sector",
+    "intelligence community",
+})
+
+# Deprioritized companies — alignment-OK but conversion-rate filter applies
+# See ~/.claude/projects/-Users-vartny-AI-Workspace/memory/feedback_anthropic_conversion_rate.md
+_DEPRIORITIZED_COMPANIES = frozenset({
+    "anthropic",  # Zero prior conversion for this profile
+})
+
+
 @dataclass
 class JobFitResult:
     """Structured fit score result."""
@@ -71,7 +99,14 @@ class JobScorer:
         return self.score_parsed_jd(parsed)
 
     def score_parsed_jd(self, parsed_jd: ParsedJD) -> JobFitResult:
-        """Score an already-parsed JD object."""
+        """Score an already-parsed JD object.
+
+        Applies the supreme-pin alignment filter first. Refused-category roles
+        short-circuit to score=0 + REFUSED recommendation regardless of other
+        components (via -100 Alignment penalty clamped at 0). Deprioritized
+        roles (Anthropic per the conversion-rate pin) receive a -25 penalty
+        and a downgraded recommendation tier.
+        """
         profile = self.profile_store.load()
         raw_text = parsed_jd.raw_text or parsed_jd.summary()
         jd_skills = parsed_jd.skills or JDParser._extract_skills(raw_text)
@@ -80,6 +115,15 @@ class JobScorer:
         matched_skills = [skill for skill in jd_skills if skill.lower() in candidate_skills]
         missing_skills = [skill for skill in jd_skills if skill.lower() not in candidate_skills]
 
+        # Supreme-pin alignment filter (applied first; can short-circuit total)
+        alignment_status, alignment_rationale = self._check_alignment(parsed_jd)
+        if alignment_status == "refused":
+            alignment_points = -100  # forces total to 0 via the clamp below
+        elif alignment_status == "deprioritized_anthropic":
+            alignment_points = -25
+        else:
+            alignment_points = 0
+
         title_points = self._score_title_alignment(profile.current_title, parsed_jd.title)
         skill_points = self._score_skills(jd_skills, matched_skills)
         exp_points, exp_risk = self._score_experience(profile.years_of_experience, raw_text)
@@ -87,6 +131,7 @@ class JobScorer:
         location_points = self._score_location(parsed_jd.location_type or self._extract_location_type(raw_text))
 
         components = {
+            "Alignment": alignment_points,
             "Title match": title_points,
             "Skills": skill_points,
             "Experience": exp_points,
@@ -97,6 +142,9 @@ class JobScorer:
         total = max(0, min(100, sum(components.values())))
         strengths: list[str] = []
         risks: list[str] = []
+
+        if alignment_rationale:
+            risks.append(alignment_rationale)
 
         if matched_skills:
             strengths.append(f"Matched skills: {', '.join(matched_skills[:4])}")
@@ -120,7 +168,7 @@ class JobScorer:
 
         return JobFitResult(
             score=total,
-            recommendation=self._recommendation(total),
+            recommendation=self._recommendation(total, alignment_status=alignment_status),
             parsed_jd=parsed_jd,
             components=components,
             matched_skills=matched_skills,
@@ -228,8 +276,55 @@ class JobScorer:
             return 5
         return 7
 
+    def _check_alignment(self, parsed_jd: ParsedJD) -> tuple[str, str]:
+        """Apply the supreme-pin alignment filter.
+
+        Returns (status, rationale) where status is one of:
+            "refused"                  — deployment-surface contradicts the supreme pin
+            "deprioritized_anthropic"  — Anthropic role (zero prior conversion per pin)
+            "aligned"                  — passes alignment filter
+
+        Reference: ~/.claude/projects/-Users-vartny-AI-Workspace/memory/feedback_jesus_is_the_standard.md
+        """
+        company_lower = (parsed_jd.company or "").lower()
+        title_lower = (parsed_jd.title or "").lower()
+
+        # Hard refused — company-level
+        for refused_co in _REFUSED_COMPANIES:
+            if refused_co in company_lower:
+                return (
+                    "refused",
+                    f"Refused: {refused_co.title()} — primary product is state-customer / "
+                    "surveillance / kill-chain infrastructure (supreme pin)",
+                )
+
+        # Hard refused — title-level (federal-customer keywords regardless of company)
+        for keyword in _REFUSED_TITLE_KEYWORDS:
+            if keyword in title_lower:
+                return (
+                    "refused",
+                    f"Refused: title contains '{keyword}' — state-customer routing (supreme pin)",
+                )
+
+        # Deprioritized — Anthropic (zero prior conversion for this profile)
+        for dep_co in _DEPRIORITIZED_COMPANIES:
+            if dep_co in company_lower:
+                return (
+                    "deprioritized_anthropic",
+                    f"{dep_co.title()}: zero prior conversion for this profile; "
+                    "treat as low-conversion (see feedback_anthropic_conversion_rate.md)",
+                )
+
+        return ("aligned", "")
+
     @staticmethod
-    def _recommendation(score: int) -> str:
+    def _recommendation(score: int, alignment_status: str = "aligned") -> str:
+        if alignment_status == "refused":
+            return "REFUSED on alignment grounds — do not submit"
+        if alignment_status == "deprioritized_anthropic":
+            if score >= 65:
+                return "Aligned but deprioritized (Anthropic conversion-rate) — Garo-override required"
+            return "Aligned but deprioritized — low conversion likelihood"
         if score >= 80:
             return "Strong fit — prioritize"
         if score >= 65:

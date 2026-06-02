@@ -219,7 +219,8 @@ class ApplicationEngine:
         # Proactive Intuition: Show countdown in status
         delay_s = self.autonomy_config.auto_advance_delay_ms / 1000.0
         for i in range(int(delay_s * 2), 0, -1):
-            await self.overlay.update_status(f"⏩ Auto-advancing in {i/2:.1f}s...")
+            if self.overlay:
+                await self.overlay.update_status(f"⏩ Auto-advancing in {i/2:.1f}s...")
             await asyncio.sleep(0.5)
 
         try:
