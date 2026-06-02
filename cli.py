@@ -39,6 +39,7 @@ from jobpilot.core.job_scorer import JobScorer
 from jobpilot.core.portal_scanner import PortalScanner, ScanTarget
 from jobpilot.core.doctor import run_doctor
 from jobpilot.core.resume_tailor import ResumeTailor
+from jobpilot.core.application_answerer import ApplicationAnswerer, TRUE_ACCOUNTS_PATH
 from jobpilot.learning.action_recorder import get_action_recorder
 
 log = get_logger(__name__)
@@ -959,12 +960,15 @@ def _answers_dir() -> Path:
     return p
 
 
+def _slug(s: str) -> str:
+    """Lowercase dash slug for answer filenames and fuzzy JD lookup."""
+    import re as _re
+    return _re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-") or "untitled"
+
+
 def _answer_path(company: str, question: str) -> Path:
     """`data/answers/<company-slug>/<question-slug>.txt`. Slugs are lowercase, dash-separated."""
-    import re as _re
-    def slug(s: str) -> str:
-        return _re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-") or "untitled"
-    return _answers_dir() / slug(company) / f"{slug(question)}.txt"
+    return _answers_dir() / _slug(company) / f"{_slug(question)}.txt"
 
 
 def _verify_ascii(path: Path) -> Optional[str]:
@@ -977,6 +981,55 @@ def _verify_ascii(path: Path) -> Optional[str]:
     if not bad:
         return None
     return f"non-ASCII bytes: {bad[:10]}"
+
+
+def _copy_file_to_clipboard(path: Path) -> bool:
+    import shutil
+    import subprocess as _sp
+
+    if not shutil.which("pbcopy"):
+        return False
+    _sp.run(["pbcopy"], input=path.read_bytes(), check=True)
+    return True
+
+
+def _resolve_answer_jd(company: str, jd: Optional[str]) -> tuple[str, str]:
+    """Resolve an explicit JD source, else best matching file in data/jds."""
+    if jd:
+        return _load_score_source(jd)
+
+    from jobpilot.core.config import DATA_DIR
+
+    jds_dir = DATA_DIR / "jds"
+    if not jds_dir.exists():
+        return "", "no JD provided"
+
+    company_slug = _slug(company)
+    candidates = [
+        path for path in jds_dir.glob("*.txt")
+        if company_slug in _slug(path.stem)
+    ]
+    if not candidates:
+        return "", "no JD provided"
+
+    candidates.sort(key=lambda path: path.stat().st_mtime, reverse=True)
+    selected = candidates[0]
+    return selected.read_text(), str(selected)
+
+
+def _latest_draft_title_for_company(company: str) -> str:
+    from jobpilot.core.config import DATA_DIR
+
+    manifest = DATA_DIR / "resumes" / "latest_draft.json"
+    if not manifest.exists():
+        return ""
+    try:
+        data = json.loads(manifest.read_text())
+    except Exception:
+        return ""
+    if _slug(str(data.get("company", ""))) != _slug(company):
+        return ""
+    return str(data.get("title", "")).strip()
 
 
 @answer_app.command("save")
@@ -1018,11 +1071,100 @@ def answer_save(
     console.print(f"[green]✓ Saved[/green] {target.relative_to(_answers_dir().parent.parent)} · {chars} chars · {words} words")
 
     if pbcopy:
-        if shutil.which("pbcopy"):
-            _sp.run(["pbcopy"], input=target.read_bytes(), check=True)
+        if _copy_file_to_clipboard(target):
             console.print(f"[cyan]→ on clipboard. Cmd+V in the field, then Enter where you want paragraph breaks.[/cyan]")
         else:
             console.print("[yellow]pbcopy not found — clipboard skipped (non-macOS?).[/yellow]")
+
+
+@answer_app.command("draft")
+def answer_draft(
+    company: str = typer.Argument(..., help="Company slug/name, e.g. titan-ai"),
+    question: str = typer.Argument(..., help="Exact application question text"),
+    jd: Optional[str] = typer.Option(None, "--jd", help="JD text or path. If omitted, JobPilot uses latest data/jds match for company."),
+    title: str = typer.Option("", "--title", help="Target role title. Defaults to latest draft title when company matches."),
+    question_slug: Optional[str] = typer.Option(None, "--question-slug", help="Filename slug to save under data/answers/<company>/"),
+    max_words: int = typer.Option(160, "--max-words", min=40, max=350, help="Target word cap for narrative answers."),
+    save: bool = typer.Option(True, "--save/--no-save", help="Save to data/answers after drafting."),
+    pbcopy: bool = typer.Option(True, "--pbcopy/--no-pbcopy", help="Copy saved/drafted answer to clipboard."),
+    bro: bool = typer.Option(True, "--bro/--no-bro", help="Use Bro/local AI when available; fallback stays account-grounded."),
+):
+    """Draft a role-tailored answer from true accounts and save/copy it."""
+    jd_text, jd_label = _resolve_answer_jd(company, jd)
+    role_title = title.strip() or _latest_draft_title_for_company(company)
+
+    answerer = ApplicationAnswerer(use_bro=bro)
+    draft = answerer.draft(
+        question,
+        jd_text=jd_text,
+        company=company,
+        title=role_title,
+        max_words=max_words,
+    )
+
+    if not draft.answer:
+        console.print("[red]No answer drafted.[/red]")
+        for warning in draft.warnings:
+            console.print(f"[yellow]{warning}[/yellow]")
+        console.print(f"[dim]Add true accounts in {TRUE_ACCOUNTS_PATH}.[/dim]")
+        raise typer.Exit(1)
+
+    console.print(Panel.fit(
+        f"[bold cyan]{company}[/bold cyan]\n"
+        f"[white]{role_title or 'Role title not set'}[/white]\n"
+        f"[dim]Question:[/dim] {draft.question}\n"
+        f"[dim]JD:[/dim] {jd_label}\n"
+        f"[dim]Source:[/dim] {draft.source} | accounts: {', '.join(draft.account_ids)}\n\n"
+        f"{draft.answer}",
+        title="Application Answer Draft",
+        border_style="cyan",
+    ))
+
+    for warning in draft.warnings:
+        console.print(f"[yellow]{warning}[/yellow]")
+
+    target: Optional[Path] = None
+    if save:
+        target = _answer_path(company, question_slug or question[:72])
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(draft.answer)
+        issue = _verify_ascii(target)
+        if issue:
+            console.print(f"[yellow]Paste-quality warning: {issue}[/yellow]")
+        console.print(f"[green]Saved[/green] {target.relative_to(_answers_dir().parent.parent)}")
+
+    if pbcopy:
+        if target:
+            copied = _copy_file_to_clipboard(target)
+        else:
+            import shutil
+            import subprocess as _sp
+            copied = bool(shutil.which("pbcopy"))
+            if copied:
+                _sp.run(["pbcopy"], input=draft.answer.encode("utf-8"), check=True)
+        if copied:
+            console.print("[cyan]Answer is on clipboard.[/cyan]")
+        else:
+            console.print("[yellow]pbcopy not found - clipboard skipped.[/yellow]")
+
+
+@answer_app.command("accounts")
+def answer_accounts():
+    """List true accounts available to the answer generator."""
+    from rich.table import Table
+
+    accounts = ApplicationAnswerer(use_bro=False).load_accounts()
+    if not accounts:
+        console.print(f"[yellow]No true accounts found at {TRUE_ACCOUNTS_PATH}[/yellow]")
+        return
+
+    table = Table(title="True Accounts", show_header=True, header_style="bold")
+    table.add_column("ID", style="cyan")
+    table.add_column("Account", style="white")
+    table.add_column("Skills", style="dim")
+    for account in accounts:
+        table.add_row(account.id, account.title, ", ".join(account.skills[:5]))
+    console.print(table)
 
 
 @answer_app.command("copy")
@@ -1052,7 +1194,7 @@ def answer_copy(
         console.print(target.read_text())
         return
 
-    _sp.run(["pbcopy"], input=target.read_bytes(), check=True)
+    _copy_file_to_clipboard(target)
     chars = len(target.read_text())
     console.print(f"[cyan]✓ on clipboard[/cyan] · {target.name} · {chars} chars")
     console.print(f"[dim]Cmd+V in the field, then Enter where you want paragraph breaks.[/dim]")

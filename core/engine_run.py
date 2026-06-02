@@ -198,6 +198,7 @@ async def run_watch_loop(engine: "ApplicationEngine", *, watch: bool) -> None:
     editing_fields: dict[int, str] = {}
 
     try:
+        while True:
             await engine.bridge.get_active_page()
             page_info = await engine.bridge.get_page_info()
             
@@ -213,7 +214,8 @@ async def run_watch_loop(engine: "ApplicationEngine", *, watch: bool) -> None:
                         WARNING,
                         message="⚠  You already submitted this application!",
                     )
-                    await engine.overlay.update_status("⚠ Already Applied")
+                    if engine.overlay:
+                        await engine.overlay.update_status("⚠ Already Applied")
                     log.info("Duplicate detected: %s", page_info.url)
                 elif prev_status == "abandoned":
                     engine.events.emit(
@@ -254,7 +256,8 @@ async def run_watch_loop(engine: "ApplicationEngine", *, watch: bool) -> None:
                 if prev_job_url and "submit" in (
                     page_info.title or ""
                 ).lower():
-                    await engine.overlay.show_success()
+                    if engine.overlay:
+                        await engine.overlay.show_success()
                     engine.action_recorder.record_application_submitted()
                     engine.app_tracker.mark_submitted(prev_job_url)
                     engine.events.emit(APPLICATION_SUBMITTED)
@@ -279,14 +282,13 @@ async def run_watch_loop(engine: "ApplicationEngine", *, watch: bool) -> None:
                 page_info.url if page_info.is_job_application else None
             )
 
-            # Re-inject overlays after navigation
-            await engine.chat.ensure_injected()
-
-            # --- chat ---
-            user_msgs = await engine.chat.get_messages()
-            for msg in user_msgs:
-                engine.events.emit(INFO, message=f"User: {msg}")
-                await engine.handle_chat(msg, page_info, app_page, parsed_jd)
+            # --- chat (overlay disabled) ---
+            if engine.chat:
+                await engine.chat.ensure_injected()
+                user_msgs = await engine.chat.get_messages()
+                for msg in user_msgs:
+                    engine.events.emit(INFO, message=f"User: {msg}")
+                    await engine.handle_chat(msg, page_info, app_page, parsed_jd)
 
             # --- voice ---
             pending_cmds = get_pending_commands()
@@ -324,7 +326,8 @@ async def run_watch_loop(engine: "ApplicationEngine", *, watch: bool) -> None:
                                 old=suggested_value,
                                 new=current,
                             )
-                            await engine.overlay.show_learning_toast(field.label)
+                            if engine.overlay:
+                                await engine.overlay.show_learning_toast(field.label)
                             log.info(
                                 "Learned edit: %s: '%s' → '%s'",
                                 field.label,
@@ -338,10 +341,11 @@ async def run_watch_loop(engine: "ApplicationEngine", *, watch: bool) -> None:
                 app_page = await parser.parse_application()
 
                 if app_page and app_page.fields:
-                    await engine.overlay.update_status(
-                        f"Step {app_page.current_step}/"
-                        f"{app_page.total_steps}"
-                    )
+                    if engine.overlay:
+                        await engine.overlay.update_status(
+                            f"Step {app_page.current_step}/"
+                            f"{app_page.total_steps}"
+                        )
 
                     profile = engine.profile_store.load()
                     await engine.upload_files(
@@ -418,25 +422,23 @@ async def run_watch_loop(engine: "ApplicationEngine", *, watch: bool) -> None:
 
                         suggestions.append(suggestion)
 
-                    # Update overlay with suggestions and fit score
-                    fit_score = getattr(page_info, 'fit_score', 0)
-                    await engine.overlay.show_suggestions(suggestions, fit_score=fit_score)
-
-                    # progress dashboard
-                    filled_count = len(
-                        [f for f in app_page.fields if f.current_value]
-                    )
-                    total_count = len(app_page.fields)
-                    apps_today = engine.app_tracker.get_stats().get(
-                        "submitted", 0
-                    )
-                    await engine.overlay.update_progress(
-                        filled=filled_count + auto_filled_count,
-                        total=total_count,
-                        step=app_page.current_step,
-                        total_steps=app_page.total_steps,
-                        apps_today=apps_today,
-                    )
+                    if engine.overlay:
+                        fit_score = getattr(page_info, 'fit_score', 0)
+                        await engine.overlay.show_suggestions(suggestions, fit_score=fit_score)
+                        filled_count = len(
+                            [f for f in app_page.fields if f.current_value]
+                        )
+                        total_count = len(app_page.fields)
+                        apps_today = engine.app_tracker.get_stats().get(
+                            "submitted", 0
+                        )
+                        await engine.overlay.update_progress(
+                            filled=filled_count + auto_filled_count,
+                            total=total_count,
+                            step=app_page.current_step,
+                            total_steps=app_page.total_steps,
+                            apps_today=apps_today,
+                        )
 
                     # pre-submit review
                     is_final = "submit" in (
@@ -452,25 +454,31 @@ async def run_watch_loop(engine: "ApplicationEngine", *, watch: bool) -> None:
                         and auto_filled_count > 0
                         and is_final
                     ):
-                        review_fields = _build_review_fields(
-                            engine,
-                            app_page,
-                            page_info,
-                        )
-                        decision = await engine.overlay.show_review(review_fields)
-                        if decision == "submit":
-                            await engine.auto_advance(app_page)
-                            engine.events.emit(
-                                INFO,
-                                message="✓ User approved submission",
+                        if engine.overlay:
+                            review_fields = _build_review_fields(
+                                engine,
+                                app_page,
+                                page_info,
                             )
-                            log.info("Pre-submit review: approved")
+                            decision = await engine.overlay.show_review(review_fields)
+                            if decision == "submit":
+                                await engine.auto_advance(app_page)
+                                engine.events.emit(
+                                    INFO,
+                                    message="✓ User approved submission",
+                                )
+                                log.info("Pre-submit review: approved")
+                            else:
+                                engine.events.emit(
+                                    WARNING,
+                                    message="✗ Submission cancelled by review",
+                                )
+                                log.info("Pre-submit review: cancelled")
                         else:
                             engine.events.emit(
-                                WARNING,
-                                message="✗ Submission cancelled by review",
+                                INFO,
+                                message="✓ All fields filled — submit manually when ready",
                             )
-                            log.info("Pre-submit review: cancelled")
                     elif not unfilled and auto_filled_count > 0:
                         await engine.auto_advance(app_page)
 
@@ -485,12 +493,14 @@ async def run_watch_loop(engine: "ApplicationEngine", *, watch: bool) -> None:
                         filled_names,
                     )
                 else:
-                    await engine.overlay.update_status("Ready")
+                    if engine.overlay:
+                        await engine.overlay.update_status("Ready")
             else:
-                await engine.overlay.update_status("Navigate to a job")
+                if engine.overlay:
+                    await engine.overlay.update_status("Navigate to a job")
 
             # --- overlay actions ---
-            action = await engine.overlay.get_pending_action()
+            action = await engine.overlay.get_pending_action() if engine.overlay else None
             if action and app_page and app_page.fields:
                 field_id = action["id"]
                 action_type = action["action"]

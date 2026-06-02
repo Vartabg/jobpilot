@@ -1,81 +1,93 @@
 """
-CDP Bridge - Connect to Chrome via DevTools Protocol
+CDP Bridge - Manages a dedicated Playwright browser for JobPilot.
 
-Uses Playwright to connect to an existing Chrome instance with remote debugging enabled.
-This allows us to interact with pages while preserving the user's cookies/session.
+On connect():
+  1. If a debug Chrome is already running on the port, reuse it (CDP).
+  2. Otherwise, launch a persistent Chromium window with a dedicated profile
+     so LinkedIn login is preserved across runs.
 """
 
 import asyncio
-from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 from playwright.async_api import async_playwright, Browser, Page, BrowserContext
 
 from jobpilot.core.logger import get_logger
+from jobpilot.core.page_info import PageInfo, build_page_info
 
 log = get_logger(__name__)
 
-
-@dataclass
-class PageInfo:
-    """Information about the current page state"""
-    url: str
-    title: str
-    is_linkedin: bool
-    is_job_application: bool
-    application_step: Optional[int] = None
+_PROFILE_DIR = Path.home() / ".jobpilot-chrome-profile"
+_LINKEDIN_JOBS = "https://www.linkedin.com/jobs/"
 
 
 class CDPBridge:
-    """
-    Bridge to Chrome via Chrome DevTools Protocol.
-    
-    Connects to an existing Chrome instance launched with --remote-debugging-port.
-    """
-    
+    """Manages a single dedicated browser window for job applications."""
+
     def __init__(self, debug_port: int = 9222):
         self.debug_port = debug_port
         self.debug_url = f"http://localhost:{debug_port}"
         self._playwright = None
-        self._browser: Optional[Browser] = None
+        self._browser: Optional[Browser] = None  # set only for CDP reconnect path
         self._context: Optional[BrowserContext] = None
         self._page: Optional[Page] = None
-        
-    async def connect(self) -> bool:
-        """Connect to Chrome via CDP"""
-        try:
-            self._playwright = await async_playwright().start()
-            self._browser = await self._playwright.chromium.connect_over_cdp(self.debug_url)
-            
-            # Get the first context (user's default)
-            contexts = self._browser.contexts
-            if not contexts:
-                log.error("No browser contexts found. Is Chrome open?")
-                return False
-                
-            self._context = contexts[0]
 
-            # Pick a usable page. Chrome exposes internal pages (chrome://,
-            # devtools://, chrome-extension://) in context.pages — injecting
-            # into those fails because their Trusted Types CSP blocks the
-            # overlay's default policy workaround. Prefer LinkedIn / any http(s)
-            # page; fall back to a new blank tab.
+    async def connect(self) -> bool:
+        """Connect to or launch the dedicated browser window."""
+        self._playwright = await async_playwright().start()
+
+        # --- path 1: reuse an already-running debug session ---
+        try:
+            self._browser = await self._playwright.chromium.connect_over_cdp(self.debug_url)
+            contexts = self._browser.contexts
+            if contexts:
+                self._context = contexts[0]
+                self._page = await self.get_active_page()
+                if self._page is None:
+                    self._page = await self._context.new_page()
+                log.info("Reconnected to existing session")
+                log.info("Current page: %s", self._page.url)
+                return True
+        except Exception:
+            self._browser = None  # fall through to launch
+
+        # --- path 2: launch a fresh persistent window ---
+        try:
+            _PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+            self._context = await self._playwright.chromium.launch_persistent_context(
+                str(_PROFILE_DIR),
+                headless=False,
+                args=[
+                    f"--remote-debugging-port={self.debug_port}",
+                    "--remote-allow-origins=*",
+                    "--no-first-run",
+                    "--no-default-browser-check",
+                ],
+            )
+            # Reuse an existing LinkedIn tab or navigate the first page there
             self._page = await self.get_active_page()
             if self._page is None:
-                self._page = await self._context.new_page()
+                pages = self._context.pages
+                self._page = pages[0] if pages else await self._context.new_page()
+                await self._page.goto(_LINKEDIN_JOBS)
+            elif "/jobs/" not in self._page.url:
+                # get_active_page() may return feed/notifications/messaging — force to jobs
+                await self._page.goto(_LINKEDIN_JOBS)
 
-            log.info("Connected to Chrome")
+            log.info("Launched dedicated browser window")
             log.info("Current page: %s", self._page.url)
             return True
-            
+
         except Exception as e:
-            log.error("Failed to connect: %s", e)
-            log.error("Make sure Chrome is running with --remote-debugging-port=9222")
-            log.error("Run: ./scripts/launch_chrome.sh")
+            log.error("Failed to launch browser: %s", e)
             return False
-    
+
     async def disconnect(self):
-        """Disconnect from Chrome"""
+        """Shut down gracefully. Closes the window only if we launched it."""
         if self._playwright:
+            if self._context and not self._browser:
+                # We own the persistent context — close the window
+                await self._context.close()
             await self._playwright.stop()
             self._playwright = None
             self._browser = None
@@ -91,36 +103,7 @@ class CDPBridge:
         """Get information about the current page"""
         if not self._page:
             raise RuntimeError("Not connected to browser")
-            
-        url = self._page.url
-        title = await self._page.title()
-        
-        is_linkedin = "linkedin.com" in url
-        is_job_application = is_linkedin and (
-            "/jobs/view/" in url or 
-            "jobs/collections" in url or
-            "/jobs/search/" in url
-        )
-        
-        # Detect application step if in Easy Apply modal
-        application_step = None
-        if is_job_application:
-            # Check for Easy Apply modal
-            step_indicator = await self._page.query_selector('[data-test-modal-id="easy-apply-modal"]')
-            if step_indicator:
-                # Try to get step number from progress indicator
-                progress = await self._page.query_selector('.jobs-easy-apply-content progress')
-                if progress:
-                    value = await progress.get_attribute("value")
-                    application_step = int(value) if value else 1
-        
-        return PageInfo(
-            url=url,
-            title=title,
-            is_linkedin=is_linkedin,
-            is_job_application=is_job_application,
-            application_step=application_step
-        )
+        return await build_page_info(self._page)
     
     async def wait_for_navigation(self, timeout: float = 30.0):
         """Wait for page navigation"""

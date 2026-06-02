@@ -123,11 +123,11 @@ def _check_applications(
         infos.append(f"Applications tracked: {total} total, {submitted} submitted.")
 
         with sqlite3.connect(str(db_path)) as conn:
-            valid_statuses = tuple(sorted(_VALID_APPLICATION_STATUSES))
-            placeholders = ", ".join("?" * len(valid_statuses))
+            _valid_statuses = tuple(sorted(_VALID_APPLICATION_STATUSES))
+            _status_placeholders = ", ".join("?" * len(_valid_statuses))
             invalid_rows = conn.execute(
-                f"SELECT DISTINCT status FROM applications WHERE status NOT IN ({placeholders})",
-                valid_statuses,
+                f"SELECT DISTINCT status FROM applications WHERE status NOT IN ({_status_placeholders})",
+                _valid_statuses,
             ).fetchall()
             invalid_statuses = [str(row[0]) for row in invalid_rows if row[0]]
             if invalid_statuses:

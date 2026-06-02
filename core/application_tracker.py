@@ -162,6 +162,26 @@ class ApplicationTracker:
         """, (now, normalized))
         conn.commit()
 
+    def mark_applied(self, url: str, title: str = "", company: str = ""):
+        """Record a manually confirmed application.
+
+        Dashboard applies happen outside the LinkedIn watch loop, so they need
+        an upsert that stores the company/title and marks the row as applied.
+        """
+        normalized = self._normalize_url(url)
+        now = datetime.now().isoformat()
+        conn = self._get_conn()
+        conn.execute("""
+            INSERT INTO applications (job_url, job_title, company, applied_at, status, updated_at)
+            VALUES (?, ?, ?, ?, 'applied', ?)
+            ON CONFLICT(job_url) DO UPDATE SET
+                job_title = excluded.job_title,
+                company = excluded.company,
+                status = 'applied',
+                updated_at = excluded.updated_at
+        """, (normalized, title, company, now, now))
+        conn.commit()
+
     def mark_abandoned(self, url: str, step_reached: int = 1):
         """Record that the application was abandoned."""
         normalized = self._normalize_url(url)

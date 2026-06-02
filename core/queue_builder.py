@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -144,7 +145,7 @@ SENIOR_BUREAUCRAT_KILLS = (
     "director", "vp ", "head of", "vice president",
     "manager,", "manager -",
 )
-# Lived/moat industries.
+# Lived/moat industries (Navy electronics → field service → AV → AI builder).
 # Tag at scan time since we don't fetch JD text. Add entries when curating
 # portals.json. Industries in HIGH_MOAT below get full vertical-moat points.
 MOAT_COMPANY_TAGS = {
@@ -167,6 +168,10 @@ MOAT_COMPANY_TAGS = {
     "giga":             "ai",
     "collectwise":      "ai_collections",
     "corvera ai":       "ai",
+    "titan ai":         "banking_ai",
+    "scaled cognition": "ai_agents",
+    "growth protocol":  "ai_workflows",
+    "p-1 ai":           "engineering_ai",
     "zymbly":           "aviation_maintenance",  # very high moat
     "crustdata":        "ai_data",
     "paratus health":   "healthcare_voice",
@@ -178,32 +183,49 @@ MOAT_COMPANY_TAGS = {
 HIGH_MOAT_INDUSTRIES = {
     "aviation_maintenance", "manufacturing", "healthcare_ops",
     "healthcare_voice", "govtech", "govtech_payments", "regtech",
-    "logistics_ai",
+    "logistics_ai", "ai_agents", "ai_workflows", "engineering_ai",
 }
 # Exclusions per PROFILE.md / feedback_anthropic_conversion_rate
 EXCLUDED_INDUSTRIES = {"fintech_compliance"}
 
-# user_location pin: NYC base; remote always; in-person only in these cities.
-WIN_LOCATION_HITS = (
-    "new york", "nyc", "remote", "us remote", "remote, us",
-    "austin", "portland", "seattle", "denver",
+# user_location pin: active search is US-only, limited to these metros plus
+# remote. Location is a hard queue gate, not just a scoring preference.
+ALLOWED_CITY_LOCATION_HITS = (
+    "new york", "nyc",
+    "austin",
+    "denver",
+    "portland",
+    "bay area", "san francisco", "sf", "oakland", "berkeley",
+    "menlo park", "palo alto", "mountain view", "san mateo",
+    "redwood city", "san jose", "sunnyvale", "cupertino", "fremont",
 )
-KILL_LOCATION_HITS = (
-    "san francisco", "bay area", "menlo park", "oakland", "berkeley",
-    "berlin", "london", "atlanta", "boston", "washington", "dc,",
-    "remote, eu", "remote, europe",
+REMOTE_LOCATION_HITS = ("remote",)
+US_LOCATION_HITS = (
+    "united states", "usa", "u s", "us",
+    "remote us", "us remote", "remote united states", "united states remote",
+)
+DISALLOWED_INTERNATIONAL_LOCATION_HITS = (
+    "london", "united kingdom", "uk", "berlin", "germany",
+    "europe", "emea", "latam", "apac",
+    "india", "singapore", "australia", "new zealand",
+    "german speaking", "french speaking", "dutch speaking", "italian speaking",
+    "move to the us", "relocate to the us",
+)
+CANADA_LOCATION_HITS = ("canada", "toronto", "vancouver")
+DISALLOWED_US_LOCATION_HITS = (
+    "seattle", "boston", "atlanta", "washington dc", "washington", "dc",
+    "chicago", "los angeles", "miami", "philadelphia", "portland maine",
 )
 
 # Company HQ fallback — when the ATS API returns no location on a role,
-# substitute the company's HQ so the logistics gate still bites. Without
-# this, SF-based companies (e.g. HappyRobot) inflated scores because
-# "Not specified" was treated as neutral. Per [user_location] pin.
+# substitute the company's HQ so the logistics gate still bites. Unknown
+# companies are excluded until they are tagged with an allowed HQ/remote signal.
 COMPANY_HQ = {
     "happyrobot":        "San Francisco",
     "soff":              "San Francisco",
     "bretton ai":        "San Francisco",
     "paratus health":    "Menlo Park",
-    "promise":           "Oakland",        # also DC; both fail
+    "promise":           "Oakland",
     "decagon":           "San Francisco",
     "zymbly":            "London",
     "n8n":               "Berlin",
@@ -215,7 +237,58 @@ COMPANY_HQ = {
     "pylon":             "New York",
     "ravenna":           "Remote",
     "signal messenger":  "Remote",
+    "titan ai":          "Remote",
+    "scaled cognition":  "New York",
+    "growth protocol":   "Remote",
+    "p-1 ai":            "Remote",
 }
+
+
+def _normalize_location_text(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
+
+
+def _has_location_hit(normalized_haystack: str, terms: tuple[str, ...]) -> bool:
+    for term in terms:
+        normalized_term = _normalize_location_text(term)
+        if not normalized_term:
+            continue
+        pieces = [re.escape(piece) for piece in normalized_term.split()]
+        pattern = r"\b" + r"\s+".join(pieces) + r"\b"
+        if re.search(pattern, normalized_haystack):
+            return True
+    return False
+
+
+def _effective_location(company: str, location: str | None) -> str:
+    loc = (location or "").strip()
+    if loc and loc.lower() != "not specified":
+        return loc
+    return COMPANY_HQ.get(company.strip().lower(), "")
+
+
+def _location_haystack(title: str, company: str, location: str | None) -> str:
+    effective_loc = _effective_location(company, location)
+    return _normalize_location_text(f"{effective_loc} {title}")
+
+
+def _is_allowed_location(title: str, company: str, location: str | None) -> bool:
+    haystack = _location_haystack(title, company, location)
+    if not haystack:
+        return False
+
+    has_us = _has_location_hit(haystack, US_LOCATION_HITS)
+    has_remote = _has_location_hit(haystack, REMOTE_LOCATION_HITS)
+    has_allowed_city = _has_location_hit(haystack, ALLOWED_CITY_LOCATION_HITS)
+
+    if _has_location_hit(haystack, DISALLOWED_INTERNATIONAL_LOCATION_HITS):
+        return False
+    if _has_location_hit(haystack, CANADA_LOCATION_HITS) and not has_us:
+        return False
+    if _has_location_hit(haystack, DISALLOWED_US_LOCATION_HITS):
+        return False
+
+    return has_allowed_city or has_remote or has_us
 
 
 def _score_psyche_fit(
@@ -262,12 +335,15 @@ def _score_job(job: PortalJob) -> tuple[int, str, int]:
     """
     title_l = job.title.lower()
     company_l = job.company.strip().lower()
-    location_l = job.location.lower() if job.location else ""
 
     # Hard gate: senior-bureaucrat ladder titles (Sr Manager / Director / VP / etc.)
     # Garo's value: "answers to few people" — these roles fail that by design.
     if any(k in title_l for k in SENIOR_BUREAUCRAT_KILLS):
         return 5, "tech", 0
+
+    # Hard gate: US-only search in the user's selected cities plus remote.
+    if not _is_allowed_location(job.title, job.company, job.location):
+        return 0, "tech", 0
 
     industry = MOAT_COMPANY_TAGS.get(company_l)
     note_l = _load_portal_notes().get(company_l, "")
@@ -304,20 +380,8 @@ def _score_job(job: PortalJob) -> tuple[int, str, int]:
     if "deploy" in title_l or "customer" in title_l or "field" in title_l: skill += 4
     skill = min(skill, 12)
 
-    # --- Logistics fit (0-10) — role location first, then company HQ fallback
-    effective_loc = location_l
-    if not effective_loc or effective_loc == "not specified":
-        hq = COMPANY_HQ.get(company_l, "").lower()
-        if hq:
-            effective_loc = hq
-    if any(k in effective_loc for k in WIN_LOCATION_HITS):
-        loc = 10
-    elif any(k in effective_loc for k in KILL_LOCATION_HITS):
-        loc = 0
-    elif not effective_loc:
-        loc = 5
-    else:
-        loc = 4
+    # --- Logistics fit (0-10) — already hard-gated above.
+    loc = 10
     if industry in EXCLUDED_INDUSTRIES:
         loc = min(loc, 2)
 
@@ -363,6 +427,8 @@ def build_queue(
     for job in raw_jobs:
         if not job.url or not job.title:
             continue
+        if not _is_allowed_location(job.title, job.company, job.location):
+            continue
         score, track, psyche_score = _score_job(job)
         # Stable 8-char ID derived from the job URL so IDs survive --refresh
         job_id = hashlib.md5(job.url.encode()).hexdigest()[:8]
@@ -399,6 +465,8 @@ def build_queue(
     seen_ids = {j.id for j in queue}
     for pj in prior.values():
         if pj.id not in seen_ids and pj.status in ("applied", "skipped"):
+            if not _is_allowed_location(pj.title, pj.company, pj.location):
+                continue
             queue.append(pj)
 
     queue.sort(key=lambda j: j.fit_score, reverse=True)

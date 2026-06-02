@@ -1,11 +1,16 @@
-"""Regression tests for the Lane-C scorer + psycho-fit + HQ fallback.
+"""Regression tests for the Lane-C scorer + psycho-fit + location gate.
 
 Guards the locked formula so future edits to weights / gates surface as
 test failures rather than silent score drift.
 """
 
 from jobpilot.core.portal_scanner import PortalJob
-from jobpilot.core.queue_builder import _score_job, _score_psyche_fit, reset_caches
+from jobpilot.core.queue_builder import (
+    _is_allowed_location,
+    _score_job,
+    _score_psyche_fit,
+    reset_caches,
+)
 
 
 def _job(title: str, company: str, location: str = "") -> PortalJob:
@@ -52,23 +57,39 @@ def test_founding_fde_in_moat_industry_scores_high():
     assert psy >= 12, f"psycho-fit should be high for founding/FDE titles, got {psy}"
 
 
-def test_remote_role_beats_kill_location():
-    """Same role, NYC/Remote vs SF — NYC should outscore SF by the loc dim."""
+def test_location_gate_allows_selected_us_metros_and_remote():
+    """The active search allows only the user's selected US metros plus remote."""
     reset_caches()
-    nyc, _, _ = _score_job(_job("Forward Deployed Engineer", "Clarion Health", "New York"))
-    sf,  _, _ = _score_job(_job("Forward Deployed Engineer", "Soff", "San Francisco"))
-    assert nyc > sf, f"NYC ({nyc}) should outscore SF ({sf})"
+    assert _is_allowed_location("Forward Deployed Engineer", "Clarion Health", "New York")
+    assert _is_allowed_location("Forward Deployed Engineer", "Soff", "San Francisco")
+    assert _is_allowed_location("Forward Deployed Engineer", "Acme", "Austin")
+    assert _is_allowed_location("Forward Deployed Engineer", "Acme", "Denver")
+    assert _is_allowed_location("Forward Deployed Engineer", "Acme", "Portland")
+    assert _is_allowed_location("Forward Deployed Engineer", "Acme", "Remote US")
+    assert _is_allowed_location("Forward Deployed Engineer | NYC", "Acme", "Not specified")
 
 
-def test_hq_fallback_bites_when_role_location_empty():
-    """Empty role location → HQ lookup → SF kill still fires (HappyRobot HQ = SF)."""
+def test_location_gate_blocks_international_nonlisted_and_unknown_locations():
+    """London/Europe/nonlisted US cities/unknown locations should not queue."""
     reset_caches()
-    empty, _, _ = _score_job(_job("Forward Deployed Engineer", "HappyRobot", ""))
-    given, _, _ = _score_job(_job("Forward Deployed Engineer", "HappyRobot", "Remote"))
-    assert given > empty, (
-        f"explicit Remote ({given}) should beat empty/HQ-SF ({empty}); "
-        "COMPANY_HQ fallback may have broken"
-    )
+    assert not _is_allowed_location("Forward Deployed Engineer", "Acme", "London")
+    assert not _is_allowed_location("Forward Deployed Engineer", "Acme", "Remote, Europe")
+    assert not _is_allowed_location("Forward Deployed Engineer | Europe/LATAM", "Starbridge", "")
+    assert not _is_allowed_location("Forward Deployed Engineer - German Speaking", "HappyRobot", "")
+    assert not _is_allowed_location("Forward Deployed Engineer - Move to the US!", "Haast", "")
+    assert not _is_allowed_location("Forward Deployed Engineer", "Acme", "Seattle")
+    assert not _is_allowed_location("Forward Deployed Engineer", "Acme", "Not specified")
+    assert _is_allowed_location("Forward Deployed Engineer", "Acme", "Remote US/Canada")
+    assert not _is_allowed_location("Forward Deployed Engineer", "Acme", "Remote Canada")
+
+
+def test_hq_fallback_allows_known_allowed_company_when_role_location_empty():
+    """Empty role location uses COMPANY_HQ; unknown no-HQ roles are excluded."""
+    reset_caches()
+    known, _, _ = _score_job(_job("Forward Deployed Engineer", "HappyRobot", ""))
+    unknown, _, _ = _score_job(_job("Forward Deployed Engineer", "UnknownCo", ""))
+    assert known > 0, "known Bay Area HQ should be eligible when ATS omits location"
+    assert unknown == 0, "unknown location with no HQ fallback should be excluded"
 
 
 def test_psyche_fit_responds_to_loved_signal():

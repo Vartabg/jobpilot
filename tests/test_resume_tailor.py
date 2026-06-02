@@ -59,7 +59,7 @@ Built UI systems, internal tools, and AI-assisted workflows.
     profile.current_title = "Senior Frontend Engineer"
     profile.current_company = "ATXBro"
     profile.years_of_experience = 8
-    profile.linkedin_url = "https://linkedin.com/in/yourprofile"
+    profile.linkedin_url = "https://linkedin.com/in/garovartabedian"
     profile.github_url = "https://github.com/Vartabg"
     profile.resume_path = str(resume_source)
     profile.custom_answers = {
