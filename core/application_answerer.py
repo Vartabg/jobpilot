@@ -21,18 +21,40 @@ from jobpilot.core.profile_store import ProfileStore, UserProfile, get_profile_s
 
 TRUE_ACCOUNTS_PATH = DATA_DIR / "true_accounts.json"
 
+# Shown when there is nothing in the profile or account bank to build a
+# background answer from. Never substitute someone else's biography.
+PROFILE_PLACEHOLDER = "[Add a short background summary with 'jobpilot profile --edit']"
+
+# Tags counted as field/customer-site experience in fallback narratives.
+_FIELD_TAGS = {"field", "field-primary", "fieldwork"}
+
 
 @dataclass
 class TrueAccount:
+    """One verified account from data/true_accounts.json.
+
+    Optional ``label`` is the human-friendly name used inside drafted
+    sentences (defaults to ``title``). Optional ``tags`` tune scoring and
+    narrative selection without hardcoding account ids:
+      - "headline":      small boost on "why this role" questions
+      - "field-primary": strongest boost for customer-site / deployment roles
+      - "field":         moderate boost for customer-site / deployment roles
+      - "fieldwork":     counts as field experience in fallback narratives
+                          without affecting selection scoring
+      - "ai":            boost when the role text mentions AI
+    """
+
     id: str
     title: str
     timeframe: str = ""
     source: str = ""
     summary: str = ""
+    label: str = ""
     details: list[str] = field(default_factory=list)
     skills: list[str] = field(default_factory=list)
     question_fit: list[str] = field(default_factory=list)
     truth_boundaries: list[str] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -153,13 +175,31 @@ class ApplicationAnswerer:
                     timeframe=str(item.get("timeframe", "")).strip(),
                     source=str(item.get("source", "")).strip(),
                     summary=str(item.get("summary", "")).strip(),
+                    label=str(item.get("label", "")).strip(),
                     details=[str(v).strip() for v in item.get("details", []) if str(v).strip()],
                     skills=[str(v).strip() for v in item.get("skills", []) if str(v).strip()],
                     question_fit=[str(v).strip() for v in item.get("question_fit", []) if str(v).strip()],
                     truth_boundaries=[str(v).strip() for v in item.get("truth_boundaries", []) if str(v).strip()],
+                    tags=[str(v).strip() for v in item.get("tags", []) if str(v).strip()],
                 )
             )
         return accounts
+
+    def load_narrative(self) -> dict[str, str]:
+        """Optional first-person copy blocks from the account bank.
+
+        The top-level "narrative" object in data/true_accounts.json lets the
+        user store reusable first-person phrasing (e.g. "background_summary",
+        "value_proposition", "strengths_opener", "strengths_secondary") so the
+        drafter never falls back to anyone else's biography.
+        """
+        if not self.accounts_path.exists():
+            return {}
+        raw = json.loads(self.accounts_path.read_text())
+        narrative = raw.get("narrative", {}) if isinstance(raw, dict) else {}
+        if not isinstance(narrative, dict):
+            return {}
+        return {str(key): str(value).strip() for key, value in narrative.items() if str(value).strip()}
 
     def select_accounts(
         self,
@@ -192,15 +232,15 @@ class ApplicationAnswerer:
                 if phrase and phrase.lower() in " ".join([question, jd_text, title]).lower()
             )
             score = overlap + phrase_hits
-            if "why" in question.lower() and account.id in {"jobpilot", "view-field-service"}:
+            if "why" in question.lower() and "headline" in account.tags:
                 score += 2
             role_text = " ".join([question, jd_text, title]).lower()
             if any(token in role_text for token in ("forward deployed", "client", "customer", "travel", "deployment")):
-                if account.id == "view-field-service":
+                if "field-primary" in account.tags:
                     score += 6
-                elif account.id == "christie-service":
+                elif "field" in account.tags:
                     score += 3
-            if "ai" in role_text and account.id in {"jobpilot", "multi-agent-workspace"}:
+            if "ai" in role_text and "ai" in account.tags:
                 score += 3
             scored.append((score, account))
 
@@ -316,16 +356,22 @@ class ApplicationAnswerer:
         q = question.lower()
         role = title or "this role"
         org = self._display_company(company) or "your team"
+        narrative = self.load_narrative()
         primary = accounts[0]
         secondary = accounts[1] if len(accounts) > 1 else None
         field_account = next(
-            (account for account in accounts if account.id in {"view-field-service", "christie-service", "navy-electronics"}),
+            (account for account in accounts if self._has_field_experience(account)),
             None,
         )
 
         if any(token in q for token in ("why", "interest", "excited", "motivat")):
+            pitch = narrative.get("value_proposition", "")
+            if pitch:
+                opener = f"I am interested in {org} because {role} maps closely to the work I do best: {pitch}."
+            else:
+                opener = f"I am interested in {org} because {role} maps closely to work I can back with specific examples."
             parts = [
-                f"I am interested in {org} because {role} maps closely to the work I do best: turning ambiguous workflow problems into useful systems.",
+                opener,
                 f"The clearest account is {self._account_label(primary)}: {self._first_person_summary(primary)}",
             ]
             if field_account and field_account.id != primary.id:
@@ -346,25 +392,54 @@ class ApplicationAnswerer:
 
         if any(token in q for token in ("strength", "bring", "contribution", "fit")):
             skills = ", ".join(primary.skills[:5])
-            answer = (
-                f"I bring a mix of builder ownership and field-tested debugging. "
-                f"From {self._account_label(primary)}, I can point to hands-on work across {skills}. "
-            )
+            opener = narrative.get("strengths_opener", "") or "My strengths come from documented work rather than generic claims."
+            if skills:
+                answer = f"{opener} From {self._account_label(primary)}, I can point to hands-on work across {skills}. "
+            else:
+                answer = f"{opener} From {self._account_label(primary)}, I can point to documented hands-on work. "
             if secondary:
-                answer += f"From {self._account_label(secondary)}, I bring customer-facing execution and the ability to solve messy problems without waiting for perfect requirements."
+                secondary_pitch = narrative.get("strengths_secondary", "") or ", ".join(secondary.skills[:4])
+                if secondary_pitch:
+                    answer += f"From {self._account_label(secondary)}, I bring {secondary_pitch}."
+                else:
+                    answer += f"A second relevant account is {self._account_label(secondary)}: {self._first_person_summary(secondary)}"
             return answer
 
         if any(token in q for token in ("yourself", "background", "who are you")):
-            return (
-                f"I am an AI automation and full-stack engineer with {profile.years_of_experience}+ years across independent software building, "
-                "field engineering, enterprise technical support, and Navy electronics. My recent work centers on practical AI workflows, browser automation, "
-                "and human-in-the-loop systems, while my field background keeps me grounded in real deployment constraints."
-            )
+            return self._background_answer(profile, accounts, narrative)
 
         return (
             f"The most relevant true account is {self._account_label(primary)}. {self._first_person_summary(primary)} "
             f"I would connect that experience to {role} by focusing on practical ownership, fast learning, and clear delivery against real workflow constraints."
         )
+
+    def _background_answer(
+        self,
+        profile: UserProfile,
+        accounts: list[TrueAccount],
+        narrative: dict[str, str],
+    ) -> str:
+        """Build a 'tell me about yourself' answer from the user's own data only."""
+        stored = narrative.get("background_summary", "")
+        if stored:
+            return stored
+
+        parts: list[str] = []
+        current_title = (profile.current_title or "").strip()
+        years = profile.years_of_experience or 0
+        if current_title and years:
+            parts.append(f"I am {self._with_article(current_title)} with {years}+ years of experience.")
+        elif current_title:
+            parts.append(f"I am {self._with_article(current_title)}.")
+        elif years:
+            parts.append(f"I bring {years}+ years of professional experience.")
+        for account in accounts[:2]:
+            summary = self._first_person_summary(account)
+            if summary:
+                parts.append(summary if summary.endswith(".") else f"{summary}.")
+        if parts:
+            return " ".join(parts)
+        return PROFILE_PLACEHOLDER
 
     @staticmethod
     def _tokenize(text: str) -> set[str]:
@@ -400,16 +475,16 @@ class ApplicationAnswerer:
 
     @staticmethod
     def _account_label(account: TrueAccount) -> str:
-        labels = {
-            "jobpilot": "JobPilot",
-            "atxbro-web": "atxbro.com",
-            "multi-agent-workspace": "my multi-agent AI workspace",
-            "view-field-service": "View field service work",
-            "christie-service": "Christie Digital service work",
-            "navy-electronics": "Navy electronics and communications work",
-            "columbia-logic": "my Columbia formal logic background",
-        }
-        return labels.get(account.id, account.title)
+        return account.label or account.title
+
+    @staticmethod
+    def _has_field_experience(account: TrueAccount) -> bool:
+        return bool(_FIELD_TAGS.intersection(account.tags))
+
+    @staticmethod
+    def _with_article(noun: str) -> str:
+        article = "an" if noun[:1].lower() in "aeiou" else "a"
+        return f"{article} {noun}"
 
     @staticmethod
     def _first_person_summary(account: TrueAccount) -> str:

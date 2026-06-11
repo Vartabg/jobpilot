@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse, urlunparse
 
+from jobpilot.core import llm_client
 from jobpilot.core.application_tracker import ApplicationTracker
 from jobpilot.core.bro_client import get_health
 from jobpilot.core.config import DATA_DIR
@@ -69,10 +70,17 @@ def run_doctor(data_dir: Optional[Path] = None, *, check_bro: bool = True) -> Do
         health = get_health()
         bro_status = str(health.get("status", "unknown"))
         summary["bro_status"] = bro_status
-        if bro_status == "ok":
-            infos.append("Bro health check passed.")
+        provider = llm_client.get_provider()
+        summary["ai_backend"] = provider or "none"
+        if provider == "bro":
+            infos.append("AI backend: local Bro server is reachable.")
+        elif provider == "gemini":
+            infos.append("AI backend: Gemini API key configured.")
         else:
-            warnings.append(f"Bro health check: {bro_status}")
+            warnings.append(
+                "No AI backend configured — resume tailoring falls back to templates. "
+                "Set GEMINI_API_KEY (free tier: https://aistudio.google.com/app/apikey)."
+            )
 
     status = "error" if errors else "warn" if warnings else "ok"
     return DoctorReport(
