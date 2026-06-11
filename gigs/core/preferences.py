@@ -1,8 +1,17 @@
 """Single source of truth for identity + pay targets used across crib sheet,
 email signoff, and salary-anchor logic.
 
-Edit `data/preferences.json` to change values without touching code. If the
-file is absent or partial, defaults below take over for missing keys.
+Edit `data/gigs/preferences.json` to change values without touching code. If
+the file is absent or partial, defaults below take over for missing keys.
+
+Identity is special — one identity, two lanes. It resolves per key in this
+order:
+
+1. explicit values in `data/gigs/preferences.json` (power-user override),
+2. jobpilot's user profile (`data/profile.json` via core.profile_store),
+3. the neutral DEFAULTS below.
+
+Pay, links, tailoring, and background bullets stay preferences-only.
 """
 
 from __future__ import annotations
@@ -90,17 +99,83 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
     return out
 
 
-def load(path: Path = PREFS_PATH) -> dict[str, Any]:
-    """Read prefs from disk, falling back to DEFAULTS for missing keys."""
-    if not path.exists():
-        return DEFAULTS
+def _profile_identity() -> dict[str, str]:
+    """Identity values inherited from the jobpilot user profile.
+
+    jobpilot's source of truth for who the user is lives in
+    `data/profile.json` (core.profile_store.UserProfile); the gigs lane
+    inherits it so identity is configured once. The import is lazy and
+    guarded so the gigs core stays usable standalone (without the jobpilot
+    package importable). Only non-empty profile values are returned.
+    """
     try:
-        loaded = json.loads(path.read_text())
-        if not isinstance(loaded, dict):
-            return DEFAULTS
-        return _deep_merge(DEFAULTS, loaded)
+        from jobpilot.core import profile_store
+    except ImportError:
+        return {}
+    try:
+        profile = profile_store.get_profile_store().load()
     except Exception:
-        return DEFAULTS
+        return {}
+    city = ", ".join(
+        part
+        for part in ((profile.city or "").strip(), (profile.state or "").strip())
+        if part
+    )
+    mapped = {
+        "first_name": profile.first_name,
+        "last_name": profile.last_name,
+        "email": profile.email,
+        "phone": profile.phone,
+        "linkedin": profile.linkedin_url,
+        "github": profile.github_url,
+        "portfolio": profile.portfolio_url,
+        "city": city,
+    }
+    return {
+        key: value.strip()
+        for key, value in mapped.items()
+        if isinstance(value, str) and value.strip()
+    }
+
+
+def _explicit_identity(loaded: dict[str, Any]) -> dict[str, Any]:
+    """Identity keys the user actually set in the preferences file.
+
+    Empty values and values still equal to the shipped placeholders carry no
+    information (`write_default_if_missing` seeds the placeholders into the
+    file), so they must not shadow the jobpilot profile.
+    """
+    raw = loaded.get("identity")
+    if not isinstance(raw, dict):
+        return {}
+    return {
+        key: value
+        for key, value in raw.items()
+        if value not in ("", None) and value != DEFAULTS["identity"].get(key)
+    }
+
+
+def load(path: Path = PREFS_PATH) -> dict[str, Any]:
+    """Read prefs from disk, falling back to DEFAULTS for missing keys.
+
+    Identity resolves per key as: explicit preferences.json values ->
+    jobpilot user profile -> neutral DEFAULTS (see module docstring). All
+    other sections come from the file with DEFAULTS filling the gaps.
+    """
+    loaded: dict[str, Any] = {}
+    if path.exists():
+        try:
+            raw = json.loads(path.read_text())
+            if isinstance(raw, dict):
+                loaded = raw
+        except Exception:
+            loaded = {}
+    merged = _deep_merge(DEFAULTS, loaded)
+    merged["identity"] = _deep_merge(
+        _deep_merge(DEFAULTS["identity"], _profile_identity()),
+        _explicit_identity(loaded),
+    )
+    return merged
 
 
 def write_default_if_missing(path: Path = PREFS_PATH) -> bool:
