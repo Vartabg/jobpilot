@@ -4,8 +4,8 @@
 
 set -e
 
-CHROME_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-DEBUG_PORT=9222
+CHROME_PATH="/Applications/Google Chrome.app"
+DEBUG_PORT="${JOBPILOT_DEBUG_PORT:-9222}"
 
 # Check if Chrome is already running with debugging
 if curl -s "http://localhost:$DEBUG_PORT/json/version" > /dev/null 2>&1; then
@@ -21,16 +21,21 @@ echo "   Using a debug profile based on your Chrome settings."
 
 # Use a separate user data directory for debugging
 # This allows CDP to work while keeping a similar browsing experience
-DEBUG_PROFILE="$HOME/.jobpilot-chrome-profile"
+DEBUG_PROFILE="${JOBPILOT_CHROME_PROFILE:-$HOME/.jobpilot-chrome-profile}"
+
+if [ -e "$DEBUG_PROFILE/SingletonLock" ]; then
+    echo "   Debug profile is locked; using a fresh temporary profile for this session."
+    DEBUG_PROFILE="$(mktemp -d /private/tmp/jobpilot-chrome-profile.XXXXXX)"
+fi
 
 # Launch Chrome with debugging enabled
-"$CHROME_PATH" \
+open -na "$CHROME_PATH" --args \
     --remote-debugging-port=$DEBUG_PORT \
     --remote-allow-origins=* \
     --user-data-dir="$DEBUG_PROFILE" \
     --no-first-run \
     --no-default-browser-check \
-    "https://www.linkedin.com/jobs/" &
+    "https://www.linkedin.com/jobs/"
 
 # Wait for Chrome to start
 sleep 2

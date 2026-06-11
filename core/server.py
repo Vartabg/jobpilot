@@ -24,13 +24,21 @@ from dataclasses import asdict
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
 from fastapi.responses import FileResponse, JSONResponse
 
 from jobpilot.core.logger import get_logger
 from jobpilot.core.profile_store import get_profile_store
 from jobpilot.core.application_tracker import get_application_tracker
 from jobpilot.core.queue_builder import (
-    QUEUE_PATH, build_queue, get_job, load_queue, save_queue, update_job_status,
+    QUEUE_PATH,
+    build_queue,
+    focus_queue_company_first,
+    get_job,
+    load_queue,
+    reconcile_queue_with_tracker,
+    save_queue,
+    update_job_status,
 )
 
 log = get_logger(__name__)
@@ -39,6 +47,15 @@ PROJECT_ROOT = Path(__file__).parent.parent
 DASHBOARD_PATH = PROJECT_ROOT / "ui" / "dashboard.html"
 
 app = FastAPI(title="JobPilot Remote", version="0.3.0")
+
+
+class ApplicationLogPayload(BaseModel):
+    company: str
+    title: str = ""
+    url: str = ""
+    status: str = "applied"
+    applied_at: str | None = None
+    source: str = "dashboard"
 
 
 # ---------------------------------------------------------------------------
@@ -162,6 +179,7 @@ async def install_page() -> "Response":
 
 @app.get("/api/queue")
 async def api_queue() -> JSONResponse:
+    reconcile_queue_with_tracker()
     jobs = load_queue()
     return JSONResponse([asdict(j) for j in jobs])
 
@@ -174,6 +192,62 @@ async def api_queue_refresh() -> JSONResponse:
         return len(jobs)
     count = await asyncio.to_thread(_run)
     return JSONResponse({"ok": True, "count": count})
+
+
+@app.post("/api/queue/reconcile")
+async def api_queue_reconcile() -> JSONResponse:
+    changed, total = reconcile_queue_with_tracker()
+    return JSONResponse({"ok": True, "changed": changed, "total": total})
+
+
+@app.post("/api/queue/focus")
+async def api_queue_focus() -> JSONResponse:
+    changed, total, companies = focus_queue_company_first()
+    return JSONResponse({
+        "ok": True,
+        "changed": changed,
+        "total": total,
+        "companies": companies,
+    })
+
+
+# ---------------------------------------------------------------------------
+# Application organizer
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/applications")
+async def api_applications(limit: int = 40) -> JSONResponse:
+    tracker = get_application_tracker()
+    recent = tracker.get_recent(limit=limit)
+    return JSONResponse({
+        "stats": tracker.get_stats(),
+        "status_counts": tracker.get_status_counts(),
+        "recent": [asdict(app) for app in recent],
+    })
+
+
+@app.post("/api/applications/log")
+async def api_log_application(payload: ApplicationLogPayload) -> JSONResponse:
+    tracker = get_application_tracker()
+    try:
+        app_row = tracker.log_application(
+            company=payload.company,
+            title=payload.title,
+            url=payload.url,
+            status=payload.status,
+            applied_at=payload.applied_at,
+            source=payload.source or "dashboard",
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    changed, total = reconcile_queue_with_tracker()
+    return JSONResponse({
+        "ok": True,
+        "application": asdict(app_row),
+        "queue_changed": changed,
+        "queue_total": total,
+    })
 
 
 # ---------------------------------------------------------------------------

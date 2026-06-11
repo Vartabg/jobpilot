@@ -11,6 +11,17 @@ venv/
 # Local data (contains your profile, applications DB, logs — never commit)
 data/
 
+# Personal job-search strategy notes — keep these out of the repo even if a
+# copy lands at the root by accident. The canonical home is data/strategy/.
+SOLUTIONS_LANE_PLAYBOOK.md
+INDEED_PROFILE_PASTE.md
+/*_PASTE.md
+/*_PLAYBOOK.md
+
+# Extension code is tracked; the user's bundled artifacts are not.
+extension/profile.json
+extension/resume.pdf
+
 # OS
 .DS_Store
 Thumbs.db

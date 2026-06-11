@@ -42,6 +42,55 @@ class TestMarkAndQuery:
         tracker.mark_started("https://linkedin.com/jobs/view/5", "New Title", "New Co")
         assert tracker.get_status("https://linkedin.com/jobs/view/5") == "started"
 
+    def test_log_application_without_url_uses_synthetic_url(self, tracker: ApplicationTracker):
+        app = tracker.log_application(
+            company="Titan AI",
+            title="Forward Deployed Engineer",
+            status="applied",
+            applied_at="2026-06-02",
+        )
+
+        assert app.job_url.startswith("manual://titan-ai-forward-deployed-engineer/")
+        assert tracker.has_applied(app.job_url) is True
+        assert tracker.company_status("Titan AI") == "applied"
+
+    def test_log_application_idempotent_by_company_title(self, tracker: ApplicationTracker):
+        tracker.log_application(
+            company="Titan AI",
+            title="Forward Deployed Engineer",
+            status="applied",
+        )
+        tracker.log_application(
+            company="titan ai",
+            title="Forward Deployed Engineer",
+            status="interview",
+        )
+
+        recent = tracker.get_recent(limit=10)
+        assert len(recent) == 1
+        assert recent[0].status == "interview"
+        assert tracker.company_status("Titan AI") == "interview"
+
+    def test_log_application_without_url_preserves_existing_real_url(self, tracker: ApplicationTracker):
+        tracker.log_application(
+            company="Titan AI",
+            title="Forward Deployed Engineer",
+            url="https://jobs.ashbyhq.com/titan-ai/123?utm=x",
+            status="applied",
+        )
+        app = tracker.log_application(
+            company="Titan AI",
+            title="Forward Deployed Engineer",
+            status="interview",
+        )
+
+        assert app.job_url == "https://jobs.ashbyhq.com/titan-ai/123"
+        assert tracker.get_status("https://jobs.ashbyhq.com/titan-ai/123") == "interview"
+
+    def test_log_application_rejects_unknown_status(self, tracker: ApplicationTracker):
+        with pytest.raises(ValueError):
+            tracker.log_application(company="Titan AI", status="maybe")
+
 
 class TestRecent:
 
@@ -77,6 +126,21 @@ class TestStats:
         assert stats["submitted"] == 1
         assert stats["abandoned"] == 1
         assert stats["in_progress"] == 1
+
+    def test_stats_include_organizer_statuses(self, tracker: ApplicationTracker):
+        tracker.log_application("A", status="applied")
+        tracker.log_application("B", status="rejected")
+        tracker.log_application("C", status="interview")
+
+        stats = tracker.get_stats()
+        assert stats["applied"] == 1
+        assert stats["rejected"] == 1
+        assert stats["interview"] == 1
+        assert tracker.get_status_counts() == {
+            "applied": 1,
+            "interview": 1,
+            "rejected": 1,
+        }
 
 
 class TestLifecycle:

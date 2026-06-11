@@ -35,7 +35,7 @@
     letter-spacing: 0;
   }
 
-  button, input, a {
+  button, input, select, a {
     font: inherit;
   }
 
@@ -255,7 +255,7 @@
     margin-bottom: 12px;
   }
 
-  .search {
+  .search, .log-form input, .log-form select {
     flex: 1;
     min-width: 180px;
     height: 38px;
@@ -264,6 +264,87 @@
     background: var(--bg);
     color: var(--ink);
     padding: 0 11px;
+  }
+
+  .organizer {
+    display: grid;
+    gap: 12px;
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--bg);
+    margin-bottom: 12px;
+  }
+
+  .organizer-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .organizer-title {
+    font-weight: 760;
+  }
+
+  .organizer-summary {
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .log-form {
+    display: grid;
+    grid-template-columns: minmax(130px, 1fr) minmax(160px, 1.4fr) 124px minmax(150px, 1fr) auto;
+    gap: 8px;
+  }
+
+  .log-form input, .log-form select {
+    min-width: 0;
+    width: 100%;
+    background: var(--surface);
+  }
+
+  .recent-apps {
+    display: grid;
+    gap: 6px;
+    max-height: 174px;
+    overflow: auto;
+  }
+
+  .app-row {
+    display: grid;
+    grid-template-columns: minmax(120px, 180px) minmax(160px, 1fr) 86px 84px;
+    gap: 8px;
+    align-items: center;
+    min-height: 34px;
+    border-top: 1px solid var(--line);
+    padding-top: 6px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .app-row strong {
+    color: var(--ink);
+    font-size: 13px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .app-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .pill {
+    justify-self: start;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 2px 7px;
+    text-transform: capitalize;
+    color: var(--muted);
+    background: var(--surface);
   }
 
   .switch {
@@ -313,6 +394,8 @@
   tr:last-child td { border-bottom: 0; }
   tr.viewing td { background: #fff7e8; }
   tr.applied td { background: #f1f8f4; }
+  tr.interview td { background: #eef6ff; }
+  tr.rejected td { color: var(--quiet); background: #fff5f5; }
   tr.skipped td { color: var(--quiet); background: #fafbfc; }
 
   .score-cell {
@@ -469,6 +552,19 @@
     .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .toolbar { align-items: stretch; flex-direction: column; }
     .search { width: 100%; min-width: 0; }
+    .organizer { padding: 10px; }
+    .organizer-head { display: grid; }
+    .log-form {
+      grid-template-columns: 1fr;
+    }
+    .app-row {
+      grid-template-columns: 1fr auto;
+      gap: 4px 8px;
+    }
+    .app-title {
+      grid-column: 1 / -1;
+      white-space: normal;
+    }
     .table-shell { border: 0; box-shadow: none; background: transparent; }
     table, thead, tbody, tr, td { display: block; width: 100%; }
     thead { display: none; }
@@ -511,6 +607,8 @@
       <button class="active" data-filter="queued" onclick="setFilter('queued')"><span>Targets</span><span class="nav-count" id="n-queued">0</span></button>
       <button data-filter="viewing" onclick="setFilter('viewing')"><span>Open</span><span class="nav-count" id="n-viewing">0</span></button>
       <button data-filter="applied" onclick="setFilter('applied')"><span>Applied</span><span class="nav-count" id="n-applied">0</span></button>
+      <button data-filter="interview" onclick="setFilter('interview')"><span>Interview</span><span class="nav-count" id="n-interview">0</span></button>
+      <button data-filter="rejected" onclick="setFilter('rejected')"><span>Rejected</span><span class="nav-count" id="n-rejected">0</span></button>
       <button data-filter="skipped" onclick="setFilter('skipped')"><span>Skipped</span><span class="nav-count" id="n-skipped">0</span></button>
     </nav>
 
@@ -533,6 +631,7 @@
       </div>
       <div class="actions">
         <button onclick="reload()">Refresh</button>
+        <button onclick="focusQueue()">Focus</button>
         <button onclick="rescan()" class="primary">Rescan</button>
         <a class="button subtle" href="/install">Fill Button</a>
       </div>
@@ -541,13 +640,36 @@
     <section class="metrics">
       <div class="metric"><div class="num" id="m-targets">0</div><div class="label">target companies</div></div>
       <div class="metric"><div class="num" id="m-hidden">0</div><div class="label">duplicates hidden</div></div>
-      <div class="metric"><div class="num" id="m-psyche">0</div><div class="label">avg personality fit</div></div>
+      <div class="metric"><div class="num" id="m-tracked">0</div><div class="label">tracked apps</div></div>
       <div class="metric"><div class="num" id="m-total">0</div><div class="label">roles scanned</div></div>
     </section>
 
     <section class="toolbar">
       <input id="search" class="search" type="search" placeholder="Search company, role, or signal" oninput="render()">
       <label class="switch"><input id="all-roles" type="checkbox" onchange="render()"> Show every role</label>
+    </section>
+
+    <section class="organizer">
+      <div class="organizer-head">
+        <div class="organizer-title">Application Organizer</div>
+        <div class="organizer-summary" id="organizer-summary">Loading tracked applications</div>
+      </div>
+      <form class="log-form" onsubmit="logExternal(event)">
+        <input id="log-company" name="company" required placeholder="Company">
+        <input id="log-title" name="title" placeholder="Role title">
+        <select id="log-status" name="status">
+          <option value="applied">Applied</option>
+          <option value="interview">Interview</option>
+          <option value="rejected">Rejected</option>
+          <option value="submitted">Submitted</option>
+          <option value="abandoned">Abandoned</option>
+        </select>
+        <input id="log-url" name="url" placeholder="URL optional">
+        <button class="primary" type="submit">Log</button>
+      </form>
+      <div class="recent-apps" id="recent-apps">
+        <div class="empty">Loading tracked applications</div>
+      </div>
     </section>
 
     <section class="table-shell">
@@ -575,6 +697,7 @@
 let jobs = [];
 let profile = {};
 let draft = {};
+let applications = { stats: {}, status_counts: {}, recent: [] };
 let filter = 'queued';
 
 function api(path, opts = {}) {
@@ -630,7 +753,7 @@ function visibleJobs() {
   }
   if (!showAll) view = groupedBest(view);
   view.sort((a, b) => {
-    const order = { viewing: 0, queued: 1, applied: 2, skipped: 3, rejected: 4 };
+    const order = { interview: 0, viewing: 1, queued: 2, applied: 3, skipped: 4, rejected: 5 };
     const statusDelta = (order[a.status] ?? 9) - (order[b.status] ?? 9);
     return statusDelta || roleScore(b) - roleScore(a) || String(a.company).localeCompare(String(b.company));
   });
@@ -657,10 +780,12 @@ function updateStats() {
   document.getElementById('n-queued').textContent = uniqueCompanyCount('queued');
   document.getElementById('n-viewing').textContent = uniqueCompanyCount('viewing');
   document.getElementById('n-applied').textContent = uniqueCompanyCount('applied');
+  document.getElementById('n-interview').textContent = uniqueCompanyCount('interview');
+  document.getElementById('n-rejected').textContent = uniqueCompanyCount('rejected');
   document.getElementById('n-skipped').textContent = uniqueCompanyCount('skipped');
   document.getElementById('m-targets').textContent = uniqueCompanyCount('queued');
   document.getElementById('m-hidden').textContent = duplicateCount();
-  document.getElementById('m-psyche').textContent = avgPsyche();
+  document.getElementById('m-tracked').textContent = applications.stats?.total || 0;
   document.getElementById('m-total').textContent = jobs.length;
 }
 
@@ -747,6 +872,7 @@ function render() {
 async function reload() {
   try {
     jobs = await api('/api/queue');
+    await loadApplications();
     render();
   } catch (e) {
     toast('Could not load queue: ' + e.message, 'error');
@@ -761,6 +887,17 @@ async function rescan() {
     toast('Queue refreshed', 'success');
   } catch (e) {
     toast('Rescan failed: ' + e.message, 'error');
+  }
+}
+
+async function focusQueue() {
+  toast('Focusing one role per company');
+  try {
+    const result = await api('/api/queue/focus', { method: 'POST' });
+    await reload();
+    toast(`Focused ${result.companies || 0} companies`, 'success');
+  } catch (e) {
+    toast('Focus failed: ' + e.message, 'error');
   }
 }
 
@@ -781,10 +918,79 @@ async function markApplied(id) {
     await api(`/api/job/${id}/mark-applied`, { method: 'POST' });
     const job = jobs.find(j => j.id === id);
     if (job) job.status = 'applied';
+    await loadApplications();
     toast('Application recorded', 'success');
     render();
   } catch (e) {
     toast('Could not mark applied: ' + e.message, 'error');
+  }
+}
+
+function statusSummary() {
+  const counts = applications.status_counts || {};
+  const parts = [
+    ['applied', counts.applied || 0],
+    ['submitted', counts.submitted || 0],
+    ['interview', counts.interview || 0],
+    ['rejected', counts.rejected || 0],
+  ].filter(([, value]) => value);
+  if (!parts.length) return 'No tracked applications yet';
+  return parts.map(([label, value]) => `${value} ${label}`).join(' · ');
+}
+
+function renderApplications() {
+  const summary = document.getElementById('organizer-summary');
+  const recent = document.getElementById('recent-apps');
+  summary.textContent = statusSummary();
+  const rows = applications.recent || [];
+  if (!rows.length) {
+    recent.innerHTML = '<div class="empty">No tracked applications yet.</div>';
+    return;
+  }
+  recent.innerHTML = rows.slice(0, 12).map(app => `
+    <div class="app-row">
+      <strong>${escape(app.company || 'Unknown')}</strong>
+      <div class="app-title">${escape(app.job_title || '(role)')}</div>
+      <span class="pill">${escape(app.status || '')}</span>
+      <span>${escape(String(app.applied_at || '').slice(0, 10))}</span>
+    </div>
+  `).join('');
+}
+
+async function loadApplications() {
+  try {
+    applications = await api('/api/applications?limit=40');
+    renderApplications();
+    updateStats();
+  } catch (e) {
+    document.getElementById('organizer-summary').textContent = 'Tracker unavailable';
+    document.getElementById('recent-apps').innerHTML = '<div class="empty">Could not load tracker.</div>';
+  }
+}
+
+async function logExternal(event) {
+  event.preventDefault();
+  const payload = {
+    company: document.getElementById('log-company').value.trim(),
+    title: document.getElementById('log-title').value.trim(),
+    status: document.getElementById('log-status').value,
+    url: document.getElementById('log-url').value.trim(),
+    source: 'dashboard',
+  };
+  if (!payload.company) {
+    toast('Company is required', 'error');
+    return;
+  }
+  try {
+    await api('/api/applications/log', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    event.target.reset();
+    await reload();
+    toast('Application logged and queue reconciled', 'success');
+  } catch (e) {
+    toast('Could not log application: ' + e.message, 'error');
   }
 }
 

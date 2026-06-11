@@ -7,7 +7,6 @@ On connect():
      so LinkedIn login is preserved across runs.
 """
 
-import asyncio
 from pathlib import Path
 from typing import Optional
 from playwright.async_api import async_playwright, Browser, Page, BrowserContext
@@ -26,7 +25,7 @@ class CDPBridge:
 
     def __init__(self, debug_port: int = 9222):
         self.debug_port = debug_port
-        self.debug_url = f"http://localhost:{debug_port}"
+        self.debug_url = f"http://127.0.0.1:{debug_port}"
         self._playwright = None
         self._browser: Optional[Browser] = None  # set only for CDP reconnect path
         self._context: Optional[BrowserContext] = None
@@ -93,23 +92,23 @@ class CDPBridge:
             self._browser = None
             self._context = None
             self._page = None
-    
+
     @property
     def page(self) -> Optional[Page]:
         """Get the current page"""
         return self._page
-    
+
     async def get_page_info(self) -> PageInfo:
         """Get information about the current page"""
         if not self._page:
             raise RuntimeError("Not connected to browser")
         return await build_page_info(self._page)
-    
+
     async def wait_for_navigation(self, timeout: float = 30.0):
         """Wait for page navigation"""
         if self._page:
             await self._page.wait_for_load_state("networkidle", timeout=timeout * 1000)
-    
+
     async def get_active_page(self) -> Optional[Page]:
         """Get the best page to work with.
 
@@ -160,13 +159,13 @@ class CDPBridge:
                 return page
 
         return None
-    
+
     async def inject_script(self, script: str) -> any:
         """Inject and execute JavaScript in the page"""
         if not self._page:
             raise RuntimeError("Not connected to browser")
         return await self._page.evaluate(script)
-    
+
     async def query_all(self, selector: str) -> list:
         """Query all elements matching a selector"""
         if not self._page:

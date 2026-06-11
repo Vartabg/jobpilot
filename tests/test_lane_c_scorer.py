@@ -65,6 +65,7 @@ def test_location_gate_allows_selected_us_metros_and_remote():
     assert _is_allowed_location("Forward Deployed Engineer", "Acme", "Austin")
     assert _is_allowed_location("Forward Deployed Engineer", "Acme", "Denver")
     assert _is_allowed_location("Forward Deployed Engineer", "Acme", "Portland")
+    assert _is_allowed_location("Forward Deployed Engineer", "Acme", "Seattle")
     assert _is_allowed_location("Forward Deployed Engineer", "Acme", "Remote US")
     assert _is_allowed_location("Forward Deployed Engineer | NYC", "Acme", "Not specified")
 
@@ -77,7 +78,6 @@ def test_location_gate_blocks_international_nonlisted_and_unknown_locations():
     assert not _is_allowed_location("Forward Deployed Engineer | Europe/LATAM", "Starbridge", "")
     assert not _is_allowed_location("Forward Deployed Engineer - German Speaking", "HappyRobot", "")
     assert not _is_allowed_location("Forward Deployed Engineer - Move to the US!", "Haast", "")
-    assert not _is_allowed_location("Forward Deployed Engineer", "Acme", "Seattle")
     assert not _is_allowed_location("Forward Deployed Engineer", "Acme", "Not specified")
     assert _is_allowed_location("Forward Deployed Engineer", "Acme", "Remote US/Canada")
     assert not _is_allowed_location("Forward Deployed Engineer", "Acme", "Remote Canada")
@@ -87,8 +87,10 @@ def test_hq_fallback_allows_known_allowed_company_when_role_location_empty():
     """Empty role location uses COMPANY_HQ; unknown no-HQ roles are excluded."""
     reset_caches()
     known, _, _ = _score_job(_job("Forward Deployed Engineer", "HappyRobot", ""))
+    growth_unknown, _, _ = _score_job(_job("Forward Deployed Engineer", "Growth Protocol", ""))
     unknown, _, _ = _score_job(_job("Forward Deployed Engineer", "UnknownCo", ""))
     assert known > 0, "known Bay Area HQ should be eligible when ATS omits location"
+    assert growth_unknown == 0, "Growth Protocol postings must carry actual role location"
     assert unknown == 0, "unknown location with no HQ fallback should be excluded"
 
 

@@ -58,6 +58,40 @@ class TestPortalScanner:
         assert jobs[0].company == "Acme"
         assert jobs[0].location == "Remote US"
 
+    @patch("jobpilot.core.portal_scanner.requests.get")
+    def test_scans_ashby_uses_location_and_secondary_locations(self, mock_get: MagicMock):
+        payload = {
+            "jobs": [
+                {
+                    "id": "123",
+                    "title": "Forward Deployed Engineer",
+                    "location": "New York City",
+                    "secondaryLocations": [
+                        {"location": "Remote (United States)"},
+                        {"location": "Remote (Canada)"},
+                    ],
+                    "jobUrl": "https://jobs.ashbyhq.com/acme/123",
+                },
+                {
+                    "id": "456",
+                    "title": "Forward Deployed Engineer",
+                    "location": "London",
+                    "jobUrl": "https://jobs.ashbyhq.com/acme/456",
+                },
+            ]
+        }
+        mock_get.return_value = MagicMock(
+            raise_for_status=lambda: None,
+            json=MagicMock(return_value=payload),
+        )
+
+        scanner = PortalScanner(keywords=["forward deployed"])
+        jobs = scanner.scan_ashby_board("acme")
+
+        assert len(jobs) == 2
+        assert jobs[0].location == "New York City; Remote (United States); Remote (Canada)"
+        assert jobs[1].location == "London"
+
     def test_save_report_writes_json(self, tmp_path: Path):
         scanner = PortalScanner(keywords=["python"])
         jobs = scanner.scan_targets([

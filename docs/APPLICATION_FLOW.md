@@ -54,7 +54,7 @@ questions to the agent over repeated automated loads of a form you intend to sub
 |------|---------|
 | `scripts/make_paste_sheet.py` | answers markdown → human `PASTE_SHEET.txt` (no browser) |
 | `data/answers/<company>/<role>.md` | the drafted, approved answers (single source of truth) |
-| `scripts/fill_comfyui_application.py` | example Ashby fill driver — **superseded** by the paste flow; kept only as a reference for the field-mapping approach. Do not use it to fill/submit a live form. |
+| `core/form_filler.py` | the generalized field-mapping implementation (the one-off fill drivers that preceded the paste flow were retired; the technique lives here) |
 
 ## Answers file format
 

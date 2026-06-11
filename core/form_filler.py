@@ -18,10 +18,31 @@ from playwright.async_api import async_playwright, Page, ElementHandle
 
 from jobpilot.core.logger import get_logger
 from jobpilot.core.profile_store import UserProfile
+from jobpilot.core.resume_tailor import ResumeTailor
 
 log = get_logger(__name__)
 
 DEFAULT_REFERRAL_SOURCE = "LinkedIn"
+
+DISALLOWED_FORM_LOCATION_PATTERNS = (
+    "authorized to work in the uk",
+    "authorised to work in the uk",
+    "authorized to work in united kingdom",
+    "authorised to work in united kingdom",
+    "eligible to work in the uk",
+    "eligible to work in united kingdom",
+    "work in the uk",
+    "work in united kingdom",
+    "based in the uk",
+    "based in united kingdom",
+    "commuting distance of london",
+    "london office",
+    "based in germany",
+    "work in germany",
+    "professional fluency in german",
+    "commuting distance of munich",
+    "munich office",
+)
 
 
 @dataclass
@@ -160,6 +181,14 @@ def _yesno_for_question(label: str, profile: UserProfile) -> Optional[str]:
     return None
 
 
+def _detect_disallowed_form_location(text: str) -> Optional[str]:
+    normalized = " ".join((text or "").lower().split())
+    for pattern in DISALLOWED_FORM_LOCATION_PATTERNS:
+        if pattern in normalized:
+            return pattern
+    return None
+
+
 # ---------------------------------------------------------------------------
 # DOM helpers
 # ---------------------------------------------------------------------------
@@ -207,8 +236,10 @@ async def _click_apply_button(page: Page) -> bool:
         'button#apply_button',
         'a.apply',
         'button:has-text("Apply for this job")',
+        'button:has-text("Apply for this Job")',
         'button:has-text("Apply now")',
         'a:has-text("Apply for this job")',
+        'a:has-text("Apply for this Job")',
         'a:has-text("Apply now")',
     ]
     for sel in selectors:
@@ -222,6 +253,23 @@ async def _click_apply_button(page: Page) -> bool:
                 return True
         except Exception:
             continue
+    try:
+        clicked = await page.evaluate(
+            """() => {
+                const els = Array.from(document.querySelectorAll('button, a'));
+                const target = els.find(el => /apply for this job|apply now/i.test(el.innerText || el.textContent || ''));
+                if (!target) return false;
+                target.click();
+                return true;
+            }"""
+        )
+        if clicked:
+            await page.wait_for_load_state("domcontentloaded", timeout=15000)
+            await asyncio.sleep(2)
+            log.info("Clicked apply button with text fallback")
+            return True
+    except Exception:
+        pass
     return False
 
 
@@ -334,16 +382,36 @@ async def _verify_upload(page: Page, filename: str) -> bool:
         return False
 
 
+def _preferred_resume_upload(profile: UserProfile) -> tuple[Optional[Path], str]:
+    """Prefer the latest tailored resume PDF, then fall back to profile resume."""
+    latest_draft = ResumeTailor.load_latest_draft_summary()
+    if latest_draft:
+        pdf_path = str(latest_draft.get("pdf_path", "") or "")
+        if pdf_path:
+            tailored_pdf = Path(pdf_path).expanduser()
+            if tailored_pdf.exists() and tailored_pdf.is_file():
+                return tailored_pdf, "tailored"
+
+    resume_path = getattr(profile, "resume_path", "") or ""
+    if resume_path:
+        candidate = Path(resume_path).expanduser()
+        if candidate.exists() and candidate.is_file():
+            return candidate, "profile"
+
+    return None, "missing"
+
+
 async def _upload_resume(page: Page, profile: UserProfile) -> Optional[str]:
-    resume = Path(profile.resume_path).expanduser()
-    if not resume.exists():
+    resume, source = _preferred_resume_upload(profile)
+    if resume is None:
         return f"Resume not found at {profile.resume_path}"
 
     async def _try_upload(inputs) -> bool:
         for fi in inputs:
             try:
                 await fi.set_input_files(str(resume))
-                log.info("Uploaded resume: %s", resume.name)
+                suffix = " (tailored)" if source == "tailored" else ""
+                log.info("Uploaded resume%s: %s", suffix, resume.name)
                 return True
             except Exception as e:
                 log.debug("File input upload attempt failed: %s", e)
@@ -711,7 +779,7 @@ async def fill_application(
     profile: UserProfile,
     cdp_port: int = 9222,
 ) -> FillResult:
-    cdp_url = f"http://localhost:{cdp_port}"
+    cdp_url = f"http://127.0.0.1:{cdp_port}"
     log.info("Filling form for %s @ %s", job_title, company)
 
     try:
@@ -779,6 +847,20 @@ async def fill_application(
             all_filled: list[str] = []
             all_skipped: list[str] = []
 
+            page_text = await page.locator("body").inner_text(timeout=5000)
+            disallowed_location = _detect_disallowed_form_location(page_text)
+            if disallowed_location:
+                return FillResult(
+                    success=False,
+                    error=(
+                        "Disallowed international location detected on form: "
+                        f"{disallowed_location}"
+                    ),
+                    stopped_before_submit=True,
+                    final_url=page.url,
+                    final_title=await page.title(),
+                )
+
             # Gather every frame: main page + any embedded iframes (Greenhouse,
             # Lever, Ashby often embed the form in an iframe on the company's
             # own careers page).
@@ -828,7 +910,10 @@ async def fill_application(
                     uploaded = True
                     break
             if uploaded:
-                all_filled.append(f"📎 Resume: {Path(profile.resume_path).name}")
+                resume_path, source = _preferred_resume_upload(profile)
+                resume_name = resume_path.name if resume_path else Path(profile.resume_path).name
+                suffix = " (tailored)" if source == "tailored" else ""
+                all_filled.append(f"📎 Resume: {resume_name}{suffix}")
             else:
                 all_skipped.append("Resume: no file input found")
 
@@ -883,126 +968,23 @@ async def fill_application(
 
 
 async def submit_application(cdp_port: int = 9222) -> tuple[bool, str]:
-    """Find and click the Submit button, then VERIFY the submission succeeded.
+    """Submit is disabled by policy.
 
-    Verification is critical — client-side validation often silently blocks
-    submission when required fields are empty, but the button click itself
-    'succeeds' from Playwright's perspective. We check for:
-      - URL change (redirect to thank-you/confirmation page)
-      - A success message appearing
-      - Validation errors appearing (explicit failure signal)
+    JobPilot may fill and stage applications, but Garo clicks the final submit
+    button himself. Keep this function as a hard fence so future integrations
+    cannot accidentally resurrect an auto-submit path by importing it.
     """
-    cdp_url = f"http://localhost:{cdp_port}"
-    submit_selectors = [
-        'button[type="submit"]:has-text("Submit")',
-        'input[type="submit"][value*="Submit" i]',
-        'button:has-text("Submit application")',
-        'button:has-text("Submit Application")',
-        'button:has-text("Submit your application")',
-        'button:has-text("Send application")',
-        'button#submit_app',
-        '[aria-label*="submit application" i]',
-    ]
-    try:
-        async with async_playwright() as p:
-            browser = await p.chromium.connect_over_cdp(cdp_url)
-            if not browser.contexts:
-                return False, "No Chrome contexts"
-            ctx = browser.contexts[0]
-            if not ctx.pages:
-                return False, "No open pages"
+    return False, "Auto-submit disabled: Garo must click the final submit button."
 
-            for page in ctx.pages:
-                try:
-                    frames = [page] + [f for f in page.frames if f != page.main_frame]
-                    for frame in frames:
-                        for sel in submit_selectors:
-                            try:
-                                btn = await frame.query_selector(sel)
-                                if not btn or not await btn.is_visible():
-                                    continue
 
-                                # Capture pre-click state
-                                url_before = page.url
-                                await btn.scroll_into_view_if_needed()
-                                await btn.click()
-                                log.info("Clicked submit button: %s", sel)
-                                await asyncio.sleep(3.5)
-
-                                # Verify submission actually went through
-                                url_after = page.url
-                                if url_after != url_before and any(k in url_after.lower() for k in [
-                                    "thank", "submitted", "success", "confirmation", "complete",
-                                ]):
-                                    return True, "Submitted — confirmation page reached"
-
-                                # Check for a success element on the page
-                                success_found = await page.evaluate(
-                                    """() => {
-                                        const body = (document.body ? document.body.innerText : '').toLowerCase();
-                                        const successPhrases = [
-                                            'thank you for applying',
-                                            'application submitted',
-                                            'application received',
-                                            "we've received",
-                                            'successfully submitted',
-                                            'your application has been received',
-                                        ];
-                                        return successPhrases.some(p => body.includes(p));
-                                    }"""
-                                )
-                                if success_found:
-                                    return True, "Submitted — success message detected"
-
-                                # Check for validation errors (explicit failure)
-                                errors = await page.evaluate(
-                                    """() => {
-                                        const errs = [];
-                                        const selectors = [
-                                            '[class*="error" i]:not([class*="error-icon"])',
-                                            '[class*="required" i]:not([class*="required-label"])',
-                                            '[aria-invalid="true"]',
-                                            '.fb-validation-error',
-                                            '[role="alert"]',
-                                        ];
-                                        for (const sel of selectors) {
-                                            for (const el of document.querySelectorAll(sel)) {
-                                                const text = (el.innerText || '').trim();
-                                                if (text && text.length < 200 && (
-                                                    text.toLowerCase().includes('required') ||
-                                                    text.toLowerCase().includes('must') ||
-                                                    text.toLowerCase().includes('please') ||
-                                                    text.toLowerCase().includes('invalid')
-                                                )) {
-                                                    errs.push(text);
-                                                }
-                                            }
-                                        }
-                                        return Array.from(new Set(errs)).slice(0, 5);
-                                    }"""
-                                )
-                                if errors:
-                                    return False, f"Form rejected — {len(errors)} required field(s) unfilled: {'; '.join(errors[:3])}"
-
-                                # URL didn't change and no explicit success/error signal:
-                                # cautious verdict — don't mark as applied.
-                                if url_after == url_before:
-                                    return False, "Clicked submit but page didn't advance — likely blocked by validation. Review in Chrome."
-
-                                # URL changed to something non-confirmation
-                                return True, f"Submitted (redirected to {url_after[:60]})"
-                            except Exception:
-                                continue
-                except Exception:
-                    continue
-            return False, "No Submit button found on any open tab"
-    except Exception as e:
-        return False, f"Submit error: {e}"
+async def _legacy_submit_application_disabled(cdp_port: int = 9222) -> tuple[bool, str]:
+    """Compatibility shim for old imports; submit remains disabled."""
+    return await submit_application(cdp_port)
 
 
 async def capture_form_screenshot(cdp_port: int = 9222, out_path: Optional[str] = None) -> Optional[str]:
     """Capture a screenshot of the currently active Chrome tab for review."""
-    cdp_url = f"http://localhost:{cdp_port}"
+    cdp_url = f"http://127.0.0.1:{cdp_port}"
     try:
         async with async_playwright() as p:
             browser = await p.chromium.connect_over_cdp(cdp_url)
