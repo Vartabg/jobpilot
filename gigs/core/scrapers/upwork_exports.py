@@ -2,7 +2,7 @@
 
 This does not log in to Upwork or scrape behind an account. It only reads PDF
 job posts that the user manually saved into the leads directory (default:
-docs/revenue/upwork-leads; override with GIGPILOT_UPWORK_LEADS_DIR).
+data/gigs/upwork-leads; override with GIGPILOT_UPWORK_LEADS_DIR).
 """
 
 from __future__ import annotations
@@ -15,10 +15,10 @@ from pathlib import Path
 
 from jobpilot.gigs.core.logger import get_logger
 from jobpilot.gigs.core.models import Gig
+from jobpilot.gigs.core.paths import data_dir
 
 log = get_logger(__name__)
 
-DEFAULT_LEADS_DIR = Path("/Users/vartny/AI_Workspace/docs/revenue/upwork-leads")
 UPWORK_URL_RE = re.compile(r"https://www\.upwork\.com/jobs/[^\s]+")
 HOURLY_RANGE_RE = re.compile(r"\$(\d+(?:\.\d+)?)\s*-\s*\$(\d+(?:\.\d+)?)")
 
@@ -45,9 +45,8 @@ KEYWORD_TAGS = (
 
 
 def _leads_dir() -> Path:
-    return Path(
-        os.getenv("GIGPILOT_UPWORK_LEADS_DIR", str(DEFAULT_LEADS_DIR))
-    ).expanduser()
+    default = data_dir() / "upwork-leads"
+    return Path(os.getenv("GIGPILOT_UPWORK_LEADS_DIR", str(default))).expanduser()
 
 
 def _pdf_text(path: Path) -> str:

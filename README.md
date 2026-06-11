@@ -128,6 +128,12 @@ jobpilot answer           Save and reuse the answers you write for application q
 
 ---
 
+## Looking for freelance work too?
+
+JobPilot also has a **gigs lane** — a second track for freelance and contract work. It scans public gig boards twice a day, scores what it finds against your profile, writes a digest you can read on your phone, and keeps a simple pipeline file you update by typing one letter (`s` to save, `p` to pass). Same rule as everything else here: it finds and drafts, you review and send — it never submits anything for you. Setup and the full phone workflow are in the [Gigs Lane guide](docs/GIGS.md).
+
+---
+
 ## Honest limitations
 
 - **macOS only right now.** Windows and Linux support is on the roadmap.

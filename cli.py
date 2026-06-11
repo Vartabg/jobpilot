@@ -1120,6 +1120,17 @@ def review(
 answer_app = typer.Typer(help="Manage paste-ready application answers (save / copy / list / show).")
 app.add_typer(answer_app, name="answer")
 
+# Gigs lane (former GigPilot). Not lazy: Typer's add_typer needs the actual
+# Typer instance at registration time, so the sub-app module must be imported
+# here. Its import cost is small (no network; state paths resolve from env).
+from jobpilot.gigs.cli import app as gigs_app  # noqa: E402
+
+app.add_typer(
+    gigs_app,
+    name="gigs",
+    help="Freelance-gig radar: scan sources, score, digest, push",
+)
+
 
 def _answers_dir() -> Path:
     """Root for stored answers: projects/jobpilot/data/answers/."""
