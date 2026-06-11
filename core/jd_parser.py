@@ -236,9 +236,9 @@ class JDParser:
         """Extract common tech skills mentioned in the JD text."""
         # Ordered by specificity so longer matches are preferred
         _SKILL_PATTERNS = [
-            "TypeScript", "JavaScript", "Python", "Java", "C\\+\\+", "C#", "Go",
+            "TypeScript", "JavaScript", "Python", "Java", "C++", "C#", "Go",
             "Rust", "Ruby", "Swift", "Kotlin", "Scala", "PHP",
-            "React", "Angular", "Vue", "Next\\.js", "Node\\.js", "Django",
+            "React", "Angular", "Vue", "Next.js", "Node.js", "Django",
             "Flask", "Spring", "FastAPI", "Express",
             "AWS", "Azure", "GCP", "Docker", "Kubernetes", "Terraform",
             "PostgreSQL", "MySQL", "MongoDB", "Redis", "ElasticSearch",
@@ -249,9 +249,15 @@ class JDParser:
         ]
         found = []
         for skill in _SKILL_PATTERNS:
-            if re.search(rf"\b{skill}\b", text, re.IGNORECASE):
+            # \b after a non-word char (e.g. "C++", "C#") requires a following
+            # word char, so it never matches before whitespace/punctuation.
+            # Use an explicit lookahead for those skills instead.
+            if re.search(r"\w$", skill):
+                tail = r"\b"
+            else:
+                tail = r"(?=\s|$|[,.;)])"
+            if re.search(rf"\b{re.escape(skill)}{tail}", text, re.IGNORECASE):
                 # Use the canonical casing from the list
-                canonical = skill.replace("\\", "")
-                if canonical not in found:
-                    found.append(canonical)
+                if skill not in found:
+                    found.append(skill)
         return found

@@ -18,7 +18,7 @@ from jobpilot.core.config import FILL_RETRIES, FILL_RETRY_DELAY_MS
 from jobpilot.core.events import (
     EventBus,
     FIELD_FILLED, FIELD_SKIPPED, FIELD_EDITED,
-    INFO, WARNING, ERROR,
+    INFO,
 )
 from jobpilot.core.linkedin_parser import SemanticType, FieldType
 from jobpilot.core.question_matcher import QuestionMatcher
@@ -95,9 +95,20 @@ class ApplicationEngine:
                         "el => el.closest('.fb-form-element, "
                         ".jobs-easy-apply-form-element') || el.parentElement"
                     )
-                    option = await parent.query_selector(
-                        f'label:has-text("{value}")'
-                    )
+                    # Never interpolate form data into a selector — scan the
+                    # labels and compare text in Python instead.
+                    option = None
+                    wanted = " ".join(value.lower().split())
+                    for lbl in await parent.query_selector_all("label"):
+                        try:
+                            text = " ".join(
+                                (await lbl.inner_text()).lower().split()
+                            )
+                        except Exception:
+                            continue
+                        if wanted and wanted in text:
+                            option = lbl
+                            break
                     if option:
                         await option.click()
                     else:
@@ -235,37 +246,6 @@ class ApplicationEngine:
                 log.info("Auto-advanced to next step")
         except Exception as e:
             log.warning("Auto-advance failed: %s", e)
-
-    # -- browser-use integration (Next-Gen) ----------------------------------
-
-    async def run_browser_agent(self, task_description: str) -> None:
-        """Hand off current CDP session to Browser-Use LLM Agent."""
-        import os
-        try:
-            from langchain_google_genai import ChatGoogleGenerativeAI
-            from browser_use import Agent
-        except ImportError:
-            log.error("browser-use or langchain not installed")
-            return
-
-        api_key = os.getenv("GOOGLE_API_KEY", "")
-        if not api_key:
-            log.warning("GOOGLE_API_KEY missing, cannot start browser-use")
-            self.events.emit(WARNING, message="Missing GOOGLE_API_KEY for browser-use")
-            return
-
-        llm = ChatGoogleGenerativeAI(model="gemini-3.1-pro", api_key=api_key)
-        self.events.emit(INFO, message=f"🤖 Handing off to browser-use: {task_description}")
-        log.info("Starting browser-use agent for: %s", task_description)
-        
-        try:
-            # We scaffold the agent. To execute, browser-use needs to bind to the active CDP context.
-            # E.g.: agent = Agent(task=task_description, llm=llm, browser=self.bridge._browser)
-            # await agent.run()
-            self.events.emit(INFO, message="[Browser-Use Agent scaffold instantiated]")
-        except Exception as e:
-            log.error("Browser-Use agent failed: %s", e)
-            self.events.emit(ERROR, message=f"Agent error: {e}")
 
     # -- chat dispatch -------------------------------------------------------
 

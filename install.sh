@@ -92,7 +92,7 @@ ok "JobPilot installed"
 
 # ── 7. Install Chromium for browser automation ────────────────────────────────
 say "Installing browser components..."
-playwright install chromium --quiet
+playwright install chromium
 ok "Browser ready"
 
 # ── 8. Shell activation shortcut ─────────────────────────────────────────────
@@ -103,12 +103,13 @@ elif [[ "$SHELL" == *"bash"* ]]; then
   SHELL_RC="$HOME/.bash_profile"
 fi
 
-ACTIVATE_LINE="# JobPilot — auto-activate when in jobpilot directory"
-if [[ -n "$SHELL_RC" ]] && ! grep -q "jobpilot/activate-jobpilot" "$SHELL_RC" 2>/dev/null; then
+if [[ -n "$SHELL_RC" ]] && ! grep -qF "# >>> jobpilot >>>" "$SHELL_RC" 2>/dev/null; then
   cat >> "$SHELL_RC" << 'SHELLBLOCK'
 
+# >>> jobpilot >>>
 # JobPilot — activate Python environment
 alias jobpilot-start='source ~/jobpilot/.venv/bin/activate && echo "JobPilot ready. Type jobpilot --help to see commands."'
+# <<< jobpilot <<<
 SHELLBLOCK
   ok "Added 'jobpilot-start' shortcut to $SHELL_RC"
 fi

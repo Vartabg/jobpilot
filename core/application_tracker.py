@@ -205,12 +205,16 @@ class ApplicationTracker:
         conn = self._get_conn()
 
         if title:
+            # Prefer an exact-URL match over a company+title match, and break
+            # company+title ties by most recently updated row, so the row we
+            # update is deterministic (and never steals a URL another row owns).
             existing = conn.execute(
                 """SELECT id, job_url FROM applications
                    WHERE job_url = ?
                       OR (LOWER(company) = LOWER(?) AND LOWER(COALESCE(job_title,'')) = LOWER(?))
+                   ORDER BY (job_url = ?) DESC, updated_at DESC, id DESC
                    LIMIT 1""",
-                (normalized_url, company, title),
+                (normalized_url, company, title, normalized_url),
             ).fetchone()
         else:
             existing = conn.execute(
@@ -220,16 +224,35 @@ class ApplicationTracker:
 
         if existing:
             stored_url = normalized_url if has_real_url else existing["job_url"]
-            conn.execute(
-                """UPDATE applications
-                   SET job_url = ?,
-                       job_title = COALESCE(NULLIF(?, ''), job_title),
-                       company = ?,
-                       status = ?,
-                       updated_at = ?
-                   WHERE id = ?""",
-                (stored_url, title, company, normalized_status, now, existing["id"]),
-            )
+            try:
+                conn.execute(
+                    """UPDATE applications
+                       SET job_url = ?,
+                           job_title = COALESCE(NULLIF(?, ''), job_title),
+                           company = ?,
+                           status = ?,
+                           updated_at = ?
+                       WHERE id = ?""",
+                    (stored_url, title, company, normalized_status, now, existing["id"]),
+                )
+            except sqlite3.IntegrityError:
+                # The URL already belongs to a different row — it's the same
+                # application, so update that row instead of crashing.
+                owner = conn.execute(
+                    "SELECT id FROM applications WHERE job_url = ? LIMIT 1",
+                    (stored_url,),
+                ).fetchone()
+                if owner is None:
+                    raise
+                conn.execute(
+                    """UPDATE applications
+                       SET job_title = COALESCE(NULLIF(?, ''), job_title),
+                           company = ?,
+                           status = ?,
+                           updated_at = ?
+                       WHERE id = ?""",
+                    (title, company, normalized_status, now, owner["id"]),
+                )
         else:
             stored_url = normalized_url
             conn.execute(

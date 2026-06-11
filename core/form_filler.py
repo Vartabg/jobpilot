@@ -10,6 +10,7 @@ Stops before submit.
 from __future__ import annotations
 
 import asyncio
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -23,6 +24,27 @@ from jobpilot.core.resume_tailor import ResumeTailor
 log = get_logger(__name__)
 
 DEFAULT_REFERRAL_SOURCE = "LinkedIn"
+
+# Default answer for EEOC / demographic self-identification questions when the
+# user hasn't provided one in their profile: decline to self-identify. This is
+# a PIPE-SEPARATED synonym list — the option matchers try each variant in turn
+# because every ATS words the "decline" option differently.
+DECLINE_TO_SELF_IDENTIFY = (
+    "Prefer not to say||I don't wish to answer||I do not wish to answer||"
+    "Decline to answer||Decline to self-identify||Decline to self identify||"
+    "Don't wish to identify||Rather not say||Choose not to identify"
+)
+
+# Where to look in profile.custom_answers when profile.demographics is absent
+# (older profiles stored demographic answers as question-keyed custom answers).
+_DEMOGRAPHIC_CUSTOM_ANSWER_HINTS: dict[str, tuple[str, ...]] = {
+    "gender": ("gender",),
+    "sexual_orientation": ("sexual orientation",),
+    "hispanic": ("hispanic", "latino"),
+    "race": ("race", "ethnicity"),
+    "veteran": ("veteran",),
+    "disability": ("disability",),
+}
 
 DISALLOWED_FORM_LOCATION_PATTERNS = (
     "authorized to work in the uk",
@@ -115,6 +137,36 @@ def _field_to_value(label: str, profile: UserProfile) -> Optional[str]:
     return None
 
 
+def _demographic_value(profile: UserProfile, key: str) -> str:
+    """Resolve a demographic (EEOC self-identification) answer.
+
+    Demographic answers are NEVER hardcoded — they belong to the user.
+    Sources, in priority order:
+      1. ``profile.demographics[key]`` — the dedicated demographics block
+         (keys: veteran, gender, race, hispanic, disability,
+         sexual_orientation).
+      2. ``profile.custom_answers`` — question-keyed answers from older
+         profiles (e.g. "Veteran Status": "...").
+      3. ``DECLINE_TO_SELF_IDENTIFY`` — when unset we decline to identify
+         rather than assert anything on the user's behalf.
+
+    Values may be "||"-separated synonym lists; the option matchers try
+    each variant in turn.
+    """
+    demographics = getattr(profile, "demographics", None)
+    if isinstance(demographics, dict):
+        value = (demographics.get(key) or "").strip()
+        if value:
+            return value
+    answers = getattr(profile, "custom_answers", None) or {}
+    hints = _DEMOGRAPHIC_CUSTOM_ANSWER_HINTS.get(key, ())
+    for question, answer in answers.items():
+        ql = question.lower()
+        if answer and any(h in ql for h in hints):
+            return answer
+    return DECLINE_TO_SELF_IDENTIFY
+
+
 def _yesno_for_question(label: str, profile: UserProfile) -> Optional[str]:
     l = label.lower()
     if any(p in l for p in [
@@ -145,21 +197,23 @@ def _yesno_for_question(label: str, profile: UserProfile) -> Optional[str]:
     ]):
         return None  # user decides — better to leave blank than say Yes too early
 
-    # EEOC / self-identification questions — return a PIPE-SEPARATED synonym
-    # list so the select/dropdown matcher can find ANY of these substrings in
-    # the option text. The answer_selects code splits on "||" and tries each.
-    if "gender identity" in l:
-        return "Prefer not to say||I don't wish to answer||Decline to answer||Rather not say||Choose not to identify"
-    if "gender" in l and "violence" not in l:
-        return "Prefer not to say||I don't wish to answer||Decline to answer||Rather not say"
-    if "race" in l or "ethnicity" in l:
-        return "Decline to answer||I don't wish to answer||Prefer not to say||Decline to self-identify||Don't wish to identify"
+    # EEOC / self-identification questions — answers come from the user's
+    # profile via _demographic_value (default: decline to self-identify).
+    # Returns a PIPE-SEPARATED synonym list so the select/dropdown matcher
+    # can find ANY of these substrings in the option text. The answer_selects
+    # code splits on "||" and tries each.
+    if "gender identity" in l or ("gender" in l and "violence" not in l):
+        return _demographic_value(profile, "gender")
+    if "sexual orientation" in l:
+        return _demographic_value(profile, "sexual_orientation")
     if "hispanic" in l or "latino" in l:
-        return "Decline to answer||I don't wish to answer||No, not Hispanic||Not Hispanic||Prefer not to say"
+        return _demographic_value(profile, "hispanic")
+    if "race" in l or "ethnicity" in l:
+        return _demographic_value(profile, "race")
     if "veteran" in l:
-        return "I identify as a protected veteran||Protected veteran||Veteran"
-    if "disability" in l:
-        return "I don't wish to answer||Prefer not to say||Decline to answer||No, I don't have||I do not have a disability"
+        return _demographic_value(profile, "veteran")
+    if "disability" in l or "disabled" in l:
+        return _demographic_value(profile, "disability")
 
     # Okta-style conflict-of-interest / prior-employment dropdowns — default No
     if any(p in l for p in [
@@ -179,6 +233,31 @@ def _yesno_for_question(label: str, profile: UserProfile) -> Optional[str]:
         if ql in l or l in ql:
             return a
     return None
+
+
+def _normalize_option_text(text: str) -> str:
+    return " ".join((text or "").lower().split())
+
+
+def _radio_option_matches(candidate: str, radio_label: str, radio_value: str) -> bool:
+    """Match a radio option strictly — exact text or whole-word match only.
+
+    Plain substring matching is too loose here: the answer "No" must not
+    match "None of the above" or "Not sure". Mirrors the stricter select
+    matcher: exact normalized equality first, then a word-boundary search
+    for answers embedded in verbose labels ("No, I do not require...").
+    """
+    needle = _normalize_option_text(candidate)
+    if not needle:
+        return False
+    for haystack in (_normalize_option_text(radio_label), _normalize_option_text(radio_value)):
+        if not haystack:
+            continue
+        if needle == haystack:
+            return True
+        if re.search(rf"(?<!\w){re.escape(needle)}(?!\w)", haystack):
+            return True
+    return False
 
 
 def _detect_disallowed_form_location(text: str) -> Optional[str]:
@@ -491,18 +570,32 @@ async def _answer_yesno_radios(page: Page, profile: UserProfile) -> list[str]:
             if not target:
                 continue
             radios = await group.query_selector_all('input[type="radio"]')
+            options = []
             for radio in radios:
                 try:
                     radio_label = await _label_text(page, radio)
                     radio_value = (await radio.get_attribute("value")) or ""
-                    check_text = f"{radio_label} {radio_value}".lower()
-                    if target.lower() in check_text:
-                        await radio.check()
-                        answered.append(f"{question[:50]} → {target}")
-                        await asyncio.sleep(0.15)
-                        break
+                    options.append((radio, radio_label, radio_value))
                 except Exception:
                     continue
+            # Try each "||" synonym in priority order; exact/word-boundary
+            # match only — "No" must not grab "None of the above".
+            candidates = [t.strip() for t in target.split("||")] if "||" in target else [target]
+            for cand in candidates:
+                match = next(
+                    (
+                        (radio, radio_label)
+                        for radio, radio_label, radio_value in options
+                        if _radio_option_matches(cand, radio_label, radio_value)
+                    ),
+                    None,
+                )
+                if match:
+                    radio, radio_label = match
+                    await radio.check()
+                    answered.append(f"{question[:50]} → {(radio_label or cand)[:40]}")
+                    await asyncio.sleep(0.15)
+                    break
         except Exception as e:
             log.debug("Radio group handling failed: %s", e)
             continue
@@ -760,7 +853,7 @@ async def _check_required_acknowledgments(page: Page) -> list[str]:
                         )
                     except Exception:
                         continue
-                checked.append(f"☑ {label[:60]}")
+                checked.append(f"☑ {label[:60]} [checked for you — please read]")
                 await asyncio.sleep(0.15)
         except Exception as e:
             log.debug("Checkbox handling failed: %s", e)
@@ -805,7 +898,8 @@ async def fill_application(
             except Exception as e:
                 log.warning("Navigation commit failed, trying window.location: %s", e)
                 try:
-                    await page.evaluate(f"window.location.href = '{job_url}'")
+                    # Parameterized — never interpolate ATS-sourced URLs into JS
+                    await page.evaluate("u => { window.location.href = u; }", job_url)
                     await asyncio.sleep(8)
                 except Exception as e2:
                     return FillResult(success=False, error=f"Could not load {job_url}: {e2}")
@@ -970,34 +1064,9 @@ async def fill_application(
 async def submit_application(cdp_port: int = 9222) -> tuple[bool, str]:
     """Submit is disabled by policy.
 
-    JobPilot may fill and stage applications, but Garo clicks the final submit
-    button himself. Keep this function as a hard fence so future integrations
-    cannot accidentally resurrect an auto-submit path by importing it.
+    JobPilot may fill and stage applications, but the user clicks the final
+    submit button themselves. Keep this function as a hard fence so future
+    integrations cannot accidentally resurrect an auto-submit path by
+    importing it.
     """
-    return False, "Auto-submit disabled: Garo must click the final submit button."
-
-
-async def _legacy_submit_application_disabled(cdp_port: int = 9222) -> tuple[bool, str]:
-    """Compatibility shim for old imports; submit remains disabled."""
-    return await submit_application(cdp_port)
-
-
-async def capture_form_screenshot(cdp_port: int = 9222, out_path: Optional[str] = None) -> Optional[str]:
-    """Capture a screenshot of the currently active Chrome tab for review."""
-    cdp_url = f"http://127.0.0.1:{cdp_port}"
-    try:
-        async with async_playwright() as p:
-            browser = await p.chromium.connect_over_cdp(cdp_url)
-            if not browser.contexts:
-                return None
-            ctx = browser.contexts[0]
-            pages = ctx.pages
-            if not pages:
-                return None
-            page = pages[-1]  # most recent tab — where the form was filled
-            out = out_path or "/tmp/jobpilot_preview.png"
-            await page.screenshot(path=out, full_page=True)
-            return out
-    except Exception as e:
-        log.warning("Screenshot failed: %s", e)
-        return None
+    return False, "Auto-submit disabled: you must click the final submit button yourself."

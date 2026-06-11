@@ -29,8 +29,8 @@ dependencies = [
     "typer>=0.9.0",
     "pydantic>=2.0.0",
     "rapidfuzz>=3.0.0",
-    "browser-use>=0.1.0",
-    "langchain-google-genai>=1.0.0",
+    "fastapi>=0.100.0",
+    "uvicorn>=0.23.0",
 ]
 
 [project.optional-dependencies]
@@ -60,6 +60,5 @@ include = [
     "core/*.py",
     "ui/*.py",
     "learning/*.py",
-    "data/*.json",
     "scripts/*.sh",
 ]

@@ -59,6 +59,12 @@ class UserProfile(BaseModel):
     # Key: question pattern, Value: your answer
     custom_answers: dict[str, str] = Field(default_factory=dict)
 
+    # EEOC self-identification answers (all optional). Keys: veteran, gender,
+    # race, disability, sexual_orientation, hispanic. Unset keys decline to
+    # self-identify. Without this field pydantic would silently drop the
+    # block from profile.json on the next save.
+    demographics: dict[str, str] = Field(default_factory=dict)
+
 
 class ProfileStore:
     """Manages loading/saving of user profile data"""
