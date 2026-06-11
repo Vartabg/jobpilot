@@ -44,7 +44,7 @@ def test_tailor_generates_markdown_resume(tmp_path: Path):
     resume_source = tmp_path / "resume.md"
     resume_source.write_text(
         """
-# Garo Vartabedian
+# Alex Sample
 
 Senior Frontend Engineer with deep React, TypeScript, and visualization experience.
 Built UI systems, internal tools, and AI-assisted workflows.
@@ -53,14 +53,14 @@ Built UI systems, internal tools, and AI-assisted workflows.
 
     store = ProfileStore(data_dir=tmp_path)
     profile = store.load()
-    profile.first_name = "Garo"
-    profile.last_name = "Vartabedian"
-    profile.email = "garo@example.com"
+    profile.first_name = "Alex"
+    profile.last_name = "Sample"
+    profile.email = "alex@example.com"
     profile.current_title = "Senior Frontend Engineer"
-    profile.current_company = "ATXBro"
+    profile.current_company = "Example Labs"
     profile.years_of_experience = 8
-    profile.linkedin_url = "https://linkedin.com/in/garovartabedian"
-    profile.github_url = "https://github.com/Vartabg"
+    profile.linkedin_url = "https://linkedin.com/in/alexsample"
+    profile.github_url = "https://github.com/alexsample"
     profile.resume_path = str(resume_source)
     profile.custom_answers = {
         "skills": "React TypeScript Python GitHub Actions visualization AI automation"
@@ -120,8 +120,8 @@ def test_tailor_reads_text_from_pdf_resume(tmp_path: Path):
 def test_tailor_falls_back_without_resume_file(tmp_path: Path):
     store = ProfileStore(data_dir=tmp_path)
     profile = store.load()
-    profile.first_name = "Garo"
-    profile.last_name = "Vartabedian"
+    profile.first_name = "Alex"
+    profile.last_name = "Sample"
     profile.current_title = "Frontend Engineer"
     profile.years_of_experience = 5
     profile.resume_path = str(tmp_path / "missing.pdf")

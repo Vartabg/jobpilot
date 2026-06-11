@@ -12,6 +12,7 @@ from typing import Optional, Protocol
 
 from jobpilot.core.bro_client import chat as bro_chat, is_bro_running, query_rag
 from jobpilot.core.jd_parser import JDParser, ParsedJD
+from jobpilot.core.policy_config import Policy, get_policy
 from jobpilot.core.profile_store import ProfileStore, UserProfile, get_profile_store
 
 
@@ -20,34 +21,6 @@ _STOPWORDS = {
     "engineer", "engineering", "developer", "software", "senior", "staff",
     "principal", "lead", "manager", "role", "job",
 }
-
-
-# ── Supreme-pin alignment filter ──────────────────────────────────
-# See ~/.claude/projects/-Users-vartny-AI-Workspace/memory/feedback_jesus_is_the_standard.md
-# Refused categories: state-military / mass-surveillance / state-deportation / kill-chain integrations.
-_REFUSED_COMPANIES = frozenset({
-    "palantir",  # Mass-surveillance, ICE-targeting, Project Maven kill-chain AI
-})
-
-# Title-keyword refusal — federal-customer-named roles regardless of company
-_REFUSED_TITLE_KEYWORDS = frozenset({
-    "federal civilian",
-    "government technology",
-    "national security",
-    "state and local government",
-    "us government",
-    "us govt",
-    "department of defense",
-    "department of homeland",
-    "public sector",
-    "intelligence community",
-})
-
-# Deprioritized companies — alignment-OK but conversion-rate filter applies
-# See ~/.claude/projects/-Users-vartny-AI-Workspace/memory/feedback_anthropic_conversion_rate.md
-_DEPRIORITIZED_COMPANIES = frozenset({
-    "anthropic",  # Zero prior conversion for this profile
-})
 
 
 @dataclass
@@ -74,9 +47,16 @@ class SupportsProfileLoad(Protocol):
 class JobScorer:
     """Compute a lightweight, explainable job-fit score."""
 
-    def __init__(self, profile_store: ProfileStore | SupportsProfileLoad | None = None, *, use_bro: bool = True):
+    def __init__(
+        self,
+        profile_store: ProfileStore | SupportsProfileLoad | None = None,
+        *,
+        use_bro: bool = True,
+        policy: Policy | None = None,
+    ):
         self.profile_store = profile_store or get_profile_store()
         self.use_bro = use_bro
+        self.policy = policy or get_policy()
 
     def score_text(
         self,
@@ -101,11 +81,12 @@ class JobScorer:
     def score_parsed_jd(self, parsed_jd: ParsedJD) -> JobFitResult:
         """Score an already-parsed JD object.
 
-        Applies the supreme-pin alignment filter first. Refused-category roles
-        short-circuit to score=0 + REFUSED recommendation regardless of other
-        components (via -100 Alignment penalty clamped at 0). Deprioritized
-        roles (Anthropic per the conversion-rate pin) receive a -25 penalty
-        and a downgraded recommendation tier.
+        Applies the user's policy filter (``data/policy.json``) first.
+        Roles matching a refused company or title keyword short-circuit to
+        score=0 + REFUSED recommendation regardless of other components
+        (via -100 Alignment penalty clamped at 0). Deprioritized companies
+        receive a -25 penalty and a downgraded recommendation tier. The
+        shipped defaults refuse and deprioritize nothing.
         """
         profile = self.profile_store.load()
         raw_text = parsed_jd.raw_text or parsed_jd.summary()
@@ -115,11 +96,11 @@ class JobScorer:
         matched_skills = [skill for skill in jd_skills if skill.lower() in candidate_skills]
         missing_skills = [skill for skill in jd_skills if skill.lower() not in candidate_skills]
 
-        # Supreme-pin alignment filter (applied first; can short-circuit total)
+        # Policy filter (applied first; can short-circuit the total)
         alignment_status, alignment_rationale = self._check_alignment(parsed_jd)
         if alignment_status == "refused":
             alignment_points = -100  # forces total to 0 via the clamp below
-        elif alignment_status == "deprioritized_anthropic":
+        elif alignment_status == "deprioritized":
             alignment_points = -25
         else:
             alignment_points = 0
@@ -277,54 +258,51 @@ class JobScorer:
         return 7
 
     def _check_alignment(self, parsed_jd: ParsedJD) -> tuple[str, str]:
-        """Apply the supreme-pin alignment filter.
+        """Apply the user's policy filter (``data/policy.json``).
 
         Returns (status, rationale) where status is one of:
-            "refused"                  — deployment-surface contradicts the supreme pin
-            "deprioritized_anthropic"  — Anthropic role (zero prior conversion per pin)
-            "aligned"                  — passes alignment filter
-
-        Reference: ~/.claude/projects/-Users-vartny-AI-Workspace/memory/feedback_jesus_is_the_standard.md
+            "refused"        — company or title matches the policy's refused lists
+            "deprioritized"  — company is configured as deprioritized
+            "aligned"        — no policy entry matched (always, with defaults)
         """
+        scoring = self.policy.scoring
         company_lower = (parsed_jd.company or "").lower()
         title_lower = (parsed_jd.title or "").lower()
 
         # Hard refused — company-level
-        for refused_co in _REFUSED_COMPANIES:
+        for refused_co, reason in scoring.refused_companies.items():
             if refused_co in company_lower:
-                return (
-                    "refused",
-                    f"Refused: {refused_co.title()} — primary product is state-customer / "
-                    "surveillance / kill-chain infrastructure (supreme pin)",
-                )
+                rationale = f"Refused by policy: {refused_co.title()}"
+                if reason:
+                    rationale += f" — {reason}"
+                return ("refused", rationale)
 
-        # Hard refused — title-level (federal-customer keywords regardless of company)
-        for keyword in _REFUSED_TITLE_KEYWORDS:
+        # Hard refused — title-level (keywords matched regardless of company)
+        for keyword, reason in scoring.refused_title_keywords.items():
             if keyword in title_lower:
-                return (
-                    "refused",
-                    f"Refused: title contains '{keyword}' — state-customer routing (supreme pin)",
-                )
+                rationale = f"Refused by policy: title contains '{keyword}'"
+                if reason:
+                    rationale += f" — {reason}"
+                return ("refused", rationale)
 
-        # Deprioritized — Anthropic (zero prior conversion for this profile)
-        for dep_co in _DEPRIORITIZED_COMPANIES:
+        # Deprioritized — penalized and downgraded, but not zeroed
+        for dep_co, reason in scoring.deprioritized_companies.items():
             if dep_co in company_lower:
-                return (
-                    "deprioritized_anthropic",
-                    f"{dep_co.title()}: zero prior conversion for this profile; "
-                    "treat as low-conversion (see feedback_anthropic_conversion_rate.md)",
-                )
+                rationale = f"{dep_co.title()}: deprioritized by policy"
+                if reason:
+                    rationale += f" — {reason}"
+                return ("deprioritized", rationale)
 
         return ("aligned", "")
 
     @staticmethod
     def _recommendation(score: int, alignment_status: str = "aligned") -> str:
         if alignment_status == "refused":
-            return "REFUSED on alignment grounds — do not submit"
-        if alignment_status == "deprioritized_anthropic":
+            return "REFUSED by policy — do not submit"
+        if alignment_status == "deprioritized":
             if score >= 65:
-                return "Aligned but deprioritized (Anthropic conversion-rate) — Garo-override required"
-            return "Aligned but deprioritized — low conversion likelihood"
+                return "Aligned but deprioritized by policy — manual override required"
+            return "Aligned but deprioritized — low priority"
         if score >= 80:
             return "Strong fit — prioritize"
         if score >= 65:

@@ -14,7 +14,7 @@ def test_doctor_reports_ok_for_healthy_setup(tmp_path: Path):
 
     profile_store = ProfileStore(data_dir=tmp_path)
     profile = profile_store.load()
-    profile.first_name = "Garo"
+    profile.first_name = "Alex"
     profile.resume_path = str(resume)
     profile_store.save(profile)
 

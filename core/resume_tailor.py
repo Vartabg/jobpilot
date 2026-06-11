@@ -1,7 +1,8 @@
 """ATS-tailored resume draft generation for JobPilot.
 
 Creates a role-specific markdown resume draft from the local profile, optional
-resume text, job description signals, and Bro/RAG context when available.
+resume text, job description signals, and AI context when a backend is
+available (local Bro server or the Gemini API via GEMINI_API_KEY).
 """
 
 from __future__ import annotations
@@ -16,7 +17,8 @@ from html import escape
 from pathlib import Path
 from typing import Optional, cast
 
-from jobpilot.core.bro_client import chat as bro_chat, is_bro_running, query_rag
+from jobpilot.core import llm_client
+from jobpilot.core.bro_client import is_bro_running, query_rag
 from jobpilot.core.job_scorer import JobFitResult, JobScorer
 from jobpilot.core.logger import get_logger
 from jobpilot.core.profile_store import ProfileStore, UserProfile, get_profile_store
@@ -412,14 +414,17 @@ class ResumeTailor:
         profile: UserProfile,
         fit_result: JobFitResult,
     ) -> list[str]:
-        if not self.use_bro or not is_bro_running():
+        if not self.use_bro or not llm_client.is_available():
             return []
 
         parsed = fit_result.parsed_jd
-        context = query_rag(
-            f"Summarize the candidate background most relevant to {parsed.title or 'this role'} at {parsed.company or 'the company'}",
-            top_k=4,
-        )
+        # RAG context only exists on the local Bro backend.
+        context = ""
+        if is_bro_running():
+            context = query_rag(
+                f"Summarize the candidate background most relevant to {parsed.title or 'this role'} at {parsed.company or 'the company'}",
+                top_k=4,
+            )
         prompt = (
             "Write exactly 3 ATS-friendly resume summary bullets. "
             "Each bullet must be concise, truthful, and specific to the job target. "
@@ -429,8 +434,10 @@ class ResumeTailor:
             f"Job target: {parsed.summary()}\n"
             f"Matched skills: {', '.join(fit_result.matched_skills) or 'none'}\n"
         )
-        reply = bro_chat(prompt, context=context or None, force_smart=True)
-        if not reply or reply.startswith("Error") or "not running" in reply.lower():
+        try:
+            reply = llm_client.complete(prompt, context=context or None, smart=True)
+        except llm_client.LLMUnavailable as exc:
+            log.debug("AI summary skipped, using template fallback: %s", exc)
             return []
 
         bullets: list[str] = []

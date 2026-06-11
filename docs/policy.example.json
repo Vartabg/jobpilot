@@ -1,0 +1,57 @@
+{
+  "_doc": "JobPilot policy template. Copy to data/policy.json (gitignored) and edit: `cp docs/policy.example.json data/policy.json`. Every section is optional — anything you leave out falls back to the neutral defaults (nothing refused, nothing deprioritized, location gate off). Keys starting with '_' are documentation only and are ignored by the loader. All matching is case-insensitive substring matching unless noted.",
+
+  "scoring": {
+    "_doc": "Consumed by the pre-apply fit scorer (core/job_scorer.py).",
+
+    "refused_companies": {
+      "_doc": "Companies you refuse to apply to, as a {name: reason} map. A match hard-zeros the fit score and the recommendation becomes 'REFUSED by policy'. The reason shows up in the score's risk list; use \"\" to omit it. A plain list of names also works.",
+      "example corp": "why you refuse them"
+    },
+
+    "refused_title_keywords": {
+      "_doc": "Title substrings that hard-zero the fit score regardless of company.",
+      "example keyword": "why roles like this are refused"
+    },
+
+    "deprioritized_companies": {
+      "_doc": "Companies that get a -25 score penalty and a downgraded recommendation instead of a hard refusal (e.g. places where applying has never converted for you).",
+      "example inc": "why they are deprioritized"
+    }
+  },
+
+  "queue": {
+    "_doc": "Consumed by the queue builder / Lane-C scorer (core/queue_builder.py).",
+
+    "_doc_title_kill_keywords": "Title substrings that hard-gate a job to score 5 so it never ranks. Typical use: management-ladder titles you never want queued.",
+    "title_kill_keywords": ["senior manager", "vice president"],
+
+    "_doc_moat_company_tags": "{company: industry-tag} map, assigned at scan time because JD text is not fetched. Tags listed in high_moat_industries earn full vertical-moat points (25); other tagged industries earn 15; untagged companies earn the neutral 6.",
+    "moat_company_tags": {
+      "example corp": "healthcare_ops"
+    },
+
+    "_doc_high_moat_industries": "Industry tags (from moat_company_tags) where you have deep lived experience — your vertical moat.",
+    "high_moat_industries": ["healthcare_ops"],
+
+    "_doc_excluded_industries": "Industry tags you want softly excluded: their logistics sub-score is slashed to 2 instead of being hard-gated.",
+    "excluded_industries": [],
+
+    "_doc_company_hq": "Optional {company: city} additions/overrides to the built-in factual company-to-HQ table, used as a location fallback when a posting carries no location.",
+    "company_hq": {
+      "example corp": "Austin"
+    },
+
+    "location_gate": {
+      "_doc": "Hard location gate. Disabled by default — every location passes. When enabled, a job qualifies only if its LOCATION fields (role location, falling back to company HQ) match allowed_locations, remote_terms, or country_terms. The job title can only disqualify (via blocked terms), never qualify — so a title like 'Help us build…' cannot pass a US gate through the word 'us'. All terms are word-anchored: 'us' matches 'Austin, US' but not 'status'.",
+      "enabled": false,
+      "allowed_locations": ["new york", "austin"],
+      "remote_terms": ["remote"],
+      "country_terms": ["united states", "usa", "us"],
+      "_doc_blocked_locations": "Hard blocks, checked against both the location fields and the title.",
+      "blocked_locations": ["london", "europe"],
+      "_doc_blocked_without_country": "Blocked unless a country term also appears in the location — e.g. 'canada' blocks 'Remote Canada' but allows 'Remote US/Canada'.",
+      "blocked_without_country": ["canada"]
+    }
+  }
+}

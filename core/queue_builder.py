@@ -26,6 +26,7 @@ from typing import Any, Optional
 from jobpilot.core.application_tracker import get_application_tracker
 from jobpilot.core.config import DATA_DIR
 from jobpilot.core.logger import get_logger
+from jobpilot.core.policy_config import get_policy, reset_policy_cache
 from jobpilot.core.portal_scanner import PortalJob, PortalScanner, ScanTarget
 
 PSYCHE_PROFILE_PATH = DATA_DIR / "psyche_profile.json"
@@ -116,23 +117,32 @@ def _load_portal_notes() -> dict[str, str]:
 
 
 def reset_caches() -> None:
-    """Drop module-level caches so subsequent builds re-read profile + notes."""
+    """Drop module-level caches so subsequent builds re-read profile, notes + policy."""
     global _psyche_profile_cache, _portal_notes_cache
     _psyche_profile_cache = None
     _portal_notes_cache = None
+    reset_policy_cache()
 
 
-# --- Lane-C scoring formula (memory pins: user_work_values_anticorporate,
-#     user_location, feedback_anthropic_conversion_rate). Replaces the old
-#     keyword-density scorer that floored everything at 30 — that floor was
-#     masking real mis-fit.
+def __getattr__(name: str):
+    # Backwards-compat: MOAT_COMPANY_TAGS used to be a module-level constant;
+    # it now lives in the user's policy (data/policy.json, empty by default).
+    if name == "MOAT_COMPANY_TAGS":
+        return get_policy().queue.moat_company_tags
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+# --- Lane-C scoring formula. Replaces the old keyword-density scorer that
+#     floored everything at 30 — that floor was masking real mis-fit.
 #
 #     Weights (sum = 100):
-#       Vertical moat (30) · Tier-fit / inverse prestige (25)
-#       Function coherence (20) · Skill overlap (15) · Logistics fit (10)
+#       Vertical moat (25) · Tier-fit (20) · Function coherence (18)
+#       · Skill overlap (12) · Logistics (10) · Psycho-fit (15)
 #
-#     Hard gates zero the score: senior-bureaucrat ladder titles,
-#     out-of-list locations, mega-cap / public prestige companies.
+#     Hard gates zero the score: title kill-keywords and out-of-list
+#     locations, both configured in data/policy.json (see
+#     docs/policy.example.json). With the shipped defaults nothing is
+#     gated: no kill-keywords, location gate off.
 
 LANE_A_FUNCTION_HITS = (
     "forward deployed", "fde", "solutions engineer", "sales engineer",
@@ -140,87 +150,11 @@ LANE_A_FUNCTION_HITS = (
     "implementation engineer", "deployment engineer",
 )
 FOUNDING_HITS = ("founding",)
-SENIOR_BUREAUCRAT_KILLS = (
-    "senior manager", "principal", "staff engineer",
-    "director", "vp ", "head of", "vice president",
-    "manager,", "manager -",
-)
-# Lived/moat industries (Navy electronics → field service → AV → AI builder).
-# Tag at scan time since we don't fetch JD text. Add entries when curating
-# portals.json. Industries in HIGH_MOAT below get full vertical-moat points.
-MOAT_COMPANY_TAGS = {
-    "haast":            "regtech",
-    "starbridge":       "govtech",
-    "promise":          "govtech_payments",
-    "clarion health":   "healthcare_ops",
-    "avallon ai":       "insurance_ops",
-    "bretton ai":       "fintech_compliance",   # tagged but excluded below
-    "decagon":          "ai_cx",
-    "pylon":            "ai_support",
-    "credal":           "ai_dev_tools",
-    "ravenna":          "ai_helpdesk",
-    "soff":             "manufacturing",         # very high moat
-    "happyrobot":       "logistics_ai",
-    "dataland":         "data_ai",
-    "airweave":         "ai_dev_tools",
-    "extend":           "ai_workflow",
-    "fern":             "ai_dev_tools",
-    "giga":             "ai",
-    "collectwise":      "ai_collections",
-    "corvera ai":       "ai",
-    "titan ai":         "banking_ai",
-    "scaled cognition": "ai_agents",
-    "growth protocol":  "ai_workflows",
-    "p-1 ai":           "engineering_ai",
-    "zymbly":           "aviation_maintenance",  # very high moat
-    "crustdata":        "ai_data",
-    "paratus health":   "healthcare_voice",
-    "arist":            "enablement",
-    "signal messenger": "infra_messaging",
-    "conduktor":        "infra_kafka",
-    "growthbook":       "feature_flags",
-}
-HIGH_MOAT_INDUSTRIES = {
-    "aviation_maintenance", "manufacturing", "healthcare_ops",
-    "healthcare_voice", "govtech", "govtech_payments", "regtech",
-    "logistics_ai", "ai_agents", "ai_workflows", "engineering_ai",
-}
-# Exclusions per PROFILE.md / feedback_anthropic_conversion_rate
-EXCLUDED_INDUSTRIES = {"fintech_compliance"}
 
-# user_location pin: active search is US-only, limited to these metros plus
-# remote. Location is a hard queue gate, not just a scoring preference.
-ALLOWED_CITY_LOCATION_HITS = (
-    "new york", "nyc",
-    "austin",
-    "denver",
-    "portland",
-    "seattle",
-    "bay area", "san francisco", "sf", "oakland", "berkeley",
-    "menlo park", "palo alto", "mountain view", "san mateo",
-    "redwood city", "san jose", "sunnyvale", "cupertino", "fremont",
-)
-REMOTE_LOCATION_HITS = ("remote",)
-US_LOCATION_HITS = (
-    "united states", "usa", "u s", "us",
-    "remote us", "us remote", "remote united states", "united states remote",
-)
-DISALLOWED_INTERNATIONAL_LOCATION_HITS = (
-    "london", "united kingdom", "uk", "berlin", "germany",
-    "europe", "emea", "latam", "apac",
-    "india", "singapore", "australia", "new zealand",
-    "german speaking", "french speaking", "dutch speaking", "italian speaking",
-    "move to the us", "relocate to the us",
-)
-CANADA_LOCATION_HITS = ("canada", "toronto", "vancouver")
-DISALLOWED_US_LOCATION_HITS = (
-    "boston", "atlanta", "washington dc", "washington", "dc",
-    "chicago", "los angeles", "miami", "philadelphia", "portland maine",
-)
-
-# Company HQ fallback — when the ATS API returns no location on a role,
-# substitute the company's HQ so the logistics gate still bites. Unknown
-# companies are excluded until they are tagged with an allowed HQ/remote signal.
+# Company HQ fallback — factual company → headquarters mapping. When the ATS
+# API returns no location on a role, substitute the company's HQ so the
+# location gate (if enabled in policy.json) still has something to bite on.
+# Extend or override per-user via `queue.company_hq` in data/policy.json.
 COMPANY_HQ = {
     "happyrobot":        "San Francisco",
     "soff":              "San Francisco",
@@ -260,35 +194,54 @@ def _has_location_hit(normalized_haystack: str, terms: tuple[str, ...]) -> bool:
     return False
 
 
+def _company_hq(company: str) -> str:
+    key = company.strip().lower()
+    policy_hq = get_policy().queue.company_hq
+    if key in policy_hq:
+        return policy_hq[key]
+    return COMPANY_HQ.get(key, "")
+
+
 def _effective_location(company: str, location: str | None) -> str:
     loc = (location or "").strip()
     if loc and loc.lower() != "not specified":
         return loc
-    return COMPANY_HQ.get(company.strip().lower(), "")
-
-
-def _location_haystack(title: str, company: str, location: str | None) -> str:
-    effective_loc = _effective_location(company, location)
-    return _normalize_location_text(f"{effective_loc} {title}")
+    return _company_hq(company)
 
 
 def _is_allowed_location(title: str, company: str, location: str | None) -> bool:
-    haystack = _location_haystack(title, company, location)
-    if not haystack:
+    """Gate a job on its location, per `queue.location_gate` in policy.json.
+
+    The gate is off by default — every location passes. When enabled, only
+    the location fields (role location, falling back to company HQ) can
+    QUALIFY a job. The title is never trusted as a positive location signal
+    — a title like "Help us build…" must not pass a US gate via the word
+    "us". Blocked terms found in the title (e.g. "— German Speaking",
+    "| Europe/LATAM") still DISQUALIFY, since that is a conservative signal.
+    """
+    gate = get_policy().queue.location_gate
+    if not gate.enabled:
+        return True
+
+    title_haystack = _normalize_location_text(title or "")
+    if title_haystack and _has_location_hit(title_haystack, gate.blocked_locations):
         return False
 
-    has_us = _has_location_hit(haystack, US_LOCATION_HITS)
-    has_remote = _has_location_hit(haystack, REMOTE_LOCATION_HITS)
-    has_allowed_city = _has_location_hit(haystack, ALLOWED_CITY_LOCATION_HITS)
-
-    if _has_location_hit(haystack, DISALLOWED_INTERNATIONAL_LOCATION_HITS):
-        return False
-    if _has_location_hit(haystack, CANADA_LOCATION_HITS) and not has_us:
-        return False
-    if _has_location_hit(haystack, DISALLOWED_US_LOCATION_HITS):
+    loc_haystack = _normalize_location_text(_effective_location(company, location))
+    if not loc_haystack:
         return False
 
-    return has_allowed_city or has_remote or has_us
+    if _has_location_hit(loc_haystack, gate.blocked_locations):
+        return False
+    has_country = _has_location_hit(loc_haystack, gate.country_terms)
+    if not has_country and _has_location_hit(loc_haystack, gate.blocked_without_country):
+        return False
+
+    return (
+        has_country
+        or _has_location_hit(loc_haystack, gate.remote_terms)
+        or _has_location_hit(loc_haystack, gate.allowed_locations)
+    )
 
 
 def _score_psyche_fit(
@@ -333,19 +286,20 @@ def _score_job(job: PortalJob) -> tuple[int, str, int]:
 
     Weights: Moat 25 · Tier 20 · Function 18 · Skill 12 · Logistics 10 · Psyche 15.
     """
+    policy = get_policy().queue
     title_l = job.title.lower()
     company_l = job.company.strip().lower()
 
-    # Hard gate: senior-bureaucrat ladder titles (Sr Manager / Director / VP / etc.)
-    # Garo's value: "answers to few people" — these roles fail that by design.
-    if any(k in title_l for k in SENIOR_BUREAUCRAT_KILLS):
+    # Hard gate: configured title kill-keywords (e.g. management-ladder
+    # titles the user never wants queued). Empty by default.
+    if any(k in title_l for k in policy.title_kill_keywords):
         return 5, "tech", 0
 
-    # Hard gate: US-only search in the user's selected cities plus remote.
+    # Hard gate: configured location gate (no-op unless enabled in policy).
     if not _is_allowed_location(job.title, job.company, job.location):
         return 0, "tech", 0
 
-    industry = MOAT_COMPANY_TAGS.get(company_l)
+    industry = policy.moat_company_tags.get(company_l)
     note_l = _load_portal_notes().get(company_l, "")
     profile = _load_psyche_profile()
 
@@ -359,8 +313,9 @@ def _score_job(job: PortalJob) -> tuple[int, str, int]:
     else:
         func = 0
 
-    # --- Vertical moat (0-25)
-    if industry in HIGH_MOAT_INDUSTRIES:
+    # --- Vertical moat (0-25) — industries where the user has lived
+    # experience, tagged per company in policy.json (no JD fetch at scan time).
+    if industry in policy.high_moat_industries:
         moat = 25
     elif industry:
         moat = 15
@@ -382,7 +337,7 @@ def _score_job(job: PortalJob) -> tuple[int, str, int]:
 
     # --- Logistics fit (0-10) — already hard-gated above.
     loc = 10
-    if industry in EXCLUDED_INDUSTRIES:
+    if industry in policy.excluded_industries:
         loc = min(loc, 2)
 
     # --- Psycho-fit (0-15) — work-style alignment via psyche_profile.json
@@ -390,7 +345,7 @@ def _score_job(job: PortalJob) -> tuple[int, str, int]:
 
     score = moat + tier + func + skill + loc + psyche
 
-    if industry in HIGH_MOAT_INDUSTRIES or any(k in title_l for k in
+    if industry in policy.high_moat_industries or any(k in title_l for k in
             ("field", "deployed", "customer engineer", "service engineer")):
         track = "both"
     else:

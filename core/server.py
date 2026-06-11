@@ -73,14 +73,14 @@ async def dashboard() -> FileResponse:
     )
 
 
-@app.get("/install", include_in_schema=False)
-async def install_page() -> "Response":
-    """Install-the-bookmarklet page — user loads this in Safari, gets
-    step-by-step instructions to save the bookmark on their phone."""
-    from fastapi.responses import HTMLResponse
-    # Generate the bookmarklet URL
+def _bookmarklet_profile() -> dict:
+    """Profile payload baked into the fill bookmarklet.
+
+    Single builder shared by /install and /api/bookmarklet so the two
+    endpoints can't drift apart.
+    """
     p = get_profile_store().load()
-    profile = {
+    return {
         "first_name": p.first_name,
         "last_name": p.last_name,
         "full_name": f"{p.first_name} {p.last_name}".strip(),
@@ -97,9 +97,22 @@ async def install_page() -> "Response":
         "years_experience": str(p.years_of_experience),
         "custom_answers": p.custom_answers or {},
     }
-    import json as _json, urllib.parse as _up
-    js = BOOKMARKLET_TEMPLATE.replace("__PROFILE__", _json.dumps(profile))
-    js_min = " ".join(js.split())
+
+
+def _bookmarklet_js() -> tuple[str, str]:
+    """Return (raw, minified) bookmarklet JS with the profile baked in."""
+    js = BOOKMARKLET_TEMPLATE.replace("__PROFILE__", json.dumps(_bookmarklet_profile()))
+    return js, " ".join(js.split())
+
+
+@app.get("/install", include_in_schema=False)
+async def install_page() -> "Response":
+    """Install-the-bookmarklet page — user loads this in Safari, gets
+    step-by-step instructions to save the bookmark on their phone."""
+    from fastapi.responses import HTMLResponse
+    # Generate the bookmarklet URL
+    import urllib.parse as _up
+    _, js_min = _bookmarklet_js()
     href = "javascript:" + _up.quote(js_min)
 
     html = f"""<!DOCTYPE html>
@@ -161,7 +174,7 @@ async def install_page() -> "Response":
 </div>
 
 <h2>What it fills automatically</h2>
-<p>Name, email, phone, LinkedIn, portfolio, location, current title, years of experience, work authorization questions ("Yes"), sponsorship questions ("No"), EEOC questions ("Prefer not to say"), veteran status ("Protected veteran"), relocation questions ("Yes"), common "how did you hear" ("LinkedIn"), and required acknowledgment checkboxes.</p>
+<p>Name, email, phone, LinkedIn, portfolio, location, current title, years of experience, work authorization questions ("Yes"), sponsorship questions ("No"), EEOC and veteran/disability questions ("Prefer not to say" unless you've saved a custom answer), relocation questions ("Yes"), common "how did you hear" ("LinkedIn"), and required acknowledgment checkboxes.</p>
 
 <p style="margin-top:24px; color:#8b949e; font-size:13px">
   <b>What it can't do:</b> Upload your resume file (iOS blocks programmatic file selection), solve CAPTCHAs (designed to require humans), answer essay questions (that's your voice — do those manually).
@@ -327,29 +340,9 @@ async def api_latest_draft() -> JSONResponse:
 async def api_bookmarklet() -> JSONResponse:
     """Return a self-contained JS bookmarklet with profile data baked in.
     User saves this as a Safari bookmark, taps it on any job form to auto-fill."""
-    p = get_profile_store().load()
-    profile = {
-        "first_name": p.first_name,
-        "last_name": p.last_name,
-        "full_name": f"{p.first_name} {p.last_name}".strip(),
-        "email": p.email,
-        "phone": p.phone,
-        "city": p.city,
-        "state": p.state,
-        "country": p.country or "United States",
-        "zip": p.zip_code,
-        "linkedin": p.linkedin_url,
-        "portfolio": p.portfolio_url,
-        "github": p.github_url,
-        "current_title": p.current_title,
-        "years_experience": str(p.years_of_experience),
-        "custom_answers": p.custom_answers or {},
-    }
-    import json as _json
-    js = BOOKMARKLET_TEMPLATE.replace("__PROFILE__", _json.dumps(profile))
     # URL-encode for bookmark use (minify whitespace)
     import urllib.parse as _up
-    js_min = " ".join(js.split())
+    js, js_min = _bookmarklet_js()
     return JSONResponse({
         "bookmarklet": "javascript:" + _up.quote(js_min),
         "raw": js,
@@ -357,6 +350,12 @@ async def api_bookmarklet() -> JSONResponse:
     })
 
 
+# Self-contained form-fill bookmarklet. Demographic/EEO answer defaults below
+# (yesNoFor) must stay aligned with the SELECT_RULES defaults in
+# extension/content.js until both surfaces are generated from a single source.
+# NOTE: this template is minified by collapsing all whitespace to single
+# spaces, so comments inside it MUST use /* */ form — a // comment would
+# swallow the rest of the script.
 BOOKMARKLET_TEMPLATE = r"""
 (function(){
   var P = __PROFILE__;
@@ -398,7 +397,7 @@ BOOKMARKLET_TEMPLATE = r"""
     if (/current title|current role|job title|headline/.test(l)) return P.current_title;
     if (/years of experience|years experience/.test(l)) return P.years_experience;
     if (/how did you hear|hear about/.test(l)) return 'LinkedIn';
-    // Custom answers fuzzy match
+    /* Custom answers fuzzy match */
     for (var q in P.custom_answers) {
       if (q.toLowerCase().indexOf(l) >= 0 || l.indexOf(q.toLowerCase()) >= 0) return P.custom_answers[q];
     }
@@ -412,16 +411,19 @@ BOOKMARKLET_TEMPLATE = r"""
     if (/willing to relocate|open to relocation|able to relocate/.test(l)) return 'Yes';
     if (/willing to work|open to work|open to hybrid|on-site|in-office|hub location|days per week|days a week/.test(l)) return 'Yes';
     if (/family member|close personal relationship|outside business|worked for.*past|live within|conflict of interest/.test(l)) return 'No';
-    if (/gender identity/.test(l)) return 'Prefer not to say||I don\'t wish to answer||Decline to answer';
-    if (/^gender/.test(l) || /\sgender\s/.test(l)) return 'Prefer not to say||I don\'t wish to answer||Decline to answer';
-    if (/race|ethnicity/.test(l)) return 'Decline to answer||I don\'t wish to answer||Prefer not to say';
-    if (/hispanic|latino/.test(l)) return 'Decline to answer||I don\'t wish to answer||No, not Hispanic';
-    if (/veteran/.test(l)) return 'I identify as a protected veteran||Protected veteran||Veteran';
-    if (/disability/.test(l)) return 'I don\'t wish to answer||Prefer not to say||Decline to answer';
+    /* Demographic/EEO defaults: decline-to-answer family. Per-user answers come
+       from profile custom_answers (checked first via valueFor). Keep these in
+       sync with the SELECT_RULES defaults in extension/content.js. */
+    if (/gender identity/.test(l)) return 'Decline to self identify||Decline to self-identify||Prefer not to say||I don\'t wish to answer||Decline to answer';
+    if (/^gender/.test(l) || /\sgender\s/.test(l)) return 'Decline to self identify||Decline to self-identify||Prefer not to say||I don\'t wish to answer||Decline to answer';
+    if (/race|ethnicity/.test(l)) return 'Decline to self identify||Decline to self-identify||Decline to answer||I don\'t wish to answer||Prefer not to say';
+    if (/hispanic|latino/.test(l)) return 'Decline to self identify||Decline to self-identify||Decline to answer||I don\'t wish to answer||Prefer not to say';
+    if (/veteran/.test(l)) return 'I don\'t wish to answer||Prefer not to say||Decline to answer';
+    if (/disability/.test(l)) return 'I do not want to answer||I don\'t wish to answer||Prefer not to say||Decline to answer';
     return null;
   }
 
-  // Fill text-like inputs
+  /* Fill text-like inputs */
   var textSel = 'input[type="text"]:not([disabled]):not([readonly]), input[type="email"]:not([disabled]):not([readonly]), input[type="tel"]:not([disabled]):not([readonly]), input[type="url"]:not([disabled]):not([readonly]), input[type="number"]:not([disabled]):not([readonly]), input:not([type]):not([disabled]):not([readonly]), textarea:not([disabled]):not([readonly])';
   document.querySelectorAll(textSel).forEach(function(el){
     try {
@@ -439,7 +441,7 @@ BOOKMARKLET_TEMPLATE = r"""
     } catch(e){}
   });
 
-  // Fill native <select>s (including hidden ones wrapped by Select2/React)
+  /* Fill native <select>s (including hidden ones wrapped by Select2/React) */
   document.querySelectorAll('select:not([disabled])').forEach(function(sel){
     try {
       if (sel.value && sel.value.trim() && sel.value.toLowerCase() !== 'select') return;
@@ -464,27 +466,33 @@ BOOKMARKLET_TEMPLATE = r"""
     } catch(e){}
   });
 
-  // Radio groups (yes/no questions)
+  /* Radio groups (yes/no + EEO questions) */
   document.querySelectorAll('fieldset, div[role="radiogroup"], ul.application-question').forEach(function(group){
     try {
       var q = (group.querySelector('legend, label, .application-label') || group).innerText.slice(0,200);
-      var target = yesNoFor(q);
+      var target = valueFor(q) || yesNoFor(q);
       if (!target) return;
+      var targets = target.split('||').map(function(s){return s.trim().toLowerCase();});
       var radios = group.querySelectorAll('input[type="radio"]');
-      for (var i=0; i<radios.length; i++){
-        var r = radios[i];
-        var rl = labelOf(r) + ' ' + (r.value || '');
-        if (rl.toLowerCase().indexOf(target.toLowerCase()) >= 0) {
-          r.checked = true;
-          r.dispatchEvent(new Event('change', { bubbles: true }));
-          filled++;
-          break;
+      for (var t=0; t<targets.length; t++){
+        var n = targets[t], done = false;
+        for (var i=0; i<radios.length; i++){
+          var r = radios[i];
+          var rl = (labelOf(r) + ' ' + (r.value || '')).toLowerCase();
+          if (rl.indexOf(n) >= 0) {
+            r.checked = true;
+            r.dispatchEvent(new Event('change', { bubbles: true }));
+            filled++;
+            done = true;
+            break;
+          }
         }
+        if (done) break;
       }
     } catch(e){}
   });
 
-  // Auto-check required acknowledgment checkboxes
+  /* Auto-check required acknowledgment checkboxes */
   document.querySelectorAll('input[type="checkbox"]:not([disabled])').forEach(function(cb){
     try {
       if (cb.checked) return;

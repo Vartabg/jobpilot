@@ -99,6 +99,8 @@ jobpilot resume ~/Downloads/job-description.txt --pdf
 
 Generates a resume customized to that specific role. Review it, adjust anything that feels off, then use it.
 
+Want AI-written summary bullets in the draft? Set a free Gemini API key first ([get one here](https://aistudio.google.com/app/apikey), then `export GEMINI_API_KEY=your_key_here`). Without a key you still get a complete draft built from your profile — just without the AI polish.
+
 ---
 
 ## Asking a friend to help
@@ -129,7 +131,7 @@ jobpilot answer           Save and reuse the answers you write for application q
 ## Honest limitations
 
 - **macOS only right now.** Windows and Linux support is on the roadmap.
-- **Resume tailoring requires an AI API key.** Google Gemini has a free tier — [get one here](https://aistudio.google.com/app/apikey). Set it: `export GEMINI_API_KEY=your_key_here`
+- **AI-written resume summaries need an AI API key.** Google Gemini has a free tier — [get one here](https://aistudio.google.com/app/apikey). Set it: `export GEMINI_API_KEY=your_key_here`. Without a key, resume drafts still generate — they just use built-in templates instead of AI-written summaries. (Advanced: if you run a local LLM server, point `BRO_URL` at it and JobPilot will use it automatically when it's reachable.)
 - **The scan works on public ATS boards.** If a company uses a private hiring system or doesn't use Greenhouse/Lever/Ashby, the scan won't find those roles.
 - **You always review before submit.** JobPilot never applies without showing you what it's about to do.
 

@@ -1,12 +1,16 @@
 """
 Bro Integration Client
 ======================
-Connects JobPilot to Bro's AI backend (Ollama + RAG + Whisper STT).
+Transport for the optional local "Bro" AI backend (Ollama + RAG + Whisper STT).
+
+Most code should not call this module directly for completions — use
+``jobpilot.core.llm_client``, which picks Bro when it is reachable and falls
+back to the Gemini API when GEMINI_API_KEY is set.
 
 Features:
 - Intelligent model routing (fast for simple, smart for complex)
 - Local STT via whisper.cpp
-- Automatic retries with exponential backoff
+- Automatic retries with exponential backoff on connection errors
 - Graceful degradation when Bro unavailable
 """
 
@@ -28,6 +32,10 @@ from jobpilot.core.config import (
 
 # Cache for health status (avoid hammering /health)
 _health_cache: dict[str, object] = {"status": None, "timestamp": 0, "ttl": HEALTH_CACHE_TTL}
+
+
+class BroUnavailable(Exception):
+    """Raised when Bro cannot produce a reply (down, busy, or errored)."""
 
 
 def _retry_on_failure(max_retries: int = MAX_RETRIES, delay: float = RETRY_DELAY):
@@ -89,48 +97,68 @@ def is_fast_model_available() -> bool:
 
 
 @_retry_on_failure(max_retries=1)
-def chat(message: str, context: Optional[str] = None, force_smart: bool = False) -> str:
+def _post_with_retry(path: str, **kwargs) -> requests.Response:
+    """POST to a Bro endpoint, retrying once on connection errors.
+
+    Raises the underlying requests exception so the retry decorator can see
+    ConnectionError (callers convert exceptions to their own contract).
+    """
+    return requests.post(f"{BRO_BASE_URL}{path}", **kwargs)
+
+
+def chat_or_raise(message: str, context: Optional[str] = None, force_smart: bool = False) -> str:
     """
     Send a message to Bro's /chat endpoint (Ollama + RAG).
-    
+
     Args:
         message: User message
         context: Optional extra context to prepend
         force_smart: Force use of the smart model (for complex questions)
-        
+
     Returns:
         AI response string
+
+    Raises:
+        BroUnavailable: when Bro is down, busy, or returns an error.
     """
     if not message or not message.strip():
         return ""
-    
+
     full_message = message
     if context:
         full_message = f"{context}\n\nUser question: {message}"
-    
+
     # Estimate timeout based on message complexity
     timeout = TIMEOUT_CHAT if force_smart or len(full_message) > 500 else TIMEOUT_FAST
-    
+
     try:
-        r = requests.post(
-            f"{BRO_BASE_URL}/chat",
-            json={"message": full_message},
-            timeout=timeout
-        )
-        if r.status_code == 200:
-            return r.json().get("reply", "No response from model.")
-        elif r.status_code == 429:
-            return "Rate limited. Try again in a moment."
-        elif r.status_code == 503:
-            return "Bro is busy. Try again."
-        else:
-            return f"Error: {r.status_code}"
-    except requests.exceptions.ConnectionError:
-        return "Bro is not running. Start it with: npm run bro (from AI_Workspace)"
-    except requests.exceptions.Timeout:
-        return "Request timed out. Ollama may be busy."
+        r = _post_with_retry("/chat", json={"message": full_message}, timeout=timeout)
+    except requests.exceptions.ConnectionError as e:
+        raise BroUnavailable("Bro is not running.") from e
+    except requests.exceptions.Timeout as e:
+        raise BroUnavailable("Request timed out. Ollama may be busy.") from e
     except Exception as e:
-        return f"Error: {e}"
+        raise BroUnavailable(f"Error: {e}") from e
+
+    if r.status_code == 200:
+        return r.json().get("reply", "No response from model.")
+    if r.status_code == 429:
+        raise BroUnavailable("Rate limited. Try again in a moment.")
+    if r.status_code == 503:
+        raise BroUnavailable("Bro is busy. Try again.")
+    raise BroUnavailable(f"Error: {r.status_code}")
+
+
+def chat(message: str, context: Optional[str] = None, force_smart: bool = False) -> str:
+    """
+    Like chat_or_raise(), but returns the error message as a string instead of
+    raising — the legacy contract some callers still rely on. New code should
+    go through jobpilot.core.llm_client, which surfaces typed errors.
+    """
+    try:
+        return chat_or_raise(message, context=context, force_smart=force_smart)
+    except BroUnavailable as e:
+        return str(e)
 
 
 def speak(text: str) -> bool:
@@ -185,15 +213,14 @@ def get_pending_commands() -> list[dict]:
         return []
 
 
-@_retry_on_failure(max_retries=1)
 def query_rag(query: str, top_k: int = 5) -> str:
     """
     Query Bro's RAG for relevant context (e.g., resume chunks).
     Returns formatted context string.
     """
     try:
-        r = requests.post(
-            f"{BRO_BASE_URL}/jobpilot/rag",
+        r = _post_with_retry(
+            "/jobpilot/rag",
             json={"query": query, "top_k": top_k},
             timeout=TIMEOUT_SHORT
         )
