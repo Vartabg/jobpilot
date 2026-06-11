@@ -173,6 +173,17 @@ class TestBuildJobContext:
         assert "Easy Apply" not in ctx
 
 
+class TestAutoAdvance:
+    @pytest.mark.asyncio
+    async def test_auto_advance_never_clicks_final_submit(self, engine, mock_overlay):
+        engine.autonomy_config.never_auto_submit = False
+        app_page = FakeApplicationPage(submit_button_text="Submit application")
+
+        await engine.auto_advance(app_page)
+
+        mock_overlay.update_status.assert_not_awaited()
+
+
 class TestChatDispatch:
     @pytest.mark.asyncio
     async def test_help_command(self, engine, mock_chat):

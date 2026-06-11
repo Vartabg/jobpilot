@@ -50,6 +50,13 @@ app = typer.Typer(
 )
 console = Console()
 
+CLAUDE_VETTED_TARGETS_PATH = (
+    Path(__file__).parent
+    / "data"
+    / "reports"
+    / "claude-vetted-targets-2026-06-03.json"
+)
+
 
 # ---------------------------------------------------------------------------
 # Event → Rich Console wiring
@@ -156,6 +163,83 @@ def _load_score_source(source: str) -> tuple[str, str]:
     if candidate.exists() and candidate.is_file():
         return candidate.read_text(), str(candidate)
     return source, "inline text"
+
+
+def _norm_claim_text(value: object) -> str:
+    return " ".join(str(value or "").strip().lower().split())
+
+
+def _load_claim_targets() -> list[dict]:
+    if not CLAUDE_VETTED_TARGETS_PATH.exists():
+        return []
+    try:
+        data = json.loads(CLAUDE_VETTED_TARGETS_PATH.read_text())
+    except Exception as exc:
+        raise RuntimeError(f"Could not read claim-lock file: {exc}") from exc
+    targets = data.get("targets", [])
+    return targets if isinstance(targets, list) else []
+
+
+def _find_claim_target(job) -> Optional[dict]:
+    job_company = _norm_claim_text(getattr(job, "company", ""))
+    job_title = _norm_claim_text(getattr(job, "title", ""))
+    job_url = _norm_claim_text(getattr(job, "url", ""))
+
+    company_matches: list[dict] = []
+    for target in _load_claim_targets():
+        target_url = _norm_claim_text(target.get("url"))
+        if target_url and target_url == job_url:
+            return target
+        if _norm_claim_text(target.get("company")) == job_company:
+            company_matches.append(target)
+
+    if len(company_matches) == 1:
+        return company_matches[0]
+
+    for target in company_matches:
+        target_title = _norm_claim_text(target.get("title"))
+        if target_title and (target_title == job_title or target_title in job_title or job_title in target_title):
+            return target
+    return None
+
+
+def _enforce_claim_lock(job, *, claim_approved: bool) -> None:
+    try:
+        target = _find_claim_target(job)
+    except RuntimeError as exc:
+        console.print(f"[red]Claim-lock blocked staging:[/red] {exc}")
+        raise typer.Exit(1) from exc
+
+    if target is None:
+        console.print(
+            "[red]Claim-lock blocked staging:[/red] "
+            f"{job.company} is not present in {CLAUDE_VETTED_TARGETS_PATH}."
+        )
+        console.print("[dim]Claude must vet it and set materials_status to 'ready' before JobPilot fills it.[/dim]")
+        raise typer.Exit(1)
+
+    decision = _norm_claim_text(target.get("decision"))
+    materials_status = _norm_claim_text(target.get("materials_status"))
+    if decision != "keep":
+        console.print(
+            "[red]Claim-lock blocked staging:[/red] "
+            f"{job.company} is marked decision={target.get('decision')!r}."
+        )
+        raise typer.Exit(1)
+    if materials_status != "ready":
+        console.print(
+            "[red]Claim-lock blocked staging:[/red] "
+            f"{job.company} materials_status={target.get('materials_status')!r}; expected 'ready'."
+        )
+        raise typer.Exit(1)
+    if not claim_approved:
+        approved = typer.confirm(
+            f"Claude materials are ready for {job.company}. Did Garo approve staging this target now?",
+            default=False,
+        )
+        if not approved:
+            console.print("[dim]Not staged. Waiting for explicit Garo approval.[/dim]")
+            raise typer.Exit(0)
 
 
 def _render_score_result(result, source_label: str) -> None:
@@ -693,8 +777,10 @@ def history(
     tracker = get_application_tracker()
     s = tracker.get_stats()
     console.print(
-        f"\n[bold]Application Summary:[/bold] {s['submitted']} submitted, "
-        f"{s['abandoned']} abandoned, {s['in_progress']} in progress\n"
+        f"\n[bold]Application Summary:[/bold] {s['total']} tracked, "
+        f"{s['applied']} applied, {s['submitted']} submitted, "
+        f"{s['interview']} interview, {s['rejected']} rejected, "
+        f"{s['in_progress']} in progress\n"
     )
     tracker.display_recent(limit)
     tracker.close()
@@ -702,10 +788,20 @@ def history(
 
 @app.command()
 def serve(
-    host: str = typer.Option("0.0.0.0", help="Bind address"),
+    host: str = typer.Option(
+        "127.0.0.1",
+        help="Bind address. Loopback by default (safe). The dashboard serves "
+        "your name/email/phone with no authentication, so only widen this "
+        "deliberately — e.g. --host 100.x.y.z for a specific Tailscale IP. "
+        "Avoid 0.0.0.0, which exposes your PII to everyone on the network.",
+    ),
     port: int = typer.Option(8766, help="Port"),
 ):
-    """Start the remote dashboard (access from phone via Tailscale)."""
+    """Start the remote dashboard (access from phone via Tailscale).
+
+    Binds to loopback (127.0.0.1) by default. To reach it from your phone over
+    Tailscale, pass your machine's Tailscale IP explicitly with --host.
+    """
     from jobpilot.core.server import run_server, get_tailscale_ip, get_local_ip
 
     ts_ip = get_tailscale_ip()
@@ -795,6 +891,7 @@ def apply(
     job_id: str = typer.Argument(..., help="Job ID from the queue (shown in dashboard or 'jobpilot queue')"),
     port: int = typer.Option(9222, help="Chrome debugging port"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be filled without filling"),
+    claim_approved: bool = typer.Option(False, "--claim-approved", help="Use only after Garo explicitly approves staging a Claude-ready target"),
 ):
     """Auto-fill a job application. Stops before submit — you approve."""
     from jobpilot.core.queue_builder import get_job, update_job_status
@@ -805,7 +902,7 @@ def apply(
         console.print(f"[red]Job '{job_id}' not found in queue. Run 'jobpilot queue' first.[/red]")
         raise typer.Exit(1)
 
-    if job.status == "applied":
+    if job.status in {"applied", "submitted"}:
         console.print(f"[yellow]Already applied to {job.title} @ {job.company}[/yellow]")
         if not typer.confirm("Apply again anyway?"):
             raise typer.Exit(0)
@@ -822,6 +919,8 @@ def apply(
     if dry_run:
         console.print("[dim]Dry run — no form filling. Pass without --dry-run to apply.[/dim]")
         raise typer.Exit(0)
+
+    _enforce_claim_lock(job, claim_approved=claim_approved)
 
     profile = get_profile_store().load()
 
@@ -1342,53 +1441,47 @@ def log(
     don't auto-write to applications.db, so subsequent `queue --fresh` runs
     correctly dedup them. Idempotent on URL.
     """
-    import sqlite3
-    import re
-    from datetime import datetime
-    from jobpilot.core.config import DATA_DIR
-
-    db_path = DATA_DIR / "applications.db"
-    if not db_path.exists():
-        console.print(f"[red]applications.db not found at {db_path}[/red]")
-        raise typer.Exit(1)
-
-    applied_at = (date or datetime.now().date().isoformat())
-    now_iso = datetime.now().isoformat()
-    slug = re.sub(r"[^a-z0-9]+", "-", f"{company}-{title or 'role'}".lower()).strip("-")
-    job_url = url.strip() or f"manual-log://{slug}/{applied_at}"
-
-    conn = sqlite3.connect(str(db_path))
+    tracker = get_application_tracker()
     try:
-        # Cross-source idempotency: same conceptual application can land via
-        # different URL prefixes (gmail-backfill:// vs manual-log:// vs the
-        # real ATS URL). Match on (company, title) case-insensitively in
-        # addition to exact URL.
-        existing = conn.execute(
-            """SELECT id, status FROM applications
-               WHERE job_url = ?
-                  OR (LOWER(company) = LOWER(?) AND LOWER(COALESCE(job_title,'')) = LOWER(COALESCE(?,'')))
-               LIMIT 1""",
-            (job_url, company, title),
-        ).fetchone()
-        if existing:
-            conn.execute(
-                "UPDATE applications SET status = ?, updated_at = ? WHERE id = ?",
-                (status, now_iso, existing[0]),
-            )
-            console.print(f"[yellow]↻ Updated existing entry to status='{status}'[/yellow]")
-        else:
-            conn.execute(
-                """INSERT INTO applications
-                   (job_url, job_title, company, applied_at, status, step_reached, fields_filled, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (job_url, title, company, applied_at, status, "manual-log", "", now_iso),
-            )
-            console.print(f"[green]✓ Logged: {company} — {title or '(role)'} [{status}][/green]")
-        conn.commit()
-        total = conn.execute("SELECT COUNT(*) FROM applications").fetchone()[0]
-        console.print(f"[dim]tracker now: {total} rows[/dim]")
-    finally:
-        conn.close()
+        app_row = tracker.log_application(
+            company=company,
+            title=title,
+            url=url,
+            status=status,
+            applied_at=date,
+            source="manual-log",
+        )
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+    stats = tracker.get_stats()
+    console.print(
+        f"[green]✓ Tracked: {app_row.company} — {app_row.job_title or '(role)'} "
+        f"[{app_row.status}][/green]"
+    )
+    console.print(f"[dim]tracker now: {stats['total']} rows[/dim]")
+    tracker.close()
+
+
+@app.command()
+def reconcile():
+    """Reconcile queue.json statuses with applications.db."""
+    from jobpilot.core.queue_builder import reconcile_queue_with_tracker
+
+    changed, total = reconcile_queue_with_tracker()
+    console.print(f"[green]✓ Reconciled queue[/green] — {changed} changed / {total} jobs")
+
+
+@app.command()
+def focus():
+    """Collapse active queue to one best role per company."""
+    from jobpilot.core.queue_builder import focus_queue_company_first
+
+    changed, total, companies = focus_queue_company_first()
+    console.print(
+        f"[green]✓ Focused active queue[/green] — skipped {changed} duplicate roles "
+        f"across {companies} companies / {total} jobs"
+    )
 
 
 if __name__ == "__main__":

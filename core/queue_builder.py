@@ -195,6 +195,7 @@ ALLOWED_CITY_LOCATION_HITS = (
     "austin",
     "denver",
     "portland",
+    "seattle",
     "bay area", "san francisco", "sf", "oakland", "berkeley",
     "menlo park", "palo alto", "mountain view", "san mateo",
     "redwood city", "san jose", "sunnyvale", "cupertino", "fremont",
@@ -213,7 +214,7 @@ DISALLOWED_INTERNATIONAL_LOCATION_HITS = (
 )
 CANADA_LOCATION_HITS = ("canada", "toronto", "vancouver")
 DISALLOWED_US_LOCATION_HITS = (
-    "seattle", "boston", "atlanta", "washington dc", "washington", "dc",
+    "boston", "atlanta", "washington dc", "washington", "dc",
     "chicago", "los angeles", "miami", "philadelphia", "portland maine",
 )
 
@@ -239,7 +240,6 @@ COMPANY_HQ = {
     "signal messenger":  "Remote",
     "titan ai":          "Remote",
     "scaled cognition":  "New York",
-    "growth protocol":   "Remote",
     "p-1 ai":            "Remote",
 }
 
@@ -436,15 +436,13 @@ def build_queue(
         # Tracker dedup — URL first, then company-level (catches Gmail-backfill
         # rows with synthetic URLs). Rejected wins over applied so dead ground
         # is visible in the queue.
-        tracker_company_status = tracker.company_status(job.company)
-        if tracker.has_applied(job.url):
-            tracker_status = tracker.get_status(job.url) or "applied"
-        elif tracker_company_status:
-            tracker_status = tracker_company_status
+        tracker_status = tracker_status_for_job(tracker, job.url, job.company)
+        # Status precedence: exact tracker URL > explicit prior skip > company
+        # tracker status > prior queue.json > default queued.
+        if prior_job and prior_job.status == "skipped" and not tracker.has_applied(job.url):
+            status = "skipped"
         else:
-            tracker_status = None
-        # Status precedence: tracker > prior queue.json > default queued
-        status = tracker_status or (prior_job.status if prior_job else "queued")
+            status = tracker_status or (prior_job.status if prior_job else "queued")
         queue.append(QueueJob(
             id=job_id,
             company=job.company,
@@ -484,6 +482,16 @@ def save_queue(jobs: list[QueueJob]) -> Path:
     return QUEUE_PATH
 
 
+def tracker_status_for_job(tracker, url: str, company: str) -> Optional[str]:
+    """Return the tracker-derived status for a queued job."""
+    tracker_company_status = tracker.company_status(company)
+    if tracker.has_applied(url):
+        return tracker.get_status(url) or "applied"
+    if tracker_company_status:
+        return tracker_company_status
+    return None
+
+
 def load_queue() -> list[QueueJob]:
     """Load queue from disk."""
     if not QUEUE_PATH.exists():
@@ -505,6 +513,67 @@ def update_job_status(job_id: str, status: str) -> bool:
             save_queue(queue)
             return True
     return False
+
+
+def reconcile_queue_with_tracker() -> tuple[int, int]:
+    """Apply authoritative application tracker states to queue.json."""
+    queue = load_queue()
+    if not queue:
+        return 0, 0
+    tracker = get_application_tracker()
+    changed = 0
+    for job in queue:
+        if job.status == "skipped" and not tracker.has_applied(job.url):
+            continue
+        tracker_status = tracker_status_for_job(tracker, job.url, job.company)
+        if tracker_status and job.status != tracker_status:
+            job.status = tracker_status
+            changed += 1
+    if changed:
+        save_queue(queue)
+    return changed, len(queue)
+
+
+def focus_queue_company_first() -> tuple[int, int, int]:
+    """Keep one active role per company and skip duplicate active roles."""
+    queue = load_queue()
+    if not queue:
+        return 0, 0, 0
+
+    active_statuses = {"queued", "viewing"}
+    groups: dict[str, list[QueueJob]] = {}
+    for job in queue:
+        if job.status not in active_statuses:
+            continue
+        key = (job.company or "").strip().lower()
+        if not key:
+            continue
+        groups.setdefault(key, []).append(job)
+
+    changed = 0
+    focused_companies = 0
+    status_rank = {"viewing": 1, "queued": 0}
+
+    for jobs in groups.values():
+        if len(jobs) <= 1:
+            continue
+        focused_companies += 1
+        jobs.sort(
+            key=lambda j: (
+                int(j.fit_score or 0) + int(j.psyche_score or 0) * 2,
+                int(j.fit_score or 0),
+                status_rank.get(j.status, 0),
+            ),
+            reverse=True,
+        )
+        for duplicate in jobs[1:]:
+            if duplicate.status != "skipped":
+                duplicate.status = "skipped"
+                changed += 1
+
+    if changed:
+        save_queue(queue)
+    return changed, len(queue), focused_companies
 
 
 def get_job(job_id: str) -> Optional[QueueJob]:

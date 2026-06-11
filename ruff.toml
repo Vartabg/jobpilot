@@ -1,5 +1,6 @@
-[lint]
 target-version = "py311"
+
+[lint]
 select = [
     "E",    # pycodestyle errors
     "W",    # pycodestyle warnings

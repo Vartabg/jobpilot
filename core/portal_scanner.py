@@ -164,7 +164,7 @@ class PortalScanner:
         company_name = label or org_slug.replace("-", " ").title()
         for item in payload.get("jobs", []):
             title = str(item.get("title", "")).strip()
-            location = str(item.get("locationName", "")).strip()
+            location = self._coerce_ashby_location(item)
             matched = self._matched_keywords(title, company_name, location)
             if self.keywords and not matched:
                 continue
@@ -187,6 +187,27 @@ class PortalScanner:
                 )
             )
         return jobs
+
+    @staticmethod
+    def _coerce_ashby_location(item: dict[str, Any]) -> str:
+        """Return Ashby's primary + secondary location text.
+
+        Ashby boards are not consistent: some payloads expose `locationName`,
+        while newer public posting responses expose `location` plus
+        `secondaryLocations`. Missing this field is dangerous because queue
+        gating may otherwise fall back to company HQ and admit international
+        postings.
+        """
+        locations: list[str] = []
+        primary = str(item.get("location") or item.get("locationName") or "").strip()
+        if primary:
+            locations.append(primary)
+        for secondary in item.get("secondaryLocations") or []:
+            if isinstance(secondary, dict):
+                value = str(secondary.get("location") or secondary.get("locationName") or "").strip()
+                if value:
+                    locations.append(value)
+        return "; ".join(dict.fromkeys(locations))
 
     @staticmethod
     def load_targets(path: Optional[Path] = None) -> list[ScanTarget]:

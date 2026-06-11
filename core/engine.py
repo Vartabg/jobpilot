@@ -213,6 +213,10 @@ class ApplicationEngine:
     async def auto_advance(self, app_page) -> None:
         """Auto-click Next/Continue if autonomy settings allow it."""
         is_final = "submit" in (app_page.submit_button_text or "").lower()
+        if is_final:
+            self.events.emit(INFO, message="✓ Final submit requires manual click in Chrome")
+            log.info("Auto-advance blocked on final submit button")
+            return
         if not self.autonomy_config.should_auto_advance(is_final):
             return
         

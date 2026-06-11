@@ -465,9 +465,9 @@ async def run_watch_loop(engine: "ApplicationEngine", *, watch: bool) -> None:
                                 await engine.auto_advance(app_page)
                                 engine.events.emit(
                                     INFO,
-                                    message="✓ User approved submission",
+                                    message="✓ Final review approved — Garo must click Submit in Chrome",
                                 )
-                                log.info("Pre-submit review: approved")
+                                log.info("Pre-submit review approved; manual Chrome submit required")
                             else:
                                 engine.events.emit(
                                     WARNING,
