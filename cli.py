@@ -34,6 +34,7 @@ from jobpilot.core.autonomy import AutonomyMode, get_autonomy_config, set_autono
 from jobpilot.core.logger import get_logger
 from jobpilot.core.events import EventBus, INFO, WARNING, ERROR, FIELD_FILLED, FIELD_SKIPPED, FIELD_EDITED, APPLICATION_STARTED, APPLICATION_SUBMITTED, APPLICATION_ABANDONED
 from jobpilot.core.engine import ApplicationEngine
+from jobpilot.core import llm_client
 from jobpilot.core.bro_client import get_health
 from jobpilot.core.jd_parser import JDParser
 from jobpilot.core.job_scorer import JobScorer
@@ -495,11 +496,24 @@ async def _doctor_async(port: int, *, bro: bool = True) -> int:
     table.add_column("Status", style="white")
     table.add_column("Details", style="dim")
 
+    gemini_key_set = bool(os.environ.get(llm_client.GEMINI_API_KEY_ENV, "").strip())
+    ai_ok = bro_ok or gemini_key_set
+
     if bro:
+        if bro_ok:
+            ai_detail = "Local Bro server reachable"
+        elif gemini_key_set:
+            ai_detail = "Gemini API key configured"
+        else:
+            ai_detail = (
+                "No AI backend — set GEMINI_API_KEY "
+                "(free tier: https://aistudio.google.com/app/apikey) "
+                "or start the local Bro stack"
+            )
         table.add_row(
-            "Bro API",
-            "OK" if bro_ok else "WARN",
-            "AI backend reachable" if bro_ok else "Bro is unreachable; chat/advice will be degraded",
+            "AI backend",
+            "OK" if ai_ok else "WARN",
+            ai_detail,
         )
         table.add_row(
             "Whisper",
@@ -558,9 +572,12 @@ async def _doctor_async(port: int, *, bro: bool = True) -> int:
         console.print("\n[yellow]💡 Tip: Run ./scripts/launch_chrome.sh and reopen the target job tab.[/yellow]")
         return 1
 
-    if bro and not bro_ok:
-        console.print("\n[yellow]Bro is down. Start the AI stack if you want chat, RAG, and voice help.[/yellow]")
-        return 1
+    if bro and not ai_ok:
+        console.print(
+            "\n[yellow]No AI backend configured — chat, tailoring, and advice fall back to "
+            "templates. Set GEMINI_API_KEY (free tier: https://aistudio.google.com/app/apikey) "
+            "or start the local Bro stack.[/yellow]"
+        )
 
     console.print("\n[green]✓ JobPilot runtime looks ready.[/green]")
     return 0
@@ -673,9 +690,9 @@ def doctor(
     port: int = typer.Option(9222, help="Chrome debugging port"),
     json_output: bool = typer.Option(False, "--json", help="Output the health report as JSON"),
     strict: bool = typer.Option(False, "--strict", help="Exit non-zero if warnings are present"),
-    bro: bool = typer.Option(True, "--bro/--no-bro", help="Include the Bro health check"),
+    bro: bool = typer.Option(True, "--bro/--no-bro", help="Include the AI backend health check"),
 ):
-    """Check Chrome, Bro, and JobPilot's local data health."""
+    """Check Chrome, the AI backend, and JobPilot's local data health."""
     runtime_exit = asyncio.run(_doctor_async(port, bro=bro))
     report = run_doctor(check_bro=bro)
 
@@ -699,7 +716,7 @@ def resume(
     output: Optional[Path] = typer.Option(None, "--output", "-o", help="Optional markdown output path for the resume draft"),
     html: bool = typer.Option(True, "--html/--no-html", help="Also write a styled HTML version next to the markdown draft"),
     pdf: bool = typer.Option(False, "--pdf", help="Also export a PDF version using Playwright/Chromium"),
-    bro: bool = typer.Option(True, "--bro/--no-bro", help="Use Bro/RAG for more personalized tailoring when available"),
+    bro: bool = typer.Option(True, "--bro/--no-bro", help="Use the AI backend (local Bro or Gemini) for more personalized tailoring when available"),
 ):
     """Generate an ATS-friendly resume draft tailored to a target role."""
     if active or not source:
@@ -1239,7 +1256,7 @@ def answer_draft(
     max_words: int = typer.Option(160, "--max-words", min=40, max=350, help="Target word cap for narrative answers."),
     save: bool = typer.Option(True, "--save/--no-save", help="Save to data/answers after drafting."),
     pbcopy: bool = typer.Option(True, "--pbcopy/--no-pbcopy", help="Copy saved/drafted answer to clipboard."),
-    bro: bool = typer.Option(True, "--bro/--no-bro", help="Use Bro/local AI when available; fallback stays account-grounded."),
+    bro: bool = typer.Option(True, "--bro/--no-bro", help="Use the AI backend (local Bro or Gemini) when available; fallback stays account-grounded."),
 ):
     """Draft a role-tailored answer from true accounts and save/copy it."""
     jd_text, jd_label = _resolve_answer_jd(company, jd)

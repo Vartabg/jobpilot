@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from jobpilot.core.bro_client import chat as bro_chat, is_bro_running
+from jobpilot.core import llm_client
 from jobpilot.core.config import DATA_DIR
 from jobpilot.core.profile_store import ProfileStore, UserProfile, get_profile_store
 
@@ -108,7 +108,7 @@ class ApplicationAnswerer:
             )
 
         ai_answer = ""
-        if self.use_bro and is_bro_running():
+        if self.use_bro and llm_client.is_available():
             ai_answer = self._draft_with_ai(
                 clean_question,
                 profile=profile,
@@ -121,7 +121,7 @@ class ApplicationAnswerer:
 
         if ai_answer:
             answer = ai_answer
-            source = "bro"
+            source = "ai"
             confidence = 0.82
         else:
             answer = self._fallback_answer(
@@ -138,7 +138,7 @@ class ApplicationAnswerer:
 
         warnings: list[str] = []
         if source == "fallback":
-            warnings.append("Bro/local AI was unavailable or disabled; used account-grounded fallback drafting.")
+            warnings.append("AI backend was unavailable or disabled; used account-grounded fallback drafting.")
         if len(answer.split()) > max_words:
             answer = " ".join(answer.split()[:max_words]).rstrip(",.;") + "."
             warnings.append(f"Trimmed answer to {max_words} words.")
@@ -268,8 +268,9 @@ class ApplicationAnswerer:
             title=title,
             max_words=max_words,
         )
-        reply = bro_chat(prompt, force_smart=True)
-        if not reply or reply.startswith("Error") or reply.startswith("Bro is not") or reply.startswith("Request timed out"):
+        try:
+            reply = llm_client.complete(prompt, smart=True)
+        except llm_client.LLMUnavailable:
             return ""
         reply = reply.strip()
         reply = re.sub(r"^(answer|draft answer)\s*:\s*", "", reply, flags=re.IGNORECASE).strip()

@@ -1,7 +1,8 @@
 """Job fit scoring for pre-apply triage.
 
 Turns a job description into a simple 0-100 fit score using the existing
-profile store, JD parser helpers, and optional Bro context when available.
+profile store, JD parser helpers, and an optional AI verdict when a backend
+(local Bro or Gemini) is available.
 """
 
 from __future__ import annotations
@@ -10,7 +11,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional, Protocol
 
-from jobpilot.core.bro_client import chat as bro_chat, is_bro_running, query_rag
+from jobpilot.core import llm_client
+from jobpilot.core.bro_client import is_bro_running, query_rag
 from jobpilot.core.jd_parser import JDParser, ParsedJD
 from jobpilot.core.policy_config import Policy, get_policy
 from jobpilot.core.profile_store import ProfileStore, UserProfile, get_profile_store
@@ -351,7 +353,7 @@ class JobScorer:
         matched_skills: list[str],
         missing_skills: list[str],
     ) -> str:
-        if not self.use_bro or not is_bro_running() or not parsed_jd.summary():
+        if not self.use_bro or not llm_client.is_available() or not parsed_jd.summary():
             return ""
 
         prompt = (
@@ -364,11 +366,15 @@ class JobScorer:
             f"Matched skills: {', '.join(matched_skills) or 'none'}\n"
             f"Missing skills: {', '.join(missing_skills[:4]) or 'none'}"
         )
-        context = query_rag(
-            f"Summarize candidate strengths relevant to {parsed_jd.title or 'this role'} at {parsed_jd.company or 'the company'}",
-            top_k=4,
-        )
-        reply = bro_chat(prompt, context=context or None)
-        if not reply or reply.startswith("Error") or "not running" in reply.lower():
+        # RAG context only exists on the local Bro backend.
+        context = ""
+        if is_bro_running():
+            context = query_rag(
+                f"Summarize candidate strengths relevant to {parsed_jd.title or 'this role'} at {parsed_jd.company or 'the company'}",
+                top_k=4,
+            )
+        try:
+            reply = llm_client.complete(prompt, context=context or None)
+        except llm_client.LLMUnavailable:
             return ""
         return reply.strip()
