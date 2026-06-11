@@ -193,6 +193,7 @@ async def run_watch_loop(engine: "ApplicationEngine", *, watch: bool) -> None:
     jd_parser = JDParser(engine.bridge.page)
     app_page = None
     parsed_jd = None
+    parsed_jd_url: Optional[str] = None
     prev_was_application = False
     prev_job_url: Optional[str] = None
     editing_fields: dict[int, str] = {}
@@ -205,6 +206,34 @@ async def run_watch_loop(engine: "ApplicationEngine", *, watch: bool) -> None:
             # Reduce polling noise in logs (only log if path changes)
             if page_info.url != prev_job_url:
                 log.debug("Polling page: %s", page_info.url)
+
+            # --- job description parsing ---
+            # Parse the JD as soon as we land on a job page so the fit
+            # score, cover-letter, and contextual-answer paths below get
+            # real data.  A parse failure must never crash the loop —
+            # we log it and continue with parsed_jd = None.
+            if page_info.is_job_application:
+                if parsed_jd is None or page_info.url != parsed_jd_url:
+                    try:
+                        parsed_jd = await jd_parser.parse()
+                        if parsed_jd and (
+                            parsed_jd.raw_text or parsed_jd.summary()
+                        ):
+                            log.info(
+                                "JD parsed: %s @ %s",
+                                parsed_jd.title or "(no title)",
+                                parsed_jd.company or "(no company)",
+                            )
+                    except Exception as exc:
+                        parsed_jd = None
+                        log.warning(
+                            "JD parse failed — continuing without it: %s",
+                            exc,
+                        )
+                    parsed_jd_url = page_info.url
+            elif parsed_jd is not None or parsed_jd_url is not None:
+                parsed_jd = None
+                parsed_jd_url = None
 
             # --- lifecycle tracking ---
             if page_info.is_job_application and not prev_was_application:
@@ -465,7 +494,7 @@ async def run_watch_loop(engine: "ApplicationEngine", *, watch: bool) -> None:
                                 await engine.auto_advance(app_page)
                                 engine.events.emit(
                                     INFO,
-                                    message="✓ Final review approved — Garo must click Submit in Chrome",
+                                    message="✓ Final review approved — click Submit in Chrome yourself",
                                 )
                                 log.info("Pre-submit review approved; manual Chrome submit required")
                             else:

@@ -91,6 +91,56 @@ class TestMarkAndQuery:
         with pytest.raises(ValueError):
             tracker.log_application(company="Titan AI", status="maybe")
 
+    def test_log_application_url_owned_by_other_row(self, tracker: ApplicationTracker):
+        """Regression: re-logging with a URL another row already owns must not
+        raise sqlite3.IntegrityError — the URL-owning row is the same
+        application and should be updated instead."""
+        # Row 1: manual application with a synthetic URL.
+        tracker.log_application(company="Acme", title="Engineer", status="applied")
+        # Row 2: a started application that owns the real URL.
+        tracker.mark_started("https://jobs.example.com/123", "Engineer", "Acme Inc")
+
+        # Re-log row 1's company+title, now pointing at row 2's URL.
+        app = tracker.log_application(
+            company="Acme",
+            title="Engineer",
+            url="https://jobs.example.com/123",
+            status="interview",
+        )
+
+        assert app.job_url == "https://jobs.example.com/123"
+        assert tracker.get_status("https://jobs.example.com/123") == "interview"
+        assert tracker.company_status("Acme") == "interview"
+
+    def test_log_application_prefers_exact_url_match(self, tracker: ApplicationTracker):
+        """When both a URL match and a company+title match exist, the URL row wins."""
+        tracker.log_application(company="Acme", title="Engineer", status="applied")
+        tracker.mark_started("https://jobs.example.com/9", "Engineer", "Acme")
+
+        tracker.log_application(
+            company="Acme",
+            title="Engineer",
+            url="https://jobs.example.com/9",
+            status="rejected",
+        )
+
+        assert tracker.get_status("https://jobs.example.com/9") == "rejected"
+        # The synthetic-URL row was not the one updated.
+        synthetic = [a for a in tracker.get_recent(limit=10) if a.job_url.startswith("manual://")]
+        assert len(synthetic) == 1
+        assert synthetic[0].status == "applied"
+
+    def test_log_application_company_title_match_uses_most_recent(self, tracker: ApplicationTracker):
+        """With multiple company+title rows, the most recently updated one is updated."""
+        tracker.mark_started("https://jobs.example.com/old", "Engineer", "Acme")
+        tracker.mark_started("https://jobs.example.com/new", "Engineer", "Acme")
+
+        app = tracker.log_application(company="Acme", title="Engineer", status="applied")
+
+        assert app.job_url == "https://jobs.example.com/new"
+        assert tracker.get_status("https://jobs.example.com/new") == "applied"
+        assert tracker.get_status("https://jobs.example.com/old") == "started"
+
 
 class TestRecent:
 

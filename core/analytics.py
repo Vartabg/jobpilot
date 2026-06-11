@@ -42,8 +42,8 @@ def export_csv(days: int = 30, output_path: Optional[Path] = None) -> Path:
     filtered = []
     for app in apps:
         try:
-            started = datetime.fromisoformat(app.started_at)
-            if started >= cutoff:
+            applied = datetime.fromisoformat(app.applied_at)
+            if applied >= cutoff:
                 filtered.append(app)
         except (ValueError, AttributeError):
             filtered.append(app)  # include if can't parse date
@@ -51,16 +51,16 @@ def export_csv(days: int = 30, output_path: Optional[Path] = None) -> Path:
     with open(output_path, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow([
-            "Job Title", "Company/Platform", "URL", "Status",
-            "Started At", "Step Reached",
+            "Job Title", "Company", "URL", "Status",
+            "Applied At", "Step Reached",
         ])
         for app in filtered:
             writer.writerow([
                 app.job_title,
-                app.platform,
-                app.url,
+                app.company,
+                app.job_url,
                 app.status,
-                app.started_at,
+                app.applied_at,
                 getattr(app, "step_reached", ""),
             ])
 
@@ -108,7 +108,7 @@ def daily_digest(days: int = 7):
         table = Table(title=f"\nRecent Applications (last {days} days)")
         table.add_column("#", style="dim", width=4)
         table.add_column("Job Title", max_width=40)
-        table.add_column("Platform", width=10)
+        table.add_column("Company", width=14)
         table.add_column("Status", width=12)
         table.add_column("Date", width=16)
 
@@ -116,8 +116,8 @@ def daily_digest(days: int = 7):
         count = 0
         for app in recent:
             try:
-                started = datetime.fromisoformat(app.started_at)
-                if started < cutoff:
+                applied = datetime.fromisoformat(app.applied_at)
+                if applied < cutoff:
                     continue
             except (ValueError, AttributeError):
                 pass
@@ -132,9 +132,9 @@ def daily_digest(days: int = 7):
             table.add_row(
                 str(count),
                 app.job_title[:40] if app.job_title else "—",
-                app.platform or "—",
+                app.company or "—",
                 status_style,
-                app.started_at[:16] if app.started_at else "—",
+                app.applied_at[:16] if app.applied_at else "—",
             )
 
         console.print(table)

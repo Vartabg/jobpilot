@@ -12,6 +12,7 @@ Usage:
 import asyncio
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Optional
@@ -42,7 +43,9 @@ from jobpilot.core.resume_tailor import ResumeTailor
 from jobpilot.core.application_answerer import ApplicationAnswerer, TRUE_ACCOUNTS_PATH
 from jobpilot.learning.action_recorder import get_action_recorder
 
-log = get_logger(__name__)
+# Named `logger`, not `log`: the `log` CLI command below would shadow it and
+# any logger call would crash with AttributeError.
+logger = get_logger(__name__)
 
 app = typer.Typer(
     name="jobpilot",
@@ -50,12 +53,27 @@ app = typer.Typer(
 )
 console = Console()
 
-CLAUDE_VETTED_TARGETS_PATH = (
-    Path(__file__).parent
-    / "data"
-    / "reports"
-    / "claude-vetted-targets-2026-06-03.json"
-)
+CLAUDE_VETTED_TARGETS_DIR = Path(__file__).parent / "data" / "reports"
+CLAUDE_VETTED_TARGETS_GLOB = "claude-vetted-targets-*.json"
+# Explicit override (tests patch this). When None, the newest matching report
+# in CLAUDE_VETTED_TARGETS_DIR is used. When no file exists at all, the
+# claim-lock gate is considered not configured and is skipped.
+CLAUDE_VETTED_TARGETS_PATH: Optional[Path] = None
+
+
+def _resolve_claim_lock_path() -> Optional[Path]:
+    """Return the newest claude-vetted-targets report, or None if not configured."""
+    if CLAUDE_VETTED_TARGETS_PATH is not None:
+        path = Path(CLAUDE_VETTED_TARGETS_PATH)
+        return path if path.exists() else None
+    candidates = [
+        path
+        for path in CLAUDE_VETTED_TARGETS_DIR.glob(CLAUDE_VETTED_TARGETS_GLOB)
+        if path.is_file()
+    ]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda path: path.stat().st_mtime)
 
 
 # ---------------------------------------------------------------------------
@@ -161,32 +179,52 @@ def _load_score_source(source: str) -> tuple[str, str]:
     """Resolve inline JD text or a file path into scoreable text."""
     candidate = Path(source).expanduser()
     if candidate.exists() and candidate.is_file():
-        return candidate.read_text(), str(candidate)
+        if candidate.suffix.lower() == ".pdf":
+            console.print(
+                "[red]That's a PDF — JobPilot can't read job descriptions out of PDFs yet.[/red]\n"
+                "[yellow]Copy the job description into a .txt file, or pass a URL instead.[/yellow]"
+            )
+            raise typer.Exit(1)
+        try:
+            return candidate.read_text(), str(candidate)
+        except UnicodeDecodeError as exc:
+            console.print(
+                "[red]That looks like a binary file — paste the job description "
+                "into a .txt file, or pass a URL.[/red]"
+            )
+            raise typer.Exit(1) from exc
     return source, "inline text"
+
+
+def _parse_years_of_experience(raw: str) -> Optional[int]:
+    """Parse a years-of-experience answer ('5', '5 years', '12+ yrs') into an int.
+
+    Returns None when no leading number can be found.
+    """
+    match = re.match(r"(\d+)", str(raw or "").strip())
+    return int(match.group(1)) if match else None
 
 
 def _norm_claim_text(value: object) -> str:
     return " ".join(str(value or "").strip().lower().split())
 
 
-def _load_claim_targets() -> list[dict]:
-    if not CLAUDE_VETTED_TARGETS_PATH.exists():
-        return []
+def _load_claim_targets(lock_path: Path) -> list[dict]:
     try:
-        data = json.loads(CLAUDE_VETTED_TARGETS_PATH.read_text())
+        data = json.loads(lock_path.read_text())
     except Exception as exc:
         raise RuntimeError(f"Could not read claim-lock file: {exc}") from exc
     targets = data.get("targets", [])
     return targets if isinstance(targets, list) else []
 
 
-def _find_claim_target(job) -> Optional[dict]:
+def _find_claim_target(job, lock_path: Path) -> Optional[dict]:
     job_company = _norm_claim_text(getattr(job, "company", ""))
     job_title = _norm_claim_text(getattr(job, "title", ""))
     job_url = _norm_claim_text(getattr(job, "url", ""))
 
     company_matches: list[dict] = []
-    for target in _load_claim_targets():
+    for target in _load_claim_targets(lock_path):
         target_url = _norm_claim_text(target.get("url"))
         if target_url and target_url == job_url:
             return target
@@ -204,8 +242,13 @@ def _find_claim_target(job) -> Optional[dict]:
 
 
 def _enforce_claim_lock(job, *, claim_approved: bool) -> None:
+    lock_path = _resolve_claim_lock_path()
+    if lock_path is None:
+        console.print("[dim]Claim-lock not configured (no vetted-targets file) — skipping that check.[/dim]")
+        return
+
     try:
-        target = _find_claim_target(job)
+        target = _find_claim_target(job, lock_path)
     except RuntimeError as exc:
         console.print(f"[red]Claim-lock blocked staging:[/red] {exc}")
         raise typer.Exit(1) from exc
@@ -213,7 +256,7 @@ def _enforce_claim_lock(job, *, claim_approved: bool) -> None:
     if target is None:
         console.print(
             "[red]Claim-lock blocked staging:[/red] "
-            f"{job.company} is not present in {CLAUDE_VETTED_TARGETS_PATH}."
+            f"{job.company} is not present in {lock_path}."
         )
         console.print("[dim]Claude must vet it and set materials_status to 'ready' before JobPilot fills it.[/dim]")
         raise typer.Exit(1)
@@ -234,11 +277,11 @@ def _enforce_claim_lock(job, *, claim_approved: bool) -> None:
         raise typer.Exit(1)
     if not claim_approved:
         approved = typer.confirm(
-            f"Claude materials are ready for {job.company}. Did Garo approve staging this target now?",
+            f"Claude materials are ready for {job.company}. Approve staging this target now?",
             default=False,
         )
         if not approved:
-            console.print("[dim]Not staged. Waiting for explicit Garo approval.[/dim]")
+            console.print("[dim]Not staged. Waiting for your explicit approval.[/dim]")
             raise typer.Exit(0)
 
 
@@ -547,7 +590,12 @@ def start(
         border_style="cyan",
     ))
 
-    asyncio.run(_start_async(port, watch))
+    try:
+        asyncio.run(_start_async(port, watch))
+    except KeyboardInterrupt:
+        # Ctrl+C lands here, not inside the coroutine — asyncio cancels the
+        # task and re-raises KeyboardInterrupt out of asyncio.run().
+        console.print("\n[cyan]Session saved. Run 'jobpilot start' to resume.[/cyan]")
 
 
 async def _start_async(port: int, watch: bool):
@@ -734,8 +782,13 @@ def _edit_profile(store):
     p.portfolio_url = typer.prompt("Portfolio URL", default=p.portfolio_url or "")
     p.github_url = typer.prompt("GitHub URL", default=p.github_url or "")
     p.resume_path = typer.prompt("Resume file path", default=p.resume_path or "")
-    exp = typer.prompt("Years of experience", default=str(p.years_of_experience) or "0")
-    p.years_of_experience = int(exp) if exp.isdigit() else 0
+    while True:
+        exp = typer.prompt("Years of experience", default=str(p.years_of_experience or 0))
+        parsed_exp = _parse_years_of_experience(exp)
+        if parsed_exp is not None:
+            p.years_of_experience = parsed_exp
+            break
+        console.print("[yellow]Couldn't read a number from that — enter digits, like 5.[/yellow]")
     p.current_title = typer.prompt("Current job title", default=p.current_title or "")
 
     store.save(p)
@@ -891,7 +944,7 @@ def apply(
     job_id: str = typer.Argument(..., help="Job ID from the queue (shown in dashboard or 'jobpilot queue')"),
     port: int = typer.Option(9222, help="Chrome debugging port"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be filled without filling"),
-    claim_approved: bool = typer.Option(False, "--claim-approved", help="Use only after Garo explicitly approves staging a Claude-ready target"),
+    claim_approved: bool = typer.Option(False, "--claim-approved", help="Use only if you've already approved staging this Claude-ready target"),
 ):
     """Auto-fill a job application. Stops before submit — you approve."""
     from jobpilot.core.queue_builder import get_job, update_job_status
