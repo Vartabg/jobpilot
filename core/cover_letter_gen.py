@@ -3,8 +3,8 @@ Cover Letter Generator — AI-tailored cover letters per application.
 
 Generates a professional cover letter using:
   1. Parsed JD (from jd_parser) for company/role context
-  2. Resume RAG context for candidate background
-  3. Ollama for natural language generation
+  2. Resume RAG context for candidate background (when the local Bro stack is up)
+  3. The AI backend (local Bro or Gemini) for natural language generation
 
 Cover letters are cached by JD hash to avoid re-generating for the same
 posting. Saved as plain text in data/cover_letters/.
@@ -49,17 +49,20 @@ def generate_cover_letter(
 
     # Build prompt
     try:
-        from jobpilot.core.bro_client import query_rag, chat as bro_chat, is_bro_running
+        from jobpilot.core import llm_client
+        from jobpilot.core.bro_client import is_bro_running, query_rag
 
-        if not is_bro_running():
-            log.warning("Bro not running — cannot generate cover letter")
+        if not llm_client.is_available():
+            log.warning("No AI backend available — cannot generate cover letter")
             return None
 
-        # Pull resume context from RAG
-        resume_ctx = query_rag(
-            f"Summarise the candidate's experience relevant to {jd_title} at {jd_company}",
-            top_k=5,
-        )
+        # Pull resume context from RAG (only exists on the local Bro backend)
+        resume_ctx = ""
+        if is_bro_running():
+            resume_ctx = query_rag(
+                f"Summarise the candidate's experience relevant to {jd_title} at {jd_company}",
+                top_k=5,
+            )
 
         reqs_text = "\n".join(f"- {r}" for r in jd_requirements[:8]) if jd_requirements else "Not specified"
 
@@ -81,9 +84,13 @@ Today's date: {datetime.now().strftime('%B %d, %Y')}
 Begin the letter with "Dear Hiring Manager," and end with "Sincerely, {candidate_name or 'The Candidate'}".
 """
 
-        letter = bro_chat(prompt, force_smart=True)
+        try:
+            letter = llm_client.complete(prompt, smart=True)
+        except llm_client.LLMUnavailable as exc:
+            log.warning(f"Cover letter generation failed: {exc}")
+            return None
 
-        if letter and not letter.startswith("Error") and len(letter) > 100:
+        if letter and len(letter) > 100:
             # Clean up
             letter = letter.strip()
             cache_path.write_text(letter)

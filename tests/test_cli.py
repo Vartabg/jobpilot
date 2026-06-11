@@ -41,7 +41,7 @@ def test_doctor_reports_ready_stack():
 
     assert result.exit_code == 0
     assert "Chrome CDP" in result.stdout
-    assert "Bro API" in result.stdout
+    assert "AI backend" in result.stdout
     assert "LinkedIn" in result.stdout
 
 

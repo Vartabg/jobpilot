@@ -28,10 +28,8 @@ from jobpilot.core.autonomy import AutonomyConfig, AutonomyMode
 from jobpilot.core.selector_registry import NEXT_BUTTON, FILE_INPUTS
 from jobpilot.core.cover_letter_gen import generate_cover_letter, get_cached_path
 from jobpilot.core.resume_tailor import ResumeTailor
-from jobpilot.core.bro_client import (
-    chat as bro_chat,
-    get_health, get_job_advice,
-)
+from jobpilot.core import llm_client
+from jobpilot.core.bro_client import get_health, is_bro_running, query_rag
 from jobpilot.learning.action_recorder import ActionRecorder
 from jobpilot.core.browser_interface import BrowserInterface
 from jobpilot.core.logger import get_logger
@@ -322,7 +320,7 @@ class ApplicationEngine:
                         if page_info.title
                         else "Unknown"
                     )
-                    advice = get_job_advice(
+                    advice = self._field_advice(
                         job_title, "LinkedIn", current_field.label
                     )
                     await self.chat.send_message(advice)
@@ -336,8 +334,38 @@ class ApplicationEngine:
                 )
         else:
             job_context = _build_job_context(page_info, app_page, parsed_jd)
-            reply = bro_chat(msg, context=job_context)
+            try:
+                reply = llm_client.complete(msg, context=job_context)
+            except llm_client.LLMUnavailable as exc:
+                reply = str(exc)
             await self.chat.send_message(reply)
+
+    @staticmethod
+    def _field_advice(job_title: str, company: str, question: str) -> str:
+        """AI advice for one application question via the active backend.
+
+        Resume RAG context is included when the local Bro stack is up. On
+        failure the error text is returned as the chat reply (legacy contract).
+        """
+        rag_context = (
+            query_rag(f"{question} {job_title} {company}", top_k=5)
+            if is_bro_running()
+            else ""
+        )
+
+        context = f"""You are helping with a job application.
+Job: {job_title} at {company}
+Question: {question}
+
+Relevant background from resume:
+{rag_context if rag_context else "(No resume indexed yet)"}
+
+Provide a concise, professional answer suggestion."""
+
+        try:
+            return llm_client.complete(question, context=context, smart=True)
+        except llm_client.LLMUnavailable as exc:
+            return str(exc)
 
     # -- voice dispatch ------------------------------------------------------
 

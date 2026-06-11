@@ -79,7 +79,8 @@ class QuestionMatcher:
     def match(self, question: str, threshold: float = 0.45, use_rag: bool = True) -> MatchResult:
         """
         Find the best matching template for a question.
-        Falls back to RAG + Ollama if no good template match.
+        Falls back to the AI backend (RAG-grounded when Bro is up) if no good
+        template match.
         
         Args:
             question: The question text to match
@@ -134,23 +135,28 @@ class QuestionMatcher:
     
     def _rag_answer(self, question: str) -> Optional[str]:
         """
-        Generate an answer using RAG (resume context) + Ollama.
-        Requires Bro to be running.
+        Generate a grounded answer via the AI backend (local Bro or Gemini).
+
+        Candidate context comes from Bro's RAG index when the local stack is
+        up; otherwise the saved profile is used so Gemini-only users still get
+        grounded answers. Never answers with zero candidate context.
         """
         try:
-            from jobpilot.core.bro_client import query_rag, chat as bro_chat, is_bro_running
-            
-            if not is_bro_running():
+            from jobpilot.core import llm_client
+            from jobpilot.core.bro_client import is_bro_running, query_rag
+
+            if not llm_client.is_available():
                 return None
-            
+
             # Get relevant context from RAG (resume, profile, etc.)
-            context = query_rag(question, top_k=3)
-            
+            context = query_rag(question, top_k=3) if is_bro_running() else ""
+            if not context:
+                context = self._profile_context()
+
             if not context:
                 return None
-            
-            # Ask Ollama to generate an answer
-            prompt = f"""You are helping someone fill out a job application. 
+
+            prompt = f"""You are helping someone fill out a job application.
 Based on their resume/profile below, write a brief, professional answer to this question.
 Keep it concise (1-3 sentences) and first-person.
 
@@ -160,22 +166,46 @@ Resume/Profile context:
 Question: {question}
 
 Answer:"""
-            
-            answer = bro_chat(prompt)
-            
-            # Clean up the answer
-            if answer and not answer.startswith("Error") and not answer.startswith("Bro is not"):
-                # Remove any "Answer:" prefix the model might have added
-                answer = answer.strip()
-                if answer.lower().startswith("answer:"):
-                    answer = answer[7:].strip()
-                return answer
-            
-            return None
-            
+
+            try:
+                answer = llm_client.complete(prompt)
+            except llm_client.LLMUnavailable:
+                return None
+
+            # Remove any "Answer:" prefix the model might have added
+            answer = answer.strip()
+            if answer.lower().startswith("answer:"):
+                answer = answer[7:].strip()
+            return answer or None
+
         except Exception as e:
             log.warning("RAG fallback failed: %s", e)
             return None
+
+    @staticmethod
+    def _profile_context() -> str:
+        """Grounding context built from the saved profile (no RAG needed)."""
+        try:
+            from jobpilot.core.profile_store import get_profile_store
+
+            profile = get_profile_store().load()
+        except Exception:
+            return ""
+
+        lines: list[str] = []
+        name = f"{profile.first_name} {profile.last_name}".strip()
+        if name:
+            lines.append(f"Name: {name}")
+        if profile.current_title:
+            lines.append(f"Current title: {profile.current_title}")
+        if profile.current_company:
+            lines.append(f"Current company: {profile.current_company}")
+        if profile.years_of_experience:
+            lines.append(f"Years of experience: {profile.years_of_experience}")
+        for saved_question, saved_answer in list(profile.custom_answers.items())[:8]:
+            if saved_question and saved_answer:
+                lines.append(f"{saved_question}: {saved_answer}")
+        return "\n".join(lines)
     
     def add_template(self, question: str, answer: str):
         """Add or update an answer template"""
@@ -231,7 +261,7 @@ Answer:"""
         """Match a question and enrich the answer with JD context.
 
         For contextual questions (why interested, experiences, strengths),
-        always tailors the template answer using the JD summary via Ollama.
+        tailors the template answer using the JD summary via the AI backend.
         For factual questions (years of experience, salary), returns the
         template answer as-is.
         """
@@ -254,12 +284,9 @@ Answer:"""
         if not needs_context:
             return base  # factual → return template as-is
 
-        # Enrich via Ollama
+        # Enrich via the AI backend (local Bro or Gemini)
         try:
-            from jobpilot.core.bro_client import chat as bro_chat, is_bro_running
-
-            if not is_bro_running():
-                return base
+            from jobpilot.core import llm_client
 
             prompt = (
                 f"Rewrite this job application answer to be specific to the company and role.\n"
@@ -269,8 +296,11 @@ Answer:"""
                 f"Original answer: {base.answer}\n\n"
                 f"Tailored answer:"
             )
-            enriched = bro_chat(prompt)
-            if enriched and not enriched.startswith("Error") and len(enriched) > 10:
+            try:
+                enriched = llm_client.complete(prompt)
+            except llm_client.LLMUnavailable:
+                return base
+            if enriched and len(enriched) > 10:
                 enriched = enriched.strip()
                 if enriched.lower().startswith("tailored answer:"):
                     enriched = enriched[len("tailored answer:"):].strip()

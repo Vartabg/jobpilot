@@ -268,10 +268,10 @@ class TestChatDispatch:
         assert any("No applications" in m for m in chat.sent_messages)
 
     @pytest.mark.asyncio
-    async def test_freeform_message_calls_bro(self):
+    async def test_freeform_message_calls_llm_backend(self):
         engine, _, _, _, chat, *_ = _make_engine()
         page_info = PageInfo("https://linkedin.com", "Job", True, True)
-        with patch("jobpilot.core.engine.bro_chat", return_value="I can help!"):
+        with patch("jobpilot.core.engine.llm_client.complete", return_value="I can help!"):
             await engine.handle_chat("What is Python?", page_info, None, None)
         assert any("I can help" in m for m in chat.sent_messages)
 

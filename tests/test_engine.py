@@ -219,12 +219,24 @@ class TestChatDispatch:
         assert "No applications" in msg
 
     @pytest.mark.asyncio
-    @patch("jobpilot.core.engine.bro_chat")
-    async def test_freeform_message(self, mock_bro, engine, mock_chat):
-        mock_bro.return_value = "AI response"
+    @patch("jobpilot.core.engine.llm_client.complete")
+    async def test_freeform_message(self, mock_complete, engine, mock_chat):
+        mock_complete.return_value = "AI response"
         await engine.handle_chat("what is python?", FakePageInfo(), None, None)
         msg = mock_chat.send_message.call_args[0][0]
         assert msg == "AI response"
+
+    @pytest.mark.asyncio
+    @patch("jobpilot.core.engine.llm_client.complete")
+    async def test_freeform_message_backend_down_replies_with_hint(
+        self, mock_complete, engine, mock_chat
+    ):
+        from jobpilot.core.llm_client import LLMUnavailable, NO_BACKEND_MESSAGE
+
+        mock_complete.side_effect = LLMUnavailable(NO_BACKEND_MESSAGE)
+        await engine.handle_chat("what is python?", FakePageInfo(), None, None)
+        msg = mock_chat.send_message.call_args[0][0]
+        assert "GEMINI_API_KEY" in msg
 
 
 class TestVoiceDispatch:

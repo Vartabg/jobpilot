@@ -301,31 +301,3 @@ def transcribe_bytes(audio_bytes: bytes, filename: str = "audio.webm") -> str:
         return "[STT timeout]"
     except Exception as e:
         return f"[STT error: {e}]"
-
-
-def get_job_advice(job_title: str, company: str, question: str) -> str:
-    """
-    Get AI advice for a specific job application question.
-    Uses RAG context from resume + smart model for quality.
-    
-    Args:
-        job_title: The job being applied for
-        company: Company name
-        question: The application question
-        
-    Returns:
-        AI-generated advice/answer suggestion
-    """
-    # Get relevant resume context
-    rag_context = query_rag(f"{question} {job_title} {company}", top_k=5)
-    
-    context = f"""You are helping with a job application.
-Job: {job_title} at {company}
-Question: {question}
-
-Relevant background from resume:
-{rag_context if rag_context else "(No resume indexed yet)"}
-
-Provide a concise, professional answer suggestion."""
-    
-    return chat(question, context=context, force_smart=True)
