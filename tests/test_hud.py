@@ -29,9 +29,15 @@ def test_export_hud_text_with_mocks(monkeypatch):
         url="https://jobs.lever.co/x", location="Austin, TX or Remote",
         portal="lever", track="tech", fit_score=46, keywords=[], status="queued",
     )
-    monkeypatch.setattr("jobpilot.ui.hud.load_gigs", lambda opts: ([gig], {"shown": 1, "collected": 1}))
-    monkeypatch.setattr("jobpilot.ui.hud.load_jobs", lambda opts: [job])
-    monkeypatch.setattr("jobpilot.ui.hud.load_pipeline_rows", lambda opts: [])
+    from jobpilot.ui.hud_state import HudData
+
+    monkeypatch.setattr(
+        "jobpilot.ui.hud.load_hud_data",
+        lambda opts, **kw: HudData(
+            gigs=[gig], jobs=[job], gigs_meta={"shown": 1, "collected": 1},
+            pipe_rows=[], pipe_counts={},
+        ),
+    )
 
     text = export_hud_text(IncomeViewOptions())
     assert "Acme" in text
@@ -50,8 +56,8 @@ def test_build_hud_layout_renders(monkeypatch):
         ),
     )
     monkeypatch.setattr("jobpilot.ui.hud.get_profile_store", lambda: type("S", (), {"load": lambda self: type("P", (), {"first_name": "G", "last_name": "V"})()})())
-    monkeypatch.setattr("jobpilot.ui.hud._check_dashboard", lambda _p: False)
-    monkeypatch.setattr("jobpilot.ui.hud._check_chrome", lambda: False)
+    monkeypatch.setattr("jobpilot.ui.hud.check_dashboard", lambda _p: False)
+    monkeypatch.setattr("jobpilot.ui.hud.check_chrome", lambda _p=9222: False)
     monkeypatch.setattr("jobpilot.ui.hud.get_application_tracker", lambda: type("T", (), {"get_stats": lambda self: {}, "close": lambda self: None})())
 
     layout = build_hud_layout(IncomeViewOptions())
@@ -82,8 +88,8 @@ def test_build_hud_layout_interactive_state(monkeypatch):
         gigs=[gig], jobs=[], gigs_meta={"shown": 1, "collected": 1, "fresh_count": 1}, pipe_rows=[], pipe_counts={},
     ))
     monkeypatch.setattr("jobpilot.ui.hud.get_profile_store", lambda: type("S", (), {"load": lambda self: type("P", (), {"first_name": "G", "last_name": "V"})()})())
-    monkeypatch.setattr("jobpilot.ui.hud._check_dashboard", lambda _p: False)
-    monkeypatch.setattr("jobpilot.ui.hud._check_chrome", lambda: False)
+    monkeypatch.setattr("jobpilot.ui.hud.check_dashboard", lambda _p: False)
+    monkeypatch.setattr("jobpilot.ui.hud.check_chrome", lambda _p=9222: False)
     monkeypatch.setattr("jobpilot.ui.hud.get_application_tracker", lambda: type("T", (), {"get_stats": lambda self: {}, "close": lambda self: None})())
 
     state = HudState(lane="gig", gig_index=0)

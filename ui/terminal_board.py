@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import re
 import time
 from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Optional
 
 from rich import box
@@ -18,32 +16,22 @@ from rich.table import Table
 from rich.text import Text
 
 from jobpilot.core.application_tracker import get_application_tracker
-from jobpilot.core.config import DATA_DIR, DEFAULT_SERVE_PORT
+from jobpilot.core.config import DEFAULT_SERVE_PORT
 from jobpilot.core.profile_store import get_profile_store
 from jobpilot.core.queue_builder import QueueJob, load_queue
+from jobpilot.ui.view_helpers import (
+    check_chrome,
+    check_dashboard,
+    is_senior_title,
+    materials_ready,
+    score_bar,
+)
 
-ANSWERS_DIR = DATA_DIR / "answers"
-
-
-def score_bar(score: int, width: int = 10) -> Text:
-    """Render a 0-100 score as a colored block bar."""
-    score = max(0, min(100, int(score or 0)))
-    filled = round(score / 100 * width)
-    bar = Text()
-    for i in range(width):
-        if i < filled:
-            if score >= 75:
-                bar.append("█", style="bold green")
-            elif score >= 55:
-                bar.append("█", style="cyan")
-            elif score >= 40:
-                bar.append("█", style="yellow")
-            else:
-                bar.append("█", style="dim")
-        else:
-            bar.append("░", style="dim")
-    bar.append(f" {score}", style="bold")
-    return bar
+# Backward-compatible private aliases (tests and legacy imports).
+_is_senior_title = is_senior_title
+_materials_ready = materials_ready
+_check_dashboard = check_dashboard
+_check_chrome = check_chrome
 
 
 def _status_style(status: str) -> str:
@@ -56,30 +44,6 @@ def _status_style(status: str) -> str:
         "skipped": "dim",
         "interview": "bold magenta",
     }.get(status or "", "white")
-
-
-def _company_slug(company: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", (company or "").strip().lower()).strip("-")
-
-
-def _materials_ready(company: str) -> Optional[Path]:
-    slug = _company_slug(company)
-    if not slug:
-        return None
-    company_dir = ANSWERS_DIR / slug
-    if not company_dir.is_dir():
-        # Also try compact slug (no hyphens), e.g. luxurypresence
-        compact = slug.replace("-", "")
-        alt = ANSWERS_DIR / compact
-        company_dir = alt if alt.is_dir() else company_dir
-    if not company_dir.is_dir():
-        return None
-    paste = company_dir / "PASTE_SHEET.txt"
-    if paste.exists():
-        return paste
-    for candidate in sorted(company_dir.glob("*.md")):
-        return candidate
-    return None
 
 
 def _location_bucket(location: str) -> str:
@@ -107,11 +71,6 @@ class BoardFilters:
     limit: int = 20
 
 
-def _is_senior_title(title: str) -> bool:
-    t = (title or "").lower()
-    return "senior" in t and not any(x in t for x in ("manager", "principal", "staff", "director", "vp"))
-
-
 def filter_jobs(jobs: list[QueueJob], filters: BoardFilters) -> list[QueueJob]:
     view = list(jobs)
     if filters.fresh:
@@ -119,7 +78,7 @@ def filter_jobs(jobs: list[QueueJob], filters: BoardFilters) -> list[QueueJob]:
     elif filters.status and filters.status != "all":
         view = [j for j in view if j.status == filters.status]
     if filters.autonomous:
-        view = [j for j in view if not _is_senior_title(j.title)]
+        view = [j for j in view if not is_senior_title(j.title)]
     if filters.austin:
         view = [j for j in view if "austin" in (j.location or "").lower()]
     if filters.location:
@@ -176,7 +135,7 @@ def _next_up_panel(jobs: list[QueueJob]) -> Optional[Panel]:
             border_style="yellow",
         )
     top = max(queued, key=lambda j: (j.fit_score, j.psyche_score))
-    materials = _materials_ready(top.company)
+    materials = materials_ready(top.company)
     mat_line = (
         f"[green]Materials ready:[/green] {materials}"
         if materials
@@ -212,7 +171,7 @@ def _queue_table(jobs: list[QueueJob], *, title: str) -> Table:
     table.add_column("📋", width=3, justify="center")
 
     for i, job in enumerate(jobs, 1):
-        ready = "✓" if _materials_ready(job.company) else "·"
+        ready = "✓" if materials_ready(job.company) else "·"
         ready_style = "green" if ready == "✓" else "dim"
         table.add_row(
             str(i),
@@ -262,26 +221,6 @@ def _filter_caption(filters: BoardFilters) -> str:
     return " · ".join(bits)
 
 
-def _check_dashboard(port: int) -> bool:
-    try:
-        import urllib.request
-
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/queue", timeout=1.5) as resp:
-            return resp.status == 200
-    except Exception:
-        return False
-
-
-def _check_chrome(port: int = 9222) -> bool:
-    try:
-        import urllib.request
-
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}/json/version", timeout=1.5):
-            return True
-    except Exception:
-        return False
-
-
 def build_board_renderable(
     *,
     filters: Optional[BoardFilters] = None,
@@ -324,8 +263,8 @@ def build_board_renderable(
             _stats_panel(jobs),
             _tracker_panel(stats),
             _services_panel(
-                dashboard_up=_check_dashboard(serve_port),
-                chrome_up=_check_chrome(),
+                dashboard_up=check_dashboard(serve_port),
+                chrome_up=check_chrome(),
                 port=serve_port,
             ),
         ],

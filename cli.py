@@ -950,13 +950,14 @@ def radar(
     interval: float = typer.Option(30.0, "--interval", help="Watch refresh seconds"),
 ):
     """Autonomous income radar — contract gigs (primary) + ATS backup (secondary)."""
-    from jobpilot.ui.radar import RadarOptions, render_radar, watch_radar
+    from jobpilot.ui.income_data import IncomeViewOptions
+    from jobpilot.ui.radar import render_radar, watch_radar
 
-    opts = RadarOptions(
+    opts = IncomeViewOptions(
         austin=austin,
         contract_first=contract_first,
         drop_rigid_schedule=anti_schedule,
-        gigs_top=gigs_top,
+        gigs_limit=gigs_top,
         jobs_limit=jobs_limit,
         min_gig_score=min_gig_score,
     )

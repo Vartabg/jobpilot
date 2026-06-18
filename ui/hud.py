@@ -42,7 +42,7 @@ from jobpilot.ui.income_data import (
     pipeline_summary,
     short_url,
 )
-from jobpilot.ui.terminal_board import _check_chrome, _check_dashboard, _materials_ready, score_bar
+from jobpilot.ui.view_helpers import check_chrome, check_dashboard, materials_ready, score_bar
 from jobpilot.ui.terminal_keys import osc8_link, raw_stdin, read_key
 
 AUSTIN_ARRIVAL = date(2026, 6, 30)
@@ -242,7 +242,7 @@ def _jobs_table(jobs: list[QueueJob], state: HudState) -> Table:
         selected = state.lane == "job" and i == state.job_index
         row_style = _row_heat_style(j.fit_score, selected=selected)
         marker = Text("▶" if selected else " ", style="bold cyan")
-        mat = "✓" if _materials_ready(j.company) else "·"
+        mat = "✓" if materials_ready(j.company) else "·"
         t.add_row(
             marker,
             str(i + 1),
@@ -327,7 +327,7 @@ def _detail_panel(
     elif state.lane == "job" and jobs:
         idx = _clamp_index(state.job_index, len(jobs))
         j = jobs[idx]
-        mat = "paste sheet ready" if _materials_ready(j.company) else "no materials yet"
+        mat = "paste sheet ready" if materials_ready(j.company) else "no materials yet"
         link = osc8_link(j.url, short_url(j.url, 64))
         lines.append(
             f"[bold cyan]J{idx + 1}[/bold cyan] {j.company} — {j.title}\n"
@@ -346,7 +346,7 @@ def _detail_panel(
         )
     elif jobs:
         j = jobs[0]
-        mat = "paste sheet ready" if _materials_ready(j.company) else "no materials yet"
+        mat = "paste sheet ready" if materials_ready(j.company) else "no materials yet"
         link = osc8_link(j.url, short_url(j.url, 64))
         lines.append(
             f"[bold cyan]J1[/bold cyan] {j.company} — {j.title}\n"
@@ -379,8 +379,8 @@ def _help_panel() -> Panel:
 
 
 def _footer_panel(port: int = DEFAULT_SERVE_PORT, *, interactive: bool = False) -> Panel:
-    dash = "up" if _check_dashboard(port) else "down"
-    chrome = "up" if _check_chrome() else "down"
+    dash = "up" if check_dashboard(port) else "down"
+    chrome = "up" if check_chrome() else "down"
     tracker = get_application_tracker()
     try:
         stats = tracker.get_stats()
@@ -673,8 +673,8 @@ def render_hud(
 def export_hud_text(opts: Optional[IncomeViewOptions] = None) -> str:
     """Plain-text export of all HUD rows (for piping / logs)."""
     opts = opts or IncomeViewOptions()
-    gigs, _ = load_gigs(opts)
-    jobs = load_jobs(opts)
+    data = load_hud_data(opts)
+    gigs, jobs = data.gigs, data.jobs
     lines = ["=== GIGS ==="]
     for i, g in enumerate(gigs, 1):
         lines.append(

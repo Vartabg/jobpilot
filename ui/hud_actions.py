@@ -9,7 +9,7 @@ from typing import Optional
 
 from jobpilot.core.queue_builder import QueueJob, update_job_status
 from jobpilot.gigs.core.models import Gig
-from jobpilot.ui.terminal_board import _materials_ready
+from jobpilot.ui.view_helpers import materials_ready
 
 
 def open_url(url: str) -> bool:
@@ -79,7 +79,7 @@ def skip_job(job: QueueJob) -> str:
 
 
 def open_materials(company: str) -> str:
-    path = _materials_ready(company)
+    path = materials_ready(company)
     if not path:
         return "no materials — draft answers first"
     subprocess.run(["open", str(path)], check=False)

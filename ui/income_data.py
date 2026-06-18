@@ -14,11 +14,16 @@ from jobpilot.gigs.core.dedupe import dedupe_cross_source
 from jobpilot.gigs.core.models import Gig
 from jobpilot.gigs.core.scorer import apply_friction, filter_and_rank
 from jobpilot.gigs.core.store import filter_new
-from jobpilot.ui.terminal_board import _is_senior_title, _materials_ready
+from jobpilot.ui.view_helpers import is_senior_title
 
 
 @dataclass
 class IncomeViewOptions:
+    """Shared filters for HUD and radar (gigs + backup ATS jobs).
+
+    ``hide_senior_jobs`` matches ``BoardFilters.autonomous`` on the queue board.
+    """
+
     austin: bool = True
     contract_first: bool = True
     drop_rigid_schedule: bool = True
@@ -97,7 +102,7 @@ def load_gigs(
 def load_jobs(opts: IncomeViewOptions) -> list[QueueJob]:
     jobs = [j for j in load_queue() if j.status == "queued"]
     if opts.hide_senior_jobs:
-        jobs = [j for j in jobs if not _is_senior_title(j.title)]
+        jobs = [j for j in jobs if not is_senior_title(j.title)]
     if opts.austin:
         jobs = [
             j for j in jobs
