@@ -548,6 +548,8 @@ def get_local_ip() -> str:
         return "127.0.0.1"
 
 
-def run_server(host: str = "127.0.0.1", port: int = 8766) -> None:
+def run_server(host: str = "127.0.0.1", port: int | None = None) -> None:
+    from jobpilot.core.config import DEFAULT_SERVE_PORT
+
     import uvicorn
-    uvicorn.run(app, host=host, port=port, log_level="info")
+    uvicorn.run(app, host=host, port=port or DEFAULT_SERVE_PORT, log_level="info")

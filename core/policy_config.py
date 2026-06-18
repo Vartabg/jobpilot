@@ -37,6 +37,8 @@ DEFAULTS: dict[str, Any] = {
     },
     "queue": {
         "title_kill_keywords": [],
+        "title_deprioritize_keywords": [],
+        "title_deprioritize_penalty": 18,
         "moat_company_tags": {},
         "high_moat_industries": [],
         "excluded_industries": [],
@@ -79,6 +81,8 @@ class QueuePolicy:
     """Queue-builder policy (consumed by ``core/queue_builder.py``)."""
 
     title_kill_keywords: tuple[str, ...] = ()
+    title_deprioritize_keywords: tuple[str, ...] = ()
+    title_deprioritize_penalty: int = 18
     moat_company_tags: dict[str, str] = field(default_factory=dict)
     high_moat_industries: frozenset = frozenset()
     excluded_industries: frozenset = frozenset()
@@ -165,6 +169,8 @@ def policy_from_dict(data: Optional[dict[str, Any]]) -> Policy:
     )
     queue = QueuePolicy(
         title_kill_keywords=_term_tuple(queue_raw.get("title_kill_keywords")),
+        title_deprioritize_keywords=_term_tuple(queue_raw.get("title_deprioritize_keywords")),
+        title_deprioritize_penalty=int(queue_raw.get("title_deprioritize_penalty", 18) or 18),
         moat_company_tags=_str_map(queue_raw.get("moat_company_tags"), lower_values=True),
         high_moat_industries=frozenset(_term_tuple(queue_raw.get("high_moat_industries"))),
         excluded_industries=frozenset(_term_tuple(queue_raw.get("excluded_industries"))),

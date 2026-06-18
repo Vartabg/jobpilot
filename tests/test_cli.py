@@ -79,6 +79,14 @@ def test_resume_command_generates_output(tmp_path: Path):
     assert "ATS Resume Draft Ready" in result.stdout
 
 
+def test_board_command_renders_dashboard():
+    with patch("jobpilot.ui.terminal_board.render_board") as render:
+        result = runner.invoke(app, ["board", "--austin", "--limit", "5"])
+
+    assert result.exit_code == 0
+    render.assert_called_once()
+
+
 def test_apply_claim_lock_blocks_non_ready_target(tmp_path: Path):
     claim_file = tmp_path / "claude-vetted-targets.json"
     claim_file.write_text(json.dumps({

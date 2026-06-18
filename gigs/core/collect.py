@@ -33,7 +33,9 @@ def scraper_registry() -> list[tuple[str, Callable[[], list[Gig]]]]:
     return scrapers
 
 
-def collect_all() -> tuple[list[Gig], list[SourceResult]]:
+def collect_all(
+    on_progress: Callable[[str], None] | None = None,
+) -> tuple[list[Gig], list[SourceResult]]:
     """Run every scraper. Failures are non-fatal; health is always recorded."""
     gigs: list[Gig] = []
     results: list[SourceResult] = []
@@ -44,11 +46,15 @@ def collect_all() -> tuple[list[Gig], list[SourceResult]]:
             gigs.extend(batch)
             results.append(SourceResult(name=name, fetched=len(batch), ok=True))
             log.info("%s: %d gigs", name, len(batch))
+            if on_progress:
+                on_progress(f"[green]✓[/] {name}: {len(batch)} gigs")
         except Exception as exc:
             log.warning("%s failed: %s", name, exc)
             results.append(
                 SourceResult(name=name, fetched=0, ok=False, error=str(exc)),
             )
+            if on_progress:
+                on_progress(f"[red]✗[/] {name}: {exc}")
 
     record_results(results)
     return gigs, results

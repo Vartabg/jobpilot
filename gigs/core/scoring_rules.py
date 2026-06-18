@@ -41,11 +41,17 @@ TITLE_ENGINEERING_PATTERNS = {
     "ai/ml engineer": 22,
     "ml engineer": 18,
     "ai solutions": 18,
-    "solutions engineer": 16,
+    "solutions engineer": 18,
     # NOTE: bare "automation engineer" is deliberately absent — it rescued
     # "Senior QA Automation Engineer" from the QA title cap. AI-flavored
     # automation roles match via "ai automation engineer" / "ai automation".
     "founding engineer": 18,
+    "implementation engineer": 20,
+    "integration engineer": 16,
+    "deployment engineer": 16,
+    "technical consultant": 18,
+    "independent contractor": 22,
+    "freelance": 16,
     "full stack engineer": 12,
     "fullstack engineer": 12,
     "full-stack engineer": 12,
@@ -99,6 +105,10 @@ TITLE_NEGATIVES = {
     # Data engineering — adjacent but not the target stack
     "data engineer": -15,
     "data analyst": -25,
+    # Senior IC ladder — user wants generalist/contract, not seniority theater
+    "senior engineer": -20,
+    "senior software": -20,
+    "staff engineer": -40,
     # Seniority / experience floors
     "intern": -60,
     "internship": -60,
@@ -166,9 +176,20 @@ SKILL_WEIGHTS = {
     "veteran": 6,
     # Location preferences
     "remote": 4,
+    "austin": 6,
     "new york": 3,
     "nyc": 3,
     "queens": 6,
+    # Autonomy / async / contract body signals
+    "async": 10,
+    "flexible hours": 10,
+    "flexible schedule": 10,
+    "milestone": 8,
+    "deliverable": 8,
+    "1099": 12,
+    "freelance": 10,
+    "hourly": 6,
+    "project-based": 8,
 }
 
 # Cap on total contribution from SKILL_WEIGHTS so a Marketing ad that
@@ -191,6 +212,16 @@ SCAM_SIGNALS = {
 
 # Description-level negatives (kept narrow — title gating handles role-shape).
 NEGATIVE_TERMS = {
+    "9-5": -18,
+    "9 to 5": -18,
+    "core hours": -15,
+    "daily standup": -12,
+    "daily stand-up": -12,
+    "must be online": -10,
+    "in-office 5 days": -20,
+    "on-site 5 days": -20,
+    "full-time employee only": -25,
+    "w2 only": -20,
     "must be a student": -30,
     "students only": -30,
     "nft project": -25,

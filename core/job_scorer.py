@@ -15,6 +15,7 @@ from jobpilot.core import llm_client
 from jobpilot.core.bro_client import is_bro_running, query_rag
 from jobpilot.core.jd_parser import JDParser, ParsedJD
 from jobpilot.core.policy_config import Policy, get_policy
+from jobpilot.core.work_style import score_work_style, title_seniority_penalty
 from jobpilot.core.profile_store import ProfileStore, UserProfile, get_profile_store
 
 
@@ -98,11 +99,21 @@ class JobScorer:
         matched_skills = [skill for skill in jd_skills if skill.lower() in candidate_skills]
         missing_skills = [skill for skill in jd_skills if skill.lower() not in candidate_skills]
 
-        # Policy filter (applied first; can short-circuit the total)
+        # Policy filter (applied first; refused roles never accumulate other points)
         alignment_status, alignment_rationale = self._check_alignment(parsed_jd)
         if alignment_status == "refused":
-            alignment_points = -100  # forces total to 0 via the clamp below
-        elif alignment_status == "deprioritized":
+            return JobFitResult(
+                score=0,
+                recommendation=self._recommendation(0, alignment_status="refused"),
+                parsed_jd=parsed_jd,
+                components={"Alignment": 0},
+                matched_skills=matched_skills,
+                missing_skills=missing_skills,
+                strengths=[],
+                risks=[alignment_rationale] if alignment_rationale else [],
+            )
+
+        if alignment_status == "deprioritized":
             alignment_points = -25
         else:
             alignment_points = 0
@@ -112,6 +123,7 @@ class JobScorer:
         exp_points, exp_risk = self._score_experience(profile.years_of_experience, raw_text)
         auth_points, auth_risk = self._score_work_auth(profile.authorized_to_work, profile.requires_sponsorship, raw_text)
         location_points = self._score_location(parsed_jd.location_type or self._extract_location_type(raw_text))
+        work_style_points, work_style_reasons = self._score_work_style(raw_text, parsed_jd.title)
 
         components = {
             "Alignment": alignment_points,
@@ -120,6 +132,7 @@ class JobScorer:
             "Experience": exp_points,
             "Work auth": auth_points,
             "Location": location_points,
+            "Work style": work_style_points,
         }
 
         total = max(0, min(100, sum(components.values())))
@@ -137,6 +150,11 @@ class JobScorer:
             strengths.append("Experience level looks aligned with the role")
         if parsed_jd.location_type == "remote":
             strengths.append("Remote role — lower friction to pursue")
+        if work_style_points >= 12:
+            strengths.append("Work style looks autonomous (async/contract/deadline signals)")
+        for reason in work_style_reasons:
+            if reason.startswith("-schedule:") or reason.startswith("-w2-only"):
+                risks.append(f"Schedule/employment flag: {reason.split(':', 1)[-1]}")
 
         if missing_skills:
             risks.append(f"Missing or unclear skills: {', '.join(missing_skills[:4])}")
@@ -258,6 +276,19 @@ class JobScorer:
         if location_type == "onsite":
             return 5
         return 7
+
+    def _score_work_style(self, raw_text: str, title: str) -> tuple[int, list[str]]:
+        """Autonomy / contract / anti-9-5 adjustment mapped to 0-20 points."""
+        queue_policy = self.policy.queue
+        deprioritize = queue_policy.title_deprioritize_keywords or (
+            "senior engineer", "senior software", "senior ai",
+        )
+        senior_pen, _ = title_seniority_penalty(title, deprioritize)
+        delta, reasons = score_work_style(raw_text, title=title)
+        # Map work_style delta (-35..25) + senior penalty into a 0-20 component.
+        combined = delta + senior_pen
+        points = max(0, min(20, 10 + combined // 2))
+        return points, reasons
 
     def _check_alignment(self, parsed_jd: ParsedJD) -> tuple[str, str]:
         """Apply the user's policy filter (``data/policy.json``).

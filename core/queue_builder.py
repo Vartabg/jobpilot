@@ -27,6 +27,7 @@ from jobpilot.core.application_tracker import get_application_tracker
 from jobpilot.core.config import DATA_DIR
 from jobpilot.core.logger import get_logger
 from jobpilot.core.policy_config import get_policy, reset_policy_cache
+from jobpilot.core.work_style import score_work_style, title_seniority_penalty
 from jobpilot.core.portal_scanner import PortalJob, PortalScanner, ScanTarget
 
 PSYCHE_PROFILE_PATH = DATA_DIR / "psyche_profile.json"
@@ -344,6 +345,16 @@ def _score_job(job: PortalJob) -> tuple[int, str, int]:
     psyche = _score_psyche_fit(title_l, company_l, industry, note_l, profile)
 
     score = moat + tier + func + skill + loc + psyche
+
+    deprioritize = policy.title_deprioritize_keywords or (
+        "senior engineer", "senior software", "senior ai", "senior full",
+    )
+    senior_pen, _ = title_seniority_penalty(job.title, deprioritize)
+    score += senior_pen
+
+    # Title-only work-style proxy (no JD at scan time).
+    ws_delta, _ = score_work_style("", title=job.title)
+    score += max(-15, min(10, ws_delta))
 
     if industry in policy.high_moat_industries or any(k in title_l for k in
             ("field", "deployed", "customer engineer", "service engineer")):
