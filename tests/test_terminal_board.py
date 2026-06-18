@@ -4,12 +4,8 @@ import json
 from pathlib import Path
 
 from jobpilot.core.queue_builder import QueueJob, save_queue
-from jobpilot.ui.terminal_board import (
-    BoardFilters,
-    build_board_renderable,
-    filter_jobs,
-    score_bar,
-)
+from jobpilot.ui.terminal_board import BoardFilters, build_board_renderable, filter_jobs
+from jobpilot.ui.view_helpers import score_bar
 
 
 def test_score_bar_colors_by_threshold():
