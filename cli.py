@@ -865,30 +865,133 @@ def serve(
         "deliberately — e.g. --host 100.x.y.z for a specific Tailscale IP. "
         "Avoid 0.0.0.0, which exposes your PII to everyone on the network.",
     ),
-    port: int = typer.Option(8766, help="Port"),
+    port: Optional[int] = typer.Option(
+        None,
+        help="Port (default: 8767 — EYE uses 8766)",
+    ),
 ):
     """Start the remote dashboard (access from phone via Tailscale).
 
     Binds to loopback (127.0.0.1) by default. To reach it from your phone over
     Tailscale, pass your machine's Tailscale IP explicitly with --host.
     """
+    from jobpilot.core.config import DEFAULT_SERVE_PORT
     from jobpilot.core.server import run_server, get_tailscale_ip, get_local_ip
 
+    serve_port = port or DEFAULT_SERVE_PORT
     ts_ip = get_tailscale_ip()
     lan_ip = get_local_ip()
 
     console.print(Panel.fit(
         f"[bold cyan]🚀 JobPilot Remote Dashboard[/bold cyan]\n"
-        + (f"[bold green]Tailscale:[/bold green]  http://{ts_ip}:{port}\n" if ts_ip else "[yellow]Tailscale not detected — start it with `tailscale up`[/yellow]\n")
-        + f"[bold]LAN:[/bold]        http://{lan_ip}:{port}\n"
-        + f"[dim]Local:       http://127.0.0.1:{port}[/dim]\n"
+        + (f"[bold green]Tailscale:[/bold green]  http://{ts_ip}:{serve_port}\n" if ts_ip else "[yellow]Tailscale not detected — start it with `tailscale up`[/yellow]\n")
+        + f"[bold]LAN:[/bold]        http://{lan_ip}:{serve_port}\n"
+        + f"[dim]Local:       http://127.0.0.1:{serve_port}[/dim]\n"
         + f"\n[dim]Open the Tailscale URL on your phone to apply remotely.[/dim]\n"
         + f"[dim]Keep this terminal open. Ctrl+C to stop.[/dim]",
         border_style="cyan",
         title="Mobile Access",
     ))
 
-    run_server(host=host, port=port)
+    run_server(host=host, port=serve_port)
+
+
+@app.command()
+def hud(
+    watch: bool = typer.Option(False, "--watch", "-w", help="Full-screen live HUD"),
+    interval: float = typer.Option(30.0, "--interval", help="Refresh seconds (--watch)"),
+    gigs: int = typer.Option(30, "--gigs", "-g", help="Max contract gigs to list"),
+    jobs: int = typer.Option(20, "--jobs", "-j", help="Max backup ATS jobs to list"),
+    pipeline: int = typer.Option(12, "--pipeline", "-p", help="Max pipeline rows"),
+    min_gig_score: int = typer.Option(45, "--min-gig-score", help="Minimum gigs fit score"),
+    contract_first: bool = typer.Option(True, "--contract-first/--all-gigs-types"),
+    anti_schedule: bool = typer.Option(True, "--anti-schedule/--allow-schedule"),
+    austin: bool = typer.Option(True, "--austin/--no-austin"),
+    fresh_gigs: bool = typer.Option(True, "--fresh/--all-gigs", help="Only unseen gigs vs entire scan"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show numbered URL index for every row"),
+    export_txt: bool = typer.Option(False, "--export", help="Plain-text dump to stdout (all rows + URLs)"),
+    pick: bool = typer.Option(False, "--pick", help="fzf fuzzy-pick a gig or job and open its URL"),
+):
+    """Full-screen terminal HUD — gigs, jobs, pipeline, URLs, and next actions."""
+    from jobpilot.ui.hud import export_hud_text, pick_hud, render_hud, watch_hud
+    from jobpilot.ui.income_data import IncomeViewOptions
+
+    opts = IncomeViewOptions(
+        austin=austin,
+        contract_first=contract_first,
+        drop_rigid_schedule=anti_schedule,
+        gigs_limit=gigs,
+        jobs_limit=jobs,
+        min_gig_score=min_gig_score,
+        gigs_fresh_only=fresh_gigs,
+        pipeline_limit=pipeline,
+    )
+    if export_txt:
+        console.print(export_hud_text(opts=opts))
+        return
+    if pick:
+        pick_hud(console, opts=opts)
+        return
+    if watch:
+        watch_hud(console, opts=opts, interval=interval, verbose=verbose)
+    else:
+        render_hud(console, opts=opts, verbose=verbose)
+
+
+@app.command()
+def radar(
+    austin: bool = typer.Option(True, "--austin/--no-austin", help="Filter jobs to Austin + remote US"),
+    contract_first: bool = typer.Option(True, "--contract-first/--all-gigs", help="Gigs: contract/1099/hourly first"),
+    anti_schedule: bool = typer.Option(True, "--anti-schedule/--allow-schedule", help="Drop 9-5 / core-hours gigs"),
+    gigs_top: int = typer.Option(8, "--gigs", help="Max contract gigs to show"),
+    jobs_limit: int = typer.Option(8, "--jobs", help="Max backup ATS jobs to show"),
+    min_gig_score: int = typer.Option(45, "--min-gig-score", help="Minimum gigs fit score"),
+    watch: bool = typer.Option(False, "--watch", "-w", help="Live refresh"),
+    interval: float = typer.Option(30.0, "--interval", help="Watch refresh seconds"),
+):
+    """Autonomous income radar — contract gigs (primary) + ATS backup (secondary)."""
+    from jobpilot.ui.radar import RadarOptions, render_radar, watch_radar
+
+    opts = RadarOptions(
+        austin=austin,
+        contract_first=contract_first,
+        drop_rigid_schedule=anti_schedule,
+        gigs_top=gigs_top,
+        jobs_limit=jobs_limit,
+        min_gig_score=min_gig_score,
+    )
+    if watch:
+        watch_radar(console, opts=opts, interval=interval)
+    else:
+        render_radar(console, opts=opts)
+
+
+@app.command()
+def board(
+    fresh: bool = typer.Option(True, "--fresh/--all", help="Show only queued roles (default) or full queue"),
+    austin: bool = typer.Option(False, "--austin", "-a", help="Filter to Austin-area roles"),
+    autonomous: bool = typer.Option(False, "--autonomous", help="Hide senior-titled queued roles"),
+    location: str = typer.Option("", "--location", "-l", help="Substring filter on location field"),
+    status: str = typer.Option("queued", "--status", "-s", help="Status filter: queued, applied, rejected, all, …"),
+    limit: int = typer.Option(20, "--limit", "-n", help="Max rows in the queue table"),
+    watch: bool = typer.Option(False, "--watch", "-w", help="Live-refresh the board every few seconds"),
+    interval: float = typer.Option(5.0, "--interval", help="Refresh interval (seconds) for --watch"),
+):
+    """Visual terminal dashboard — queue, next-up, tracker, and service health."""
+    from jobpilot.ui.terminal_board import BoardFilters, render_board, watch_board
+
+    filters = BoardFilters(
+        fresh=fresh,
+        austin=austin,
+        autonomous=autonomous,
+        location=location.strip(),
+        status=status.strip().lower() or "queued",
+        limit=limit,
+    )
+    if watch:
+        watch_board(console, filters=filters, interval=interval)
+    else:
+        render_board(console, filters=filters)
 
 
 @app.command()
@@ -898,9 +1001,11 @@ def queue(
     open_dashboard: bool = typer.Option(True, "--open/--no-open", help="Open dashboard in browser after building"),
     fresh: bool = typer.Option(False, "--fresh", help="Show only roles you haven't applied to / been rejected from (dedup vs applications.db)"),
     as_json: bool = typer.Option(False, "--json", help="Emit the queue (filtered) as JSON to stdout. Suppresses dashboard + console table. For piping into other tools/agents."),
+    no_board: bool = typer.Option(False, "--no-board", help="Skip the terminal board after queue build/load"),
 ):
     """Scan ATS boards, score jobs, and open the apply dashboard."""
     from jobpilot.core.queue_builder import build_queue, load_queue, save_queue
+    from jobpilot.ui.terminal_board import BoardFilters, render_board
     import subprocess
     from dataclasses import asdict
 
@@ -923,7 +1028,8 @@ def queue(
         jobs = load_queue()
         queued = [j for j in jobs if j.status == "queued"]
         console.print(f"[cyan]Loaded existing queue: {len(queued)} jobs ready to apply[/cyan]")
-        console.print(f"[dim]Run with --refresh to re-scan portals[/dim]")
+        if not queued:
+            console.print(f"[dim]Run with --refresh to re-scan portals[/dim]")
     else:
         console.print("[cyan]Scanning ATS boards (this takes ~30 seconds)...[/cyan]")
         jobs = build_queue(limit=limit)
@@ -933,25 +1039,18 @@ def queue(
         save_queue(jobs)
         console.print(f"[green]✓ Built queue: {len(jobs)} jobs across tech + field ops[/green]")
 
-        from rich.table import Table
-        view_jobs = [j for j in jobs if j.status == "queued"] if fresh else jobs
-        if fresh:
-            filtered = len(jobs) - len(view_jobs)
-            console.print(f"[dim]--fresh: hiding {filtered} already-applied/rejected jobs[/dim]")
-        table = Table(title="Top 10 Fresh Jobs" if fresh else "Top 10 Jobs")
-        table.add_column("Score", style="cyan", width=6)
-        table.add_column("Company", style="white", max_width=18)
-        table.add_column("Role", style="green", max_width=38)
-        table.add_column("Track", style="magenta", width=10)
-        table.add_column("Status", style="yellow", width=10)
-        table.add_column("ID", style="dim", width=8)
-        for j in view_jobs[:10]:
-            table.add_row(str(j.fit_score), j.company, j.title, j.track, j.status, j.id)
-        console.print(table)
+    if not no_board:
+        render_board(
+            console,
+            filters=BoardFilters(
+                fresh=True,
+                limit=min(limit, 20),
+            ),
+        )
 
     if open_dashboard and dashboard_path.exists():
         subprocess.run(["open", str(dashboard_path)], check=False)
-        console.print(f"[green]✓ Dashboard opened — click ⚡ Apply Now on any job[/green]")
+        console.print(f"[green]✓ Web dashboard opened — or run [cyan]jobpilot board --watch[/cyan] in another tab[/green]")
     elif not dashboard_path.exists():
         console.print(f"[yellow]Dashboard not found at {dashboard_path}[/yellow]")
 

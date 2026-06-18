@@ -53,6 +53,8 @@ def scan(
     min_score: int = typer.Option(55, "--min-score", help="Minimum fit score to show"),
     top_n: int = typer.Option(15, "--top", help="How many top gigs to show"),
     all: bool = typer.Option(False, "--all", help="Show all gigs regardless of 'seen' state"),
+    contract_first: bool = typer.Option(False, "--contract-first", help="Prefer contract/1099/hourly; drop explicit W-2-only"),
+    anti_schedule: bool = typer.Option(False, "--anti-schedule", help="Drop postings with 9-5 / core-hours language"),
 ):
     """Scan all sources and show the top gigs. Doesn't send anything."""
     all_gigs = _collect_with_status()
@@ -68,8 +70,20 @@ def scan(
     if deduped:
         console.print(f"[dim]{deduped} cross-source duplicates collapsed[/dim]")
 
-    ranked = filter_and_rank(all_gigs, min_score=min_score, top_n=top_n)
-    console.print(f"\n[bold]Top {len(ranked)} gigs (min score {min_score}):[/bold]\n")
+    ranked = filter_and_rank(
+        all_gigs,
+        min_score=min_score,
+        top_n=top_n,
+        contract_first=contract_first,
+        drop_rigid_schedule=anti_schedule,
+    )
+    filters = []
+    if contract_first:
+        filters.append("contract-first")
+    if anti_schedule:
+        filters.append("anti-9-5")
+    filter_note = f" ({', '.join(filters)})" if filters else ""
+    console.print(f"\n[bold]Top {len(ranked)} gigs (min score {min_score}){filter_note}:[/bold]\n")
 
     if not ranked:
         console.print("[yellow]Nothing met the bar. Try --min-score 40 or --all.[/yellow]")
@@ -95,6 +109,8 @@ def scan(
 def digest(
     min_score: int = typer.Option(55, "--min-score"),
     top_n: int = typer.Option(12, "--top"),
+    contract_first: bool = typer.Option(False, "--contract-first", help="Prefer contract/1099/hourly postings"),
+    anti_schedule: bool = typer.Option(False, "--anti-schedule", help="Drop rigid 9-5 / core-hours postings"),
 ):
     """Run scan → filter via pipeline + seen → rank → write pipeline + push.
 
@@ -103,7 +119,12 @@ def digest(
     not a silent gap in the morning digest.
     """
     try:
-        _run_digest(min_score=min_score, top_n=top_n)
+        _run_digest(
+            min_score=min_score,
+            top_n=top_n,
+            contract_first=contract_first,
+            drop_rigid_schedule=anti_schedule,
+        )
     except Exception as exc:
         short = f"{type(exc).__name__}: {exc}"
         try:
@@ -114,7 +135,13 @@ def digest(
         raise
 
 
-def _run_digest(*, min_score: int, top_n: int) -> None:
+def _run_digest(
+    *,
+    min_score: int,
+    top_n: int,
+    contract_first: bool = False,
+    drop_rigid_schedule: bool = False,
+) -> None:
     migrate_applied_into_pipeline()
     hygiene = pipeline.migrate_pipeline_hygiene()
     if hygiene["collapsed"] or hygiene["ids_regenerated"]:
@@ -144,7 +171,13 @@ def _run_digest(*, min_score: int, top_n: int) -> None:
     if deduped:
         console.print(f"[dim]{deduped} cross-source duplicates collapsed[/dim]")
 
-    ranked = filter_and_rank(fresh, min_score=min_score, top_n=top_n)
+    ranked = filter_and_rank(
+        fresh,
+        min_score=min_score,
+        top_n=top_n,
+        contract_first=contract_first,
+        drop_rigid_schedule=drop_rigid_schedule,
+    )
     ranked = enrich_wwr(ranked)
 
     existing_ids = {r.gig_id for r in existing_pipeline if r.gig_id}

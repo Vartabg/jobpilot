@@ -22,6 +22,7 @@ from jobpilot.learning.learning_db import LearningDB
 _VALID_APPLICATION_STATUSES = {
     "started", "submitted", "abandoned",
     "applied", "rejected", "interview",
+    "skipped",  # user-dismissed queue items via dashboard/bookmarklet
 }
 
 

@@ -35,6 +35,7 @@ import re
 
 from jobpilot.gigs.core import preferences
 from jobpilot.gigs.core.models import Gig
+from jobpilot.core.work_style import is_contract_friendly, is_w2_only, score_work_style
 from jobpilot.gigs.core.scoring_rules import (
     DOMAIN_BONUS,
     JOB_BOARD_SOURCES,
@@ -235,6 +236,12 @@ def score_gig(gig: Gig) -> Gig:
         score += 5
         reasons.append(f"+5 pay ${hourly_eq:.0f}/hr")
 
+    # ----- Work style (autonomy / contract / anti-9-5) -----
+    ws_delta, ws_reasons = score_work_style(full_text, title=gig.title or "")
+    if ws_delta:
+        score += ws_delta
+        reasons.extend(ws_reasons[:4])
+
     # ----- Title-cap -----
     if title_capped:
         if score > TITLE_NEGATIVE_CAP:
@@ -258,12 +265,23 @@ def _pay_parse_is_confident(gig: Gig) -> bool:
     return bool(gig.salary_min and gig.salary_max)
 
 
-def filter_and_rank(gigs: list[Gig], min_score: int = 55, top_n: int = 15) -> list[Gig]:
+def filter_and_rank(
+    gigs: list[Gig],
+    min_score: int = 55,
+    top_n: int = 15,
+    *,
+    contract_first: bool = False,
+    drop_rigid_schedule: bool = False,
+) -> list[Gig]:
     """Score every gig, drop the weak ones, return top N sorted.
 
     Below-floor pay only hard-drops a gig when the parse is confident — a
     comp mis-parse must not silently kill a good gig (the 2026-06 "$70-$90
     per hour read as $70K-$90K" bug). Unstated pay always passes.
+
+    ``contract_first`` drops explicit W-2-only postings unless contract
+    signals are also present. ``drop_rigid_schedule`` removes postings with
+    strong 9-5 / core-hours language.
 
     Sort keys (highest priority first):
       1. fit_score (descending)
@@ -271,6 +289,8 @@ def filter_and_rank(gigs: list[Gig], min_score: int = 55, top_n: int = 15) -> li
       3. source priority (Upwork > HN > everything else)
       4. pay (descending)
     """
+    from jobpilot.core.work_style import is_schedule_rigid
+
     floor_h = _pay_floor_hourly()
     scored = [score_gig(g) for g in gigs]
     kept = [
@@ -281,6 +301,26 @@ def filter_and_rank(gigs: list[Gig], min_score: int = 55, top_n: int = 15) -> li
             or not _pay_parse_is_confident(g)
         )
     ]
+    if contract_first:
+        kept = [
+            g for g in kept
+            if is_contract_friendly(
+                " ".join([g.description or "", g.title or ""]),
+                title=g.title or "",
+            )
+            or not is_w2_only(
+                " ".join([g.description or "", g.title or ""]),
+                title=g.title or "",
+            )
+        ]
+    if drop_rigid_schedule:
+        kept = [
+            g for g in kept
+            if not is_schedule_rigid(
+                " ".join([g.description or "", g.title or ""]),
+                title=g.title or "",
+            )
+        ]
     kept.sort(key=lambda g: (
         -g.fit_score,
         apply_friction(g),

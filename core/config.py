@@ -16,6 +16,12 @@ SESSION_FILE = DATA_DIR / "session.json"
 SETTINGS_FILE = DATA_DIR / "settings.json"
 
 # ---------------------------------------------------------------------------
+# HTTP dashboard (job queue / mobile tracker)
+# EYE backend owns :8766 — JobPilot uses :8767 to avoid collision.
+# ---------------------------------------------------------------------------
+DEFAULT_SERVE_PORT: int = int(os.environ.get("JOBPILOT_SERVE_PORT", "8767"))
+
+# ---------------------------------------------------------------------------
 # Bro Client
 # ---------------------------------------------------------------------------
 BRO_BASE_URL: str = os.environ.get("BRO_URL", "http://127.0.0.1:8765")
