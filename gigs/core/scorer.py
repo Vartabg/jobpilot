@@ -120,7 +120,7 @@ def _phrase_in(text: str, phrase: str) -> bool:
 
 
 _REMOTE_TOKENS = ("remote", "anywhere", "distributed", "worldwide", "global")
-# A location requirement naming one of these is compatible with a US/Austin
+# A location requirement naming one of these is compatible with a US/home-metro
 # applicant ("must live in the US"); anything else ("must live in Canada")
 # means out of reach. Word-boundary so "us" matches "the US." but not "Russia".
 _HOME_OK_RE = re.compile(
