@@ -196,7 +196,23 @@ def pay(prefs: dict[str, Any] | None = None) -> dict[str, Any]:
 
 
 def links(prefs: dict[str, Any] | None = None) -> dict[str, str]:
-    return dict((prefs or load())["links"])
+    """Outreach pages for email drafts/packets.
+
+    Any page still left at the neutral placeholder falls through to the resolved
+    portfolio (which itself inherits from the jobpilot profile), the same way
+    identity() resolves. Without this, a user who set their portfolio but not
+    work_page/service_page would ship 'your-portfolio.example.com' into the
+    actual outbound email while the crib sheet showed the real URL.
+    """
+    prefs = prefs or load()
+    out = dict(prefs["links"])
+    portfolio = (identity(prefs).get("portfolio") or "").rstrip("/")
+    default_portfolio = DEFAULTS["identity"]["portfolio"].rstrip("/")
+    if portfolio and portfolio != default_portfolio:
+        for key in ("work_page", "service_page"):
+            if out.get(key) == DEFAULTS["links"][key]:
+                out[key] = portfolio
+    return out
 
 
 def home_metro_tags(prefs: dict[str, Any] | None = None) -> list[str]:

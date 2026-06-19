@@ -6,7 +6,30 @@ import re
 from dataclasses import dataclass
 
 from jobpilot.gigs.core import preferences
+from jobpilot.gigs.core.logger import get_logger
 from jobpilot.gigs.core.models import Gig
+
+log = get_logger(__name__)
+
+# Strings that must never reach an employer — the neutral-default placeholders.
+# A leak here means a draft shipped before identity/links resolved (see the
+# example.com portfolio bug). Cheap regression net on top of the resolver fix.
+_PLACEHOLDER_MARKERS = (
+    "example.com",
+    "your-portfolio",
+    "your-handle",
+    "your city, st",
+    "your professional tagline",
+)
+
+
+def contains_placeholder(text: str) -> str | None:
+    """Return the first placeholder marker found in `text`, or None if clean."""
+    low = (text or "").lower()
+    for marker in _PLACEHOLDER_MARKERS:
+        if marker in low:
+            return marker
+    return None
 
 
 _SKILL_DISPLAY = {
@@ -251,6 +274,9 @@ def pick_offer(gig: Gig) -> str:
     ):
         return "RAG / internal knowledge assistant"
 
+    # Require a real front-end 3D stack signal. A bare "3d" matched "3D
+    # geologic models" / CAD / data-viz and mis-pitched a Three.js rescue to
+    # backend roles — the offer must be corroborated by an actual web-3D tool.
     if _has_any(
         text,
         (
@@ -259,11 +285,10 @@ def pick_offer(gig: Gig) -> str:
             "react three fiber",
             "r3f",
             "webgl",
+            "webgpu",
             "shader",
-            "3d",
-            "configurator",
-            "virtual tour",
-            "interactive map",
+            "babylon.js",
+            "babylonjs",
         ),
     ):
         return "Interactive 3D performance rescue"
@@ -391,4 +416,13 @@ def build_revenue_brief(gig: Gig) -> RevenueBrief:
         "rules. Do not auto-submit."
     )
 
-    return RevenueBrief(offer=offer, action=action, draft=body + signoff + review_note)
+    draft = body + signoff + review_note
+    leak = contains_placeholder(draft)
+    if leak:
+        log.error(
+            "Draft for %s contains placeholder %r — identity/links did not "
+            "resolve. Fix data/gigs/preferences.json or the jobpilot profile "
+            "before sending.",
+            gig.id, leak,
+        )
+    return RevenueBrief(offer=offer, action=action, draft=draft)
