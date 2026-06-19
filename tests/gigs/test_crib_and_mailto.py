@@ -114,11 +114,14 @@ def test_crib_sheet_has_standard_answers_and_per_lead_section(tmp_path: Path) ->
     # Standard Greenhouse answers table
     assert "Authorized to work in the US?" in text
     assert "Veteran status" in text
-    # Per-lead section
+    # Per-lead section: candidate-facing salary (pasteable) + private anchor
     assert "Acme AI" in text
-    assert "Salary ask" in text
-    # Salary anchor inside stated band 180-200K -> ~197K (185 + 0.85 * 15)
+    assert "Desired salary (paste)" in text
+    assert "Your anchor (don't paste)" in text
+    # Candidate-facing band references the stated 180-200K band
     assert "K" in text and "180" in text and "200" in text
+    # ...but must NOT leak the anchoring strategy into the pasteable field
+    assert "just under" not in text.split("Your anchor")[0]
     # Resume hard-line is preserved
     assert "Resume" in text and "manual" in text
 
@@ -141,19 +144,23 @@ def test_crib_sheet_relocate_answer_flips_for_non_home_metro_role(
     )
     text_home = write_crib_sheet([home], crib_dir=tmp_path / "home").read_text()
     text_other = write_crib_sheet([elsewhere], crib_dir=tmp_path / "other").read_text()
-    assert "currently located here" in text_home
-    assert "relocate prior to the start" in text_other
+    # Home-metro roles get a "local to this role" note appended to the
+    # data-defined relocate answer; non-home roles get the base answer only.
+    assert "local to this role" in text_home
+    assert "local to this role" not in text_other
 
 
-def test_crib_sheet_defaults_to_relocate_answer_without_home_metro(tmp_path: Path) -> None:
-    # With neutral defaults (no home_metro_tags), every role gets the
-    # relocate answer — nothing location-personal ships in defaults.
+def test_crib_sheet_relocate_answer_is_data_driven(tmp_path: Path, monkeypatch) -> None:
+    # The relocate answer comes from preferences work_style — never hardcoded.
+    prefs = dict(preferences.DEFAULTS)
+    prefs["work_style"] = {"relocate_default": "Based in Testville", "in_office_default": "x"}
+    monkeypatch.setattr(preferences, "load", lambda path=None: prefs)
     g = _gig(location="New York, NY")
     text = write_crib_sheet([g], crib_dir=tmp_path).read_text()
-    assert "relocate prior to the start" in text
+    assert "Based in Testville" in text
 
 
 def test_crib_sheet_handles_no_pay_band(tmp_path: Path) -> None:
     g = _gig(salary_min=0, salary_max=0, pay_hourly_est=0)
     text = write_crib_sheet([g], crib_dir=tmp_path).read_text()
-    assert "open to scope" in text
+    assert "happy to discuss range" in text

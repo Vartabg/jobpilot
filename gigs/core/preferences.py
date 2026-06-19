@@ -60,6 +60,12 @@ DEFAULTS: dict[str, Any] = {
     "location": {
         "home_metro_tags": [],
     },
+    # Drives the crib sheet's relocate / in-office answers. Neutral by default;
+    # set real answers in data/gigs/preferences.json.
+    "work_style": {
+        "relocate_default": "Open to relocation for the right role",
+        "in_office_default": "Open to remote, hybrid, or onsite",
+    },
     "tailoring": {
         # Skills the user wants the email opener to call out when a gig
         # description mentions them. Order = priority for which to pick.
@@ -217,6 +223,10 @@ def links(prefs: dict[str, Any] | None = None) -> dict[str, str]:
 
 def home_metro_tags(prefs: dict[str, Any] | None = None) -> list[str]:
     return list((prefs or load())["location"]["home_metro_tags"])
+
+
+def work_style(prefs: dict[str, Any] | None = None) -> dict[str, str]:
+    return dict((prefs or load())["work_style"])
 
 
 def skill_keywords(prefs: dict[str, Any] | None = None) -> list[str]:

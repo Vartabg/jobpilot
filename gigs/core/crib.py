@@ -24,28 +24,46 @@ from jobpilot.gigs.core.proposals import build_revenue_brief
 
 CRIB_DIR = away_dir()
 
-# Standard ATS answers. Neutral placeholder defaults only — edit to match
-# your own answers (a data/preferences.json override is a phase-3 follow-up).
-# Demographic/EEOC rows default to declining so nothing personal ships.
-STANDARD_ANSWERS: list[tuple[str, str]] = [
-    ("Phone country", "+1"),
-    ("Location (city)", "Your City, ST, USA"),
-    ("Country based in", "USA"),
-    ("Authorized to work in the US?", "Yes"),
-    ("Require visa sponsorship?", "No"),
-    ("Willing to relocate?", "Yes — returning to Austin; remote/async until settled"),
-    ("In-office acknowledgment", "Prefer remote/async; milestone on-site OK"),
-    ("Privacy consent", "Consent"),
-    ("Gender", "Decline To Self Identify"),
-    ("Hispanic/Latino?", "Decline To Self Identify"),
-    ("Race/Ethnicity", "Decline To Self Identify"),
-    ("Veteran status", "I don't wish to answer"),
-    ("Disability status", "I do not want to answer"),
-    ("How did you hear about us?", "LinkedIn"),
-]
+def _veteran_answer() -> str:
+    """Veteran-status answer, resolved truthfully from the jobpilot profile's
+    demographics (declines if unset). Reversible: clear/edit
+    demographics.veteran in data/profile.json to change it. The stored value
+    may carry ATS answer-variants ('A||B||C'); display the first.
+    """
+    try:
+        from jobpilot.core import profile_store
+        prof = profile_store.get_profile_store().load()
+        val = (getattr(prof, "demographics", {}) or {}).get("veteran", "")
+    except Exception:
+        val = ""
+    val = (val or "").split("||", 1)[0].strip()
+    return val or "I don't wish to answer"
 
-# Identity now comes from preferences.json so the user can edit without code.
-# These constants are kept only as last-line fallbacks for tests that don't load prefs.
+
+def _standard_answers() -> list[tuple[str, str]]:
+    """Standard ATS answers, resolved from preferences/profile so nothing
+    personal is hardcoded. Location + relocate + in-office come from the user's
+    data; demographics default to declining (veteran resolves from profile)."""
+    ident = preferences.identity()
+    ws = preferences.work_style()
+    city = (ident.get("city") or "").strip()
+    location = f"{city}, USA" if city and "usa" not in city.lower() else (city or "Your City, ST, USA")
+    return [
+        ("Phone country", "+1"),
+        ("Location (city)", location),
+        ("Country based in", "USA"),
+        ("Authorized to work in the US?", "Yes"),
+        ("Require visa sponsorship?", "No"),
+        ("Willing to relocate?", ws.get("relocate_default", "Open to relocation for the right role")),
+        ("In-office acknowledgment", ws.get("in_office_default", "Open to remote, hybrid, or onsite")),
+        ("Privacy consent", "Consent"),
+        ("Gender", "Decline To Self Identify"),
+        ("Hispanic/Latino?", "Decline To Self Identify"),
+        ("Race/Ethnicity", "Decline To Self Identify"),
+        ("Veteran status", _veteran_answer()),
+        ("Disability status", "I do not want to answer"),
+        ("How did you hear about us?", "LinkedIn"),
+    ]
 
 
 def _is_home_metro_role(gig: Gig) -> bool:
@@ -59,30 +77,45 @@ def _is_home_metro_role(gig: Gig) -> bool:
 
 
 def _relocate_answer(gig: Gig) -> str:
-    return (
-        "Yes, I'm currently located here"
-        if _is_home_metro_role(gig)
-        else "Yes, I'd relocate prior to the start of the role"
+    """Per-lead relocate line. Pulls the user's data-defined answer; appends a
+    'local' note for home-metro roles. No location is hardcoded here."""
+    base = preferences.work_style().get(
+        "relocate_default", "Open to relocation for the right role"
     )
+    if _is_home_metro_role(gig):
+        return f"{base} — local to this role"
+    return base
 
 
-def _salary_anchor(gig: Gig) -> str:
-    """Best salary/rate ask given the gig's stated pay band, using
-    preferences for the within-band anchor pct and unstated-pay default.
-    """
+def _salary_candidate(gig: Gig) -> str:
+    """Candidate-facing 'Desired salary' value — safe to paste into an ATS
+    field. Carries no anchoring strategy (don't tip the negotiation)."""
+    if gig.salary_max and gig.salary_min:
+        return (
+            f"Open to the role; comfortable within your "
+            f"${gig.salary_min/1000:.0f}–${gig.salary_max/1000:.0f}K band"
+        )
+    if gig.salary_max:
+        return f"Open / competitive — your posted ${gig.salary_max/1000:.0f}K ceiling works"
+    if gig.pay_hourly_est:
+        return f"${gig.pay_hourly_est:.0f}/hr"
+    return "Open / competitive — happy to discuss range for the role"
+
+
+def _salary_note(gig: Gig) -> str:
+    """Private anchoring note for the user's eyes only — never paste this."""
     pay_prefs = preferences.pay()
     pct = pay_prefs.get("anchor_within_band_pct", 85) / 100.0
     if gig.salary_max and gig.salary_min:
         target = int(gig.salary_min + pct * (gig.salary_max - gig.salary_min))
-        return f"${target/1000:.0f}K (within stated ${gig.salary_min/1000:.0f}–${gig.salary_max/1000:.0f}K band)"
+        return f"anchor ~${target/1000:.0f}K ({int(pct*100)}% into the ${gig.salary_min/1000:.0f}–${gig.salary_max/1000:.0f}K band)"
     if gig.salary_max:
-        target = int(0.95 * gig.salary_max)
-        return f"${target/1000:.0f}K (just under stated ceiling ${gig.salary_max/1000:.0f}K)"
+        return f"anchor ~${int(0.95 * gig.salary_max)/1000:.0f}K (just under the ${gig.salary_max/1000:.0f}K ceiling)"
     if gig.pay_hourly_est:
-        return f"${gig.pay_hourly_est:.0f}/hr"
+        return f"rate ${gig.pay_hourly_est:.0f}/hr"
     target_yr = pay_prefs.get("target_annual_usd", 175000)
     target_hr = pay_prefs.get("target_hourly_usd", 90)
-    return f"${target_yr/1000:.0f}K base / ${target_hr}/hr equivalent (open to scope)"
+    return f"target ${target_yr/1000:.0f}K / ${target_hr}/hr equivalent"
 
 
 def _gig_section(index: int, gig: Gig) -> list[str]:
@@ -95,7 +128,8 @@ def _gig_section(index: int, gig: Gig) -> list[str]:
         "",
         f"- **Apply:** {apply_target}",
         f"- **Source post:** {gig.url}",
-        f"- **Salary ask:** {_salary_anchor(gig)}",
+        f"- **Desired salary (paste):** {_salary_candidate(gig)}",
+        f"- **Your anchor (don't paste):** {_salary_note(gig)}",
         f"- **Relocate answer:** {_relocate_answer(gig)} (this role is in {gig.location or 'unspecified'})",
         f"- **Offer angle:** {brief.offer}",
         "",
@@ -135,7 +169,7 @@ def write_crib_sheet(gigs: list[Gig], crib_dir: Path = CRIB_DIR) -> Path:
         "| Field | Answer |",
         "| --- | --- |",
     ]
-    for label, answer in STANDARD_ANSWERS:
+    for label, answer in _standard_answers():
         lines.append(f"| {label} | {answer} |")
     lines += [
         "",
@@ -143,10 +177,11 @@ def write_crib_sheet(gigs: list[Gig], crib_dir: Path = CRIB_DIR) -> Path:
         "",
         "## Background snapshot (copy-paste source for ATS essay questions)",
         "",
-        "Edit `data/preferences.json` → `background_bullets` to update.",
+        "Edit `data/gigs/preferences.json` → `background_bullets` to update.",
         "",
     ]
     bullets = preferences.background_bullets()
+    default_bullets = preferences.DEFAULTS["background_bullets"]
     label_map = {
         "elevator_pitch": "Elevator pitch",
         "ai_agent_systems": "AI agent systems",
@@ -157,11 +192,16 @@ def write_crib_sheet(gigs: list[Gig], crib_dir: Path = CRIB_DIR) -> Path:
         "education": "Education",
     }
     for key, label in label_map.items():
-        if key in bullets and bullets[key]:
-            lines.append(f"### {label}")
-            lines.append("")
-            lines.append(f"> {bullets[key]}")
-            lines.append("")
+        val = bullets.get(key, "")
+        # Skip empty AND still-at-placeholder bullets — never paste an
+        # instructional default like "Describe a full-stack project" into an
+        # ATS essay field.
+        if not val or val == default_bullets.get(key):
+            continue
+        lines.append(f"### {label}")
+        lines.append("")
+        lines.append(f"> {val}")
+        lines.append("")
     lines += [
         "## Per-lead crib (top 8)",
         "",
