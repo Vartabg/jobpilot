@@ -1,6 +1,6 @@
 from jobpilot.gigs.core import preferences
 from jobpilot.gigs.core.models import Gig
-from jobpilot.gigs.core.proposals import build_revenue_brief, pick_offer
+from jobpilot.gigs.core.proposals import build_revenue_brief, email_body, pick_offer
 
 
 def test_pick_offer_prefers_rag_for_knowledge_chatbot() -> None:
@@ -44,3 +44,35 @@ def test_revenue_brief_keeps_final_send_human_approved() -> None:
     # Service page comes from preferences (neutral default or the user's
     # gitignored data/preferences.json) — never hardcoded.
     assert preferences.links()["service_page"] in brief.draft
+
+
+def test_revenue_brief_adds_grounded_personalization_hook() -> None:
+    gig = Gig(
+        id="test-personalized",
+        source="hn",
+        title="AI workflow automation engineer",
+        url="https://example.com",
+        description="Need LLM workflow automation in Python with Slack integration.",
+        tags=["python", "agent"],
+    )
+
+    brief = build_revenue_brief(gig)
+
+    assert "What caught my eye is the workflow orchestration piece" in brief.draft
+    assert "Python" in brief.draft
+    assert "practical systems I build" in brief.draft
+
+
+def test_email_body_keeps_personalization_without_review_footer() -> None:
+    gig = Gig(
+        id="test-phone-body",
+        source="hn",
+        title="RAG engineer",
+        url="https://example.com",
+        description="Build RAG over internal docs with vector search and citations.",
+    )
+
+    body = email_body(gig)
+
+    assert "What caught my eye is the need to turn scattered documents" in body
+    assert "Review before sending" not in body

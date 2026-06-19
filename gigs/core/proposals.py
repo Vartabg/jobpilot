@@ -9,16 +9,6 @@ from jobpilot.gigs.core import preferences
 from jobpilot.gigs.core.models import Gig
 
 
-def _tailored_hook(gig: Gig) -> str:
-    """Tailored hooks have been removed — recruiters recognize 'I noticed
-    you mention {keyword}' as an AI-generated tell. The honest play is to
-    leave the user a clean opener and let them write 1-2 sentences of
-    real personalization themselves before sending. Returns empty string
-    so the caller's draft is the user's blank canvas, not a fake hook.
-    """
-    return ""
-
-
 _SKILL_DISPLAY = {
     "three.js": "Three.js",
     "threejs": "Three.js",
@@ -50,6 +40,145 @@ _SKILL_DISPLAY = {
 
 def _display_skill(kw: str) -> str:
     return _SKILL_DISPLAY.get(kw.lower(), kw)
+
+
+_PERSONALIZATION_SIGNALS: tuple[tuple[tuple[str, ...], str], ...] = (
+    (
+        (
+            "rag",
+            "retrieval",
+            "vector",
+            "embedding",
+            "knowledge base",
+            "knowledge assistant",
+            "document search",
+            "internal docs",
+        ),
+        "the need to turn scattered documents into cited, usable answers",
+    ),
+    (
+        (
+            "workflow",
+            "automation",
+            "n8n",
+            "zapier",
+            "make.com",
+            "crm",
+            "slack",
+            "calendar",
+            "integration",
+            "orchestration",
+        ),
+        "the workflow orchestration piece",
+    ),
+    (
+        (
+            "agent",
+            "agentic",
+            "tool use",
+            "mcp",
+            "model context protocol",
+            "llm",
+            "claude",
+            "anthropic",
+        ),
+        "the practical agent/tooling angle",
+    ),
+    (
+        (
+            "three.js",
+            "threejs",
+            "react three fiber",
+            "r3f",
+            "webgl",
+            "shader",
+            "3d",
+            "configurator",
+            "virtual tour",
+        ),
+        "the interactive 3D and performance angle",
+    ),
+    (
+        (
+            "playwright",
+            "browser-use",
+            "chrome devtools",
+            "browser automation",
+            "scraping",
+            "web automation",
+        ),
+        "the browser automation and integration work",
+    ),
+    (
+        (
+            "security",
+            "privacy",
+            "compliance",
+            "sensitive",
+            "governance",
+            "audit",
+        ),
+        "the security and human-review constraints",
+    ),
+)
+
+
+def _matched_personalization_skills(gig: Gig, limit: int = 2) -> list[str]:
+    """Pick user-configured skills that are explicitly present in the gig."""
+    text = _text(gig)
+    matches: list[str] = []
+    seen: set[str] = set()
+    for keyword in preferences.skill_keywords():
+        keyword_l = str(keyword).strip().lower()
+        if not keyword_l or keyword_l not in text:
+            continue
+        display = _display_skill(keyword_l)
+        normalized = display.lower()
+        if normalized in seen:
+            continue
+        matches.append(display)
+        seen.add(normalized)
+        if len(matches) >= limit:
+            break
+    return matches
+
+
+def _personalization_signal(gig: Gig) -> str:
+    """Return a grounded phrase from the posting text, never invented research."""
+    text = _text(gig)
+    for keywords, phrase in _PERSONALIZATION_SIGNALS:
+        if _has_any(text, keywords):
+            return phrase
+
+    title = _display_title(gig)
+    if title:
+        role = re.sub(r"\s+", " ", title).strip(" .").lower()
+        return f"the {role} scope"
+    return "the practical implementation scope"
+
+
+def _tailored_hook(gig: Gig) -> str:
+    """One grounded personalization sentence for phone-ready drafts.
+
+    The hook uses only the listing's own text plus user-configured skill
+    keywords. It avoids fake company research while removing the old manual
+    step where the user had to write the first personalized line themselves.
+    """
+    signal = _personalization_signal(gig)
+    skills = _matched_personalization_skills(gig)
+    if skills:
+        if len(skills) == 1:
+            skill_text = skills[0]
+        else:
+            skill_text = f"{skills[0]} and {skills[1]}"
+        return (
+            f" What caught my eye is {signal}, especially the overlap with "
+            f"{skill_text}; that maps closely to the practical systems I build."
+        )
+    return (
+        f" What caught my eye is {signal}; that is the kind of practical "
+        "implementation work I like."
+    )
 
 
 @dataclass(frozen=True)
