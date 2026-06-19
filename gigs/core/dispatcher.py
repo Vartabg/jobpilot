@@ -26,7 +26,12 @@ from jobpilot.gigs.core.logger import get_logger
 from jobpilot.gigs.core.models import Gig
 from jobpilot.gigs.core import pipeline
 from jobpilot.gigs.core.paths import digests_dir
-from jobpilot.gigs.core.proposals import build_revenue_brief, email_body, email_subject
+from jobpilot.gigs.core.proposals import (
+    build_revenue_brief,
+    contains_placeholder,
+    email_body,
+    email_subject,
+)
 
 log = get_logger(__name__)
 
@@ -59,9 +64,15 @@ def _apply_target(g: Gig) -> str:
     if not base.lower().startswith("mailto:"):
         return base
 
+    raw_body = email_body(g)
+    if contains_placeholder(raw_body) or contains_placeholder(email_subject(g)):
+        # A placeholder leaked despite the resolver — don't ship a tappable
+        # mailto with a dead link; send them to the source post to fill manually.
+        return g.url
+
     addr = base[len("mailto:"):].split("?", 1)[0]
     subject = quote(email_subject(g))
-    body = quote(email_body(g))
+    body = quote(raw_body)
     mailto = f"mailto:{addr}?subject={subject}&body={body}"
 
     shortcut_name = os.getenv("GIGPILOT_IOS_SHORTCUT", "").strip()
