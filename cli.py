@@ -939,6 +939,39 @@ def hud(
         render_hud(console, opts=opts, verbose=verbose, plain=plain)
 
 
+@app.command()
+def dashboard(
+    save: Optional[Path] = typer.Option(None, "--save", help="Write the PNG here (in addition to showing it)"),
+    ascii_only: bool = typer.Option(False, "--ascii", help="Force the plain-text version"),
+    fetch: bool = typer.Option(False, "--fetch", help="Re-scrape sources for fresh data (slower)"),
+):
+    """One-glance visual dashboard — renders as a real image inline in iTerm,
+    plain text everywhere else."""
+    from jobpilot.ui.dashboard_image import (
+        ascii_dashboard,
+        collect_dashboard_data,
+        render_dashboard_png,
+    )
+    from jobpilot.ui.inline_image import print_inline_image, supports_inline_images
+
+    data = collect_dashboard_data(fetch=fetch)
+
+    if ascii_only:
+        console.print(ascii_dashboard(data))
+        return
+
+    png = render_dashboard_png(data)
+    if save:
+        Path(save).expanduser().write_bytes(png)
+        console.print(f"[green]Saved dashboard → {save}[/green]")
+
+    if supports_inline_images():
+        print_inline_image(png, name="jobpilot-dashboard.png", width="auto")
+    elif not save:
+        console.print(ascii_dashboard(data))
+        console.print("[dim]Tip: run this in iTerm2 (or pass --save) to see the graphical dashboard.[/dim]")
+
+
 @app.command("center-status")
 def center_status(
     watch: bool = typer.Option(False, "--watch", "-w", help="Live status dashboard"),
