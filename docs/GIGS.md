@@ -83,6 +83,8 @@ The scheduled scripts source that file automatically. Do not put the topic in tr
 
 Each notification surfaces the direct apply target where one can be extracted (a `mailto:` link or an ATS form) as an **Apply** action button, so applying from the phone takes a handful of taps. Resume and cover-letter uploads stay manual by design.
 
+For `mailto:` apply targets, the **Apply** button opens a prefilled subject and body. The body now includes one grounded personalization sentence generated from the posting text and your configured skill keywords, so you should not need to hand-edit a generic opener before sending. Still review for accuracy before sending.
+
 ## Running it on a schedule
 
 Installs two macOS LaunchAgents for the logged-in user — a digest at 8am and 5pm, and a weekly summary on Sundays at 9am:

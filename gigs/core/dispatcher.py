@@ -165,15 +165,17 @@ def push_ntfy(gigs: list[Gig], topic: str | None = None, *, source_warning: str 
     today = datetime.now().strftime("%a %b %d")
     top = gigs[0]
     subtitle = f"{top.fit_score}/100 {top.company or top.title[:40]}"
+    top_brief = build_revenue_brief(top)
 
     body_lines = [
-        f"{today}: {len(gigs)} new — tap Apply for top gig, or open GigPilot/pipeline.md",
+        f"{today}: {len(gigs)} new - tap Apply for a personalized {top_brief.offer} draft, or open GigPilot/pipeline.md",
         "",
     ]
     for g in gigs[:5]:
         pay = _fmt_pay(g)
         co = g.company or g.source
-        body_lines.append(f"[{g.fit_score}] {co}: {g.title[:50]} — {pay}")
+        offer = build_revenue_brief(g).offer
+        body_lines.append(f"[{g.fit_score}] {co}: {g.title[:50]} - {pay} - {offer}")
     if source_warning:
         body_lines.append("")
         body_lines.append(f"⚠ {source_warning}")
