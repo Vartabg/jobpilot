@@ -16,7 +16,7 @@ import requests  # pyright: ignore[reportMissingModuleSource]
 
 from jobpilot.gigs.core.logger import get_logger
 from jobpilot.gigs.core.models import Gig
-from jobpilot.gigs.core.scrapers.comp import parse_comp
+from jobpilot.gigs.core.scrapers.comp import detect_currency, parse_comp
 
 log = get_logger(__name__)
 
@@ -258,6 +258,7 @@ def scrape_hn_hiring() -> list[Gig]:
             salary_min=sal_min,
             salary_max=sal_max,
             pay_hourly_est=hourly,
+            currency=detect_currency(text),
             tags=hits + (["remote"] if remote else []),
         ))
 

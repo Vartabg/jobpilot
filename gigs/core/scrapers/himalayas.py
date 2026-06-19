@@ -10,7 +10,7 @@ import requests  # pyright: ignore[reportMissingModuleSource]
 
 from jobpilot.gigs.core.logger import get_logger
 from jobpilot.gigs.core.models import Gig
-from jobpilot.gigs.core.scrapers.comp import parse_comp
+from jobpilot.gigs.core.scrapers.comp import detect_currency, parse_comp
 from jobpilot.gigs.core.scrapers.ids import stable_url_suffix
 
 log = get_logger(__name__)
@@ -48,6 +48,7 @@ def scrape_himalayas() -> list[Gig]:
         desc = _strip_html(entry.get("summary", entry.get("description", "")))
         combined = f"{title} {desc}"
         sal_min, sal_max, hourly = parse_comp(combined)
+        currency = detect_currency(combined)
 
         # Himalayas title pattern: "Position at Company"
         company = ""
@@ -69,6 +70,7 @@ def scrape_himalayas() -> list[Gig]:
             salary_min=sal_min,
             salary_max=sal_max,
             pay_hourly_est=hourly,
+            currency=currency,
             tags=[],
         ))
 

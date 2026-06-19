@@ -39,13 +39,19 @@ ICLOUD_DIR = digests_dir()
 NTFY_BASE = "https://ntfy.sh"
 
 
+def _cur(g: Gig) -> str:
+    """Currency suffix shown only when it isn't USD (so '$' stays clean)."""
+    c = (g.currency or "USD").upper()
+    return "" if c == "USD" else f" {c}"
+
+
 def _fmt_pay(g: Gig) -> str:
     if g.salary_max and g.salary_min:
-        return f"${g.salary_min/1000:.0f}–${g.salary_max/1000:.0f}K/yr"
+        return f"${g.salary_min/1000:.0f}–${g.salary_max/1000:.0f}K{_cur(g)}/yr"
     if g.salary_max:
-        return f"up to ${g.salary_max/1000:.0f}K/yr"
+        return f"up to ${g.salary_max/1000:.0f}K{_cur(g)}/yr"
     if g.pay_hourly_est:
-        return f"${g.pay_hourly_est:.0f}/hr"
+        return f"${g.pay_hourly_est:.0f}{_cur(g)}/hr"
     return "pay not stated"
 
 
