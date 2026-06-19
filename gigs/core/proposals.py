@@ -230,7 +230,18 @@ def email_subject(gig: Gig) -> str:
         head = role
     else:
         head = "Your hiring post"
-    return f"{head[:80]} — interested + brief background"[:110]
+    tag = _SUBJECT_TAG.get(pick_offer(gig), "full-stack + AI engineer")
+    return f"{head[:72]} — {tag}"[:110]
+
+
+# Short value tag for the subject line, by offer — leads with relevant value
+# instead of the old generic "interested + brief background".
+_SUBJECT_TAG = {
+    "RAG / internal knowledge assistant": "AI / retrieval engineer",
+    "Interactive 3D performance rescue": "front-end + 3D engineer",
+    "AI workflow audit + one automation": "AI automation engineer",
+    "AI workflow audit": "AI / automation engineer",
+}
 
 
 def email_body(gig: Gig) -> str:
@@ -317,6 +328,16 @@ def pick_offer(gig: Gig) -> str:
     return "AI workflow audit"
 
 
+def followup_message(company: str = "", role: str = "") -> str:
+    """A short, neutral 2nd-touch nudge for a sent-but-quiet application."""
+    what = role.strip() or "the role"
+    where = f" at {company.strip()}" if company.strip() else ""
+    return (
+        f"Following up on my note about {what}{where} — still very interested. "
+        "Happy to share more or hop on a quick call if useful."
+    )
+
+
 def _action_for_source(source: str) -> str:
     source = source.lower()
     if "upwork" in source:
@@ -351,72 +372,119 @@ def _opening_line(gig: Gig) -> str:
     return "Hi - I saw your hiring post."
 
 
+_CONTRACT_TITLE_RE = re.compile(
+    r"\b(contract|contractor|freelance|freelancer|1099|c2c|corp[- ]to[- ]corp)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_contract_lead(gig: Gig) -> bool:
+    """Contractor framing only for genuine contract/freelance sources. Most of
+    the pipeline is full-time, where leading with 'contractor' reads to an FTE
+    recruiter as a flight risk."""
+    if "upwork" in (gig.source or "").lower():
+        return True
+    return bool(_CONTRACT_TITLE_RE.search(f"{gig.title or ''} {gig.description or ''}"))
+
+
+# Full-time framing: what Garo BUILDS (an engineer who ships end to end), not a
+# contractor pitching an audit. Grounded in his real stack.
+_FTE_CAPABILITY = {
+    "RAG / internal knowledge assistant":
+        "I build local-first AI and document-retrieval systems end to end in "
+        "Python/React, careful about security boundaries and human review.",
+    "Interactive 3D performance rescue":
+        "I build interactive web and 3D front-ends end to end — React/Next.js "
+        "and Three.js/WebGPU, with an eye on performance and mobile.",
+    "AI workflow audit + one automation":
+        "I build practical LLM/agent workflow automation end to end — tools, "
+        "orchestration, and human-in-the-loop — not model training.",
+    "AI workflow audit":
+        "I build practical AI and automation systems end to end — LLM APIs, "
+        "tools, and the glue between them, with human-review gates.",
+}
+_FTE_CAPABILITY_DEFAULT = (
+    "I'm a full-stack + AI engineer who ships end to end — LLM/agent systems, "
+    "web apps, and the automation between them."
+)
+
+# Contract framing: a bounded, service-shaped offer (appropriate for Upwork /
+# explicit contract roles).
+_CONTRACT_CAPABILITY = {
+    "RAG / internal knowledge assistant":
+        "The scope looks like a fit for a lean RAG MVP: ingestion, chunking, "
+        "citations, a simple UI, and a clear update path. I'd start with a small "
+        "architecture pass, then ship the first working assistant.",
+    "Interactive 3D performance rescue":
+        "My strongest fit is stabilizing Three.js/R3F experiences that are slow "
+        "or fragile on mobile — a focused performance triage, then a short pass "
+        "on the highest-impact fixes.",
+    "AI workflow audit + one automation":
+        "This looks like a practical AI workflow problem, not a model-training "
+        "one. I'd map the current workflow, find the one automation with the "
+        "fastest ROI, and keep anything sensitive out of cloud AI.",
+    "AI workflow audit":
+        "I think the fastest path is a bounded AI workflow audit before "
+        "building — separating no-AI fixes from AI-worthy work and recommending "
+        "the smallest useful automation.",
+}
+_CONTRACT_CAPABILITY_DEFAULT = _CONTRACT_CAPABILITY["AI workflow audit"]
+
+# Offer → which background bullet to use as the concrete proof line.
+_OFFER_PROOF_KEY = {
+    "RAG / internal knowledge assistant": "ai_agent_systems",
+    "Interactive 3D performance rescue": "full_stack_web",
+    "AI workflow audit + one automation": "browser_automation",
+    "AI workflow audit": "developer_tooling",
+}
+
+
+def _proof_bullet(offer: str) -> str:
+    """One concrete proof sentence from the user's background bullets, matched
+    to the offer. Skips bullets still at the neutral placeholder."""
+    bullets = preferences.background_bullets()
+    defaults = preferences.DEFAULTS["background_bullets"]
+    for key in (_OFFER_PROOF_KEY.get(offer, ""), "ai_agent_systems", "elevator_pitch"):
+        val = bullets.get(key, "")
+        if val and val != defaults.get(key):
+            return val
+    return ""
+
+
 def build_revenue_brief(gig: Gig) -> RevenueBrief:
-    """Create a concise proposal/DM draft for manual approval."""
+    """A concise, role-aware outreach draft for manual approval.
+
+    Structure: a grounded fit line → one concrete proof → a low-friction CTA.
+    Full-time roles get a builder/engineer framing; genuine contract/Upwork
+    sources keep the service/audit framing.
+    """
     offer = pick_offer(gig)
     action = _action_for_source(gig.source)
-    company = gig.company or "your team"
+    contract = _is_contract_lead(gig)
     opening = _opening_line(gig) + _tailored_hook(gig)
-    # Outreach pages come from preferences (data/preferences.json, gitignored);
-    # shipped defaults are neutral placeholders.
+    proof = _proof_bullet(offer)
     pages = preferences.links()
-    service_page = pages["service_page"]
-    work_page = pages["work_page"]
 
-    if offer == "RAG / internal knowledge assistant":
-        body = (
-            f"{opening} The scope looks like a fit for a lean RAG "
-            "MVP: ingestion, chunking, citations, a simple web UI, and a clear update "
-            "path for new documents.\n\n"
-            "I build local-first AI and document-retrieval systems in Python/React, "
-            "and I am careful about security boundaries and human review. I would start "
-            "with a small architecture pass, then ship the first working assistant before "
-            "expanding features.\n\n"
-            f"Relevant work: {work_page}\n"
-            "A good first milestone would be: corpus audit, retrieval design, one working "
-            "chat path with cited answers, and deployment notes."
-        )
-    elif offer == "Interactive 3D performance rescue":
-        body = (
-            f"{opening} My strongest fit is stabilizing "
-            "Three.js/R3F experiences that are slow, fragile, or struggling on mobile.\n\n"
-            "I would begin with a focused performance triage: asset size, texture lifecycle, "
-            "render-loop cost, camera/input ownership, and reduced-motion/mobile fallback. "
-            "Then I would scope a short stabilization sprint around the highest-impact fixes.\n\n"
-            f"Relevant work: {work_page}\n"
-            "If useful, I can send a short teardown before we talk."
-        )
-    elif offer == "AI workflow audit + one automation":
-        body = (
-            f"{opening} This looks like a practical AI workflow problem, "
-            "not a model-training problem. That is the lane I work in: LLM APIs, tools, "
-            "workflow orchestration, and human-in-the-loop automation.\n\n"
-            "I would start by mapping the current workflow, identifying the one automation "
-            "with the fastest ROI, and keeping anything sensitive out of cloud AI unless it "
-            "is explicitly safe.\n\n"
-            f"Service outline: {service_page}\n"
-            f"Relevant work: {work_page}\n"
-            "First milestone: a bounded audit plus one working automation with docs."
-        )
+    parts = [opening]
+    if contract:
+        parts.append(_CONTRACT_CAPABILITY.get(offer, _CONTRACT_CAPABILITY_DEFAULT))
+        if proof:
+            parts.append(f"A bit of relevant work: {proof}")
+        parts.append(f"Service outline: {pages['service_page']} · Relevant work: {pages['work_page']}")
+        parts.append("Open to a short call to scope it? Happy to share more first.")
     else:
-        body = (
-            f"{opening} I think the fastest path is a bounded AI "
-            "workflow audit before building. I would identify the current bottlenecks, "
-            "separate no-AI fixes from AI-worthy work, and recommend the smallest useful "
-            "automation.\n\n"
-            f"Service outline: {service_page}\n"
-            "If the audit does not surface clear savings, I would say that directly instead "
-            "of trying to sell implementation."
-        )
-
-    signoff = "\n\n" + preferences.signoff_block()
+        parts.append(_FTE_CAPABILITY.get(offer, _FTE_CAPABILITY_DEFAULT))
+        if proof:
+            parts.append(proof)
+        parts.append(f"Relevant work: {pages['work_page']}")
+        parts.append("Is this still open? I'd welcome a short call.")
 
     review_note = (
         "\n\nReview before sending: confirm scope, rate, buyer quality, and any platform "
         "rules. Do not auto-submit."
     )
 
-    draft = body + signoff + review_note
+    draft = "\n\n".join(parts) + "\n\n" + preferences.signoff_block() + review_note
     leak = contains_placeholder(draft)
     if leak:
         log.error(

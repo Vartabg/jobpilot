@@ -31,6 +31,7 @@ from jobpilot.gigs.core.proposals import (
     contains_placeholder,
     email_body,
     email_subject,
+    followup_message,
 )
 
 log = get_logger(__name__)
@@ -114,7 +115,9 @@ def _build_actions(top: Gig) -> str:
     return f"view, Apply, {target}, clear=true"
 
 
-def write_markdown(gigs: list[Gig], *, source_warning: str = "") -> Path:
+def write_markdown(
+    gigs: list[Gig], *, source_warning: str = "", followups: list | None = None,
+) -> Path:
     """Write today's digest as markdown to iCloud Drive. Returns path."""
     ICLOUD_DIR.mkdir(parents=True, exist_ok=True)
     today = datetime.now().strftime("%Y-%m-%d")
@@ -126,6 +129,18 @@ def write_markdown(gigs: list[Gig], *, source_warning: str = "") -> Path:
     ]
     if source_warning:
         lines.append(f"> ⚠️ {source_warning}")
+        lines.append("")
+    if followups:
+        lines.append(f"## ⏰ Follow up ({len(followups)})")
+        lines.append("")
+        lines.append("Sent, no reply yet — a 2nd touch is where most replies come from.")
+        lines.append("")
+        for r in followups:
+            who = " — ".join(p for p in (r.company, r.role) if p) or "this lead"
+            lines.append(f"- **{who}** (last touched {r.last_touched or '?'})")
+            lines.append(f"  > {followup_message(r.company, r.role)}")
+        lines.append("")
+        lines.append("---")
         lines.append("")
     lines += [
         f"**{len(gigs)} fresh opportunities**, sorted by fit + pay.",
@@ -169,7 +184,10 @@ def write_markdown(gigs: list[Gig], *, source_warning: str = "") -> Path:
     return out
 
 
-def push_ntfy(gigs: list[Gig], topic: str | None = None, *, source_warning: str = "") -> bool:
+def push_ntfy(
+    gigs: list[Gig], topic: str | None = None, *,
+    source_warning: str = "", followup_count: int = 0,
+) -> bool:
     """Send a short summary push to the user's ntfy topic (phone)."""
     topic = topic or os.getenv("NTFY_TOPIC", "")
     if not topic:
@@ -184,8 +202,9 @@ def push_ntfy(gigs: list[Gig], topic: str | None = None, *, source_warning: str 
     subtitle = f"{top.fit_score}/100 {top.company or top.title[:40]}"
     top_brief = build_revenue_brief(top)
 
+    followup_bit = f" · {followup_count} to follow up" if followup_count else ""
     body_lines = [
-        f"{today}: {len(gigs)} new - tap Apply for a personalized {top_brief.offer} draft, or open GigPilot/pipeline.md",
+        f"{today}: {len(gigs)} new{followup_bit} - tap Apply for a personalized {top_brief.offer} draft, or open GigPilot/pipeline.md",
         "",
     ]
     for g in gigs[:5]:
@@ -264,12 +283,14 @@ def dispatch(
     Cut from previous version: daily_brief.md (replaced by pipeline.md),
     cover_letters/ PDFs (recruiters spot bulk-generated content as AI tell).
     """
-    md_path = write_markdown(gigs, source_warning=source_warning)
+    followups = pipeline.followups_due(pipeline_rows) if pipeline_rows else []
+    md_path = write_markdown(gigs, source_warning=source_warning, followups=followups)
     save_latest_leads(gigs)
     crib_path = write_crib_sheet(gigs)
-    pushed = push_ntfy(gigs, source_warning=source_warning)
+    pushed = push_ntfy(gigs, source_warning=source_warning, followup_count=len(followups))
     return {
         "gigs": len(gigs),
+        "followups": len(followups),
         "digest_path": str(md_path),
         "crib_path": str(crib_path),
         "pushed": pushed,

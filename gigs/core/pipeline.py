@@ -175,6 +175,26 @@ def parse_last_touched(value: str, today: datetime | None = None) -> datetime | 
     return max(candidates) if candidates else None
 
 
+def followups_due(
+    rows: list[Row], *, days: int = 3, today: datetime | None = None,
+) -> list[Row]:
+    """Rows that were 'sent' but not yet replied and have gone quiet for
+    `days`+ — most cold-outreach replies come from the 2nd–4th touch, so a
+    one-shot sender leaves replies on the table. last_touched-less rows are
+    skipped (can't age them)."""
+    today = today or datetime.now()
+    due: list[Row] = []
+    for r in rows:
+        if r.status != "sent":
+            continue
+        dt = parse_last_touched(r.last_touched, today)
+        if dt is None:
+            continue
+        if (today - dt).days >= days:
+            due.append(r)
+    return due
+
+
 def _fmt_pay_for_pipeline(g: Gig) -> str:
     if g.salary_max and g.salary_min:
         return f"${g.salary_min/1000:.0f}-${g.salary_max/1000:.0f}K"

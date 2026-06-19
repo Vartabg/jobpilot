@@ -284,8 +284,10 @@ def _run_digest(
         )
         return
 
-    result = dispatch(added, source_warning=source_warning)
+    result = dispatch(added, updated, source_warning=source_warning)
     pushed = result["pushed"]
+    if result.get("followups"):
+        console.print(f"  Follow-ups due: {result['followups']}")
 
     console.print(f"\n[green]✓[/green] Dispatched {result['gigs']} new gigs to pipeline")
     console.print(f"  Push: {'sent' if pushed else 'skipped (NTFY_TOPIC unset)'}")
