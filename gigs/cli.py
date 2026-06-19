@@ -28,10 +28,22 @@ from jobpilot.gigs.core.scrapers.weworkremotely import enrich_apply_urls as enri
 from jobpilot.gigs.core.store import filter_new, mark_archived, mark_seen, seen_count, sync_first_seen
 from jobpilot.gigs.core.away import sync_reminders_from_pipeline
 
-_ensure_prefs()
-
 app = typer.Typer(help="Daily tech-gig digest")
 console = Console()
+
+
+@app.callback()
+def _gigs_setup() -> None:
+    """Seed prefs and apply any scoring overrides on first use of a gigs command.
+
+    Done here, not at import, so merely importing this module (e.g. when the
+    parent `jobpilot` CLI mounts the gigs sub-app for `--help`) never touches
+    the filesystem.
+    """
+    from jobpilot.gigs.core import scoring_rules
+
+    _ensure_prefs()
+    scoring_rules.apply_overrides()
 
 
 def _collect_with_status() -> list[Gig]:

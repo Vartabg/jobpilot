@@ -4,14 +4,14 @@ Score each gig 0-100 against the user's profile + pay thresholds.
 Scoring has two layers:
 
 1. **Title layer** — what the role actually IS, not what the ad says.
-   `TITLE_ENGINEERING_PATTERNS` matches AI-engineering job-title shapes
+   `_rules.TITLE_ENGINEERING_PATTERNS` matches AI-engineering job-title shapes
    (forward deployed, applied ai, ai engineer, agent builder, etc.) and
-   `TITLE_NEGATIVES` matches DevOps / Marketing / Sales / PM / Intern shapes.
+   `_rules.TITLE_NEGATIVES` matches DevOps / Marketing / Sales / PM / Intern shapes.
    When a title hits a negative without an engineering rescue, the role is
-   hard-capped at `TITLE_NEGATIVE_CAP` so the description layer can't push
+   hard-capped at `_rules.TITLE_NEGATIVE_CAP` so the description layer can't push
    it past the threshold on incidental keyword matches.
 
-2. **Full-text layer** — `SKILL_WEIGHTS` adds capped contribution from the
+2. **Full-text layer** — `_rules.SKILL_WEIGHTS` adds capped contribution from the
    user's stack (rag, claude, mcp, three.js, playwright, …). The cap
    prevents description noise (a Marketing ad that lists every AI buzzword)
    from saturating the score.
@@ -36,20 +36,7 @@ import re
 from jobpilot.gigs.core import preferences
 from jobpilot.gigs.core.models import Gig
 from jobpilot.core.work_style import is_contract_friendly, is_w2_only, score_work_style
-from jobpilot.gigs.core.scoring_rules import (
-    DOMAIN_BONUS,
-    JOB_BOARD_SOURCES,
-    NEGATIVE_TERMS,
-    REVENUE_TERMS,
-    SCAM_SIGNALS,
-    SKILL_WEIGHTS,
-    SKILL_WEIGHTS_CAP,
-    STRONG_FIT_TERMS,
-    TITLE_ENGINEERING_PATTERNS,
-    TITLE_NEGATIVE_CAP,
-    TITLE_NEGATIVES,
-    TITLE_TECH_BONUS,
-)
+from jobpilot.gigs.core import scoring_rules as _rules
 
 
 def _pay_floor_hourly() -> float:
@@ -137,60 +124,60 @@ def score_gig(gig: Gig) -> Gig:
     # "automation engineer") must not stack — one title scoring +64 across
     # three nested patterns is how everything saturated at 97-100. Only the
     # longest match scores (weight breaks length ties); every match still
-    # counts as a rescue from TITLE_NEGATIVES and the job-board penalty.
+    # counts as a rescue from _rules.TITLE_NEGATIVES and the job-board penalty.
     title_eng_hits = [
-        phrase for phrase in TITLE_ENGINEERING_PATTERNS if _phrase_in(title, phrase)
+        phrase for phrase in _rules.TITLE_ENGINEERING_PATTERNS if _phrase_in(title, phrase)
     ]
     if title_eng_hits:
         best = max(
             title_eng_hits,
-            key=lambda p: (len(p), TITLE_ENGINEERING_PATTERNS[p]),
+            key=lambda p: (len(p), _rules.TITLE_ENGINEERING_PATTERNS[p]),
         )
-        w = TITLE_ENGINEERING_PATTERNS[best]
+        w = _rules.TITLE_ENGINEERING_PATTERNS[best]
         score += w
         reasons.append(f"+{w} title:{best}")
 
-    for phrase, w in TITLE_TECH_BONUS.items():
+    for phrase, w in _rules.TITLE_TECH_BONUS.items():
         if _phrase_in(title, phrase):
             score += w
             reasons.append(f"+{w} title:{phrase}")
 
     title_neg_hits: list[str] = []
-    for phrase, w in TITLE_NEGATIVES.items():
+    for phrase, w in _rules.TITLE_NEGATIVES.items():
         if _phrase_in(title, phrase):
             score += w
             title_neg_hits.append(phrase)
             reasons.append(f"{w} title:{phrase}")
 
     # If the title is DevOps/Marketing/Sales/PM-shaped and nothing in
-    # TITLE_ENGINEERING_PATTERNS matched, the role is off-track regardless
+    # _rules.TITLE_ENGINEERING_PATTERNS matched, the role is off-track regardless
     # of how many AI buzzwords appear in the description.
     title_capped = bool(title_neg_hits) and not title_eng_hits
 
     # ----- Full-text skill layer (capped) -----
     skill_total = 0
-    for kw, w in SKILL_WEIGHTS.items():
+    for kw, w in _rules.SKILL_WEIGHTS.items():
         if _has_keyword(full_text, kw):
             skill_total += w
             reasons.append(f"+{w} {kw}")
-    if skill_total > SKILL_WEIGHTS_CAP:
-        reasons.append(f"cap-{SKILL_WEIGHTS_CAP} skill bonus capped (raw {skill_total})")
-        skill_total = SKILL_WEIGHTS_CAP
+    if skill_total > _rules.SKILL_WEIGHTS_CAP:
+        reasons.append(f"cap-{_rules.SKILL_WEIGHTS_CAP} skill bonus capped (raw {skill_total})")
+        skill_total = _rules.SKILL_WEIGHTS_CAP
     score += skill_total
 
     # ----- Spam + description-level negatives -----
-    for kw, w in SCAM_SIGNALS.items():
+    for kw, w in _rules.SCAM_SIGNALS.items():
         if kw in full_text:
             score += w
             reasons.append(f"{w} {kw}")
 
-    for kw, w in NEGATIVE_TERMS.items():
+    for kw, w in _rules.NEGATIVE_TERMS.items():
         if _has_keyword(full_text, kw):
             score += w
             reasons.append(f"{w} {kw}")
 
     # ----- Domain (company) bonus -----
-    for kw, w in DOMAIN_BONUS.items():
+    for kw, w in _rules.DOMAIN_BONUS.items():
         if _has_keyword(full_text, kw):
             score += w
             reasons.append(f"+{w} {kw}")
@@ -200,11 +187,11 @@ def score_gig(gig: Gig) -> Gig:
         score += 25
         reasons.append("+25 saved Upwork lead")
 
-    if any(_has_keyword(full_text, term) for term in REVENUE_TERMS):
+    if any(_has_keyword(full_text, term) for term in _rules.REVENUE_TERMS):
         score += 8
         reasons.append("+8 revenue-term fit")
 
-    if any(_phrase_in(title, term) for term in STRONG_FIT_TERMS):
+    if any(_phrase_in(title, term) for term in _rules.STRONG_FIT_TERMS):
         score += 15
         reasons.append("+15 strong-fit phrase in title")
 
@@ -213,9 +200,9 @@ def score_gig(gig: Gig) -> Gig:
     # signal get hit hard — most of them match an incidental "automation"
     # or "ai" in the description.
     if (
-        gig.source in JOB_BOARD_SOURCES
+        gig.source in _rules.JOB_BOARD_SOURCES
         and not title_eng_hits
-        and not any(_phrase_in(title, term) for term in STRONG_FIT_TERMS)
+        and not any(_phrase_in(title, term) for term in _rules.STRONG_FIT_TERMS)
     ):
         score -= 25
         reasons.append("-25 generic job-board role (no AI title signal)")
@@ -244,9 +231,9 @@ def score_gig(gig: Gig) -> Gig:
 
     # ----- Title-cap -----
     if title_capped:
-        if score > TITLE_NEGATIVE_CAP:
-            reasons.append(f"cap-{TITLE_NEGATIVE_CAP} title is non-engineering (no AI rescue)")
-        score = min(score, TITLE_NEGATIVE_CAP)
+        if score > _rules.TITLE_NEGATIVE_CAP:
+            reasons.append(f"cap-{_rules.TITLE_NEGATIVE_CAP} title is non-engineering (no AI rescue)")
+        score = min(score, _rules.TITLE_NEGATIVE_CAP)
 
     gig.fit_score = max(0, min(100, score))
     gig.fit_reasons = reasons[:8]
