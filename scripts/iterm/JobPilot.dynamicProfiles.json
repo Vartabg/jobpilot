@@ -1,0 +1,250 @@
+{
+  "Profiles": [
+    {
+      "Name": "JobPilot · Command Center",
+      "Guid": "A1B2C3D4-E5F6-7890-ABCD-EF1234567801",
+      "Tags": ["jobpilot", "primary"],
+      "Badge Text": "HUD",
+      "Badge Color": {
+        "Red Component": 0.2,
+        "Green Component": 0.85,
+        "Blue Component": 0.95,
+        "Alpha Component": 0.9
+      },
+      "Custom Directory": "Yes",
+      "Working Directory": "__JPROOT__",
+      "Custom Command": "Yes",
+      "Command": "__JPROOT__/scripts/iterm/pane-hud.sh",
+      "Initial Text": "",
+      "Unlimited Scrollback": false,
+      "Scrollback Lines": 0,
+      "alternateMouseScroll": 1,
+      "Smart Cursor Color": true,
+      "Cursor Guide": true,
+      "Blinking Cursor": false,
+      "Sync Title": false,
+      "Use Tab Color": true,
+      "Tab Color": {
+        "Red Component": 0.1,
+        "Green Component": 0.55,
+        "Blue Component": 0.65,
+        "Alpha Component": 1
+      },
+      "Background Color": {
+        "Red Component": 0.04,
+        "Green Component": 0.05,
+        "Blue Component": 0.08,
+        "Alpha Component": 1
+      },
+      "Foreground Color": {
+        "Red Component": 0.92,
+        "Green Component": 0.94,
+        "Blue Component": 0.96,
+        "Alpha Component": 1
+      },
+      "Cursor Color": {
+        "Red Component": 0.2,
+        "Green Component": 0.95,
+        "Blue Component": 0.85,
+        "Alpha Component": 1
+      },
+      "Selection Color": {
+        "Red Component": 0.15,
+        "Green Component": 0.35,
+        "Blue Component": 0.45,
+        "Alpha Component": 0.35
+      },
+      "Link Color": {
+        "Red Component": 0.35,
+        "Green Component": 0.85,
+        "Blue Component": 1,
+        "Alpha Component": 1
+      },
+      "Use Bold Font": true,
+      "ASCII Ligatures": true,
+      "Non-ASCII Ligatures": true,
+      "Horizontal Spacing": 1,
+      "Vertical Spacing": 1,
+      "Use Italic Font": true,
+      "Minimum Contrast": 0,
+      "Shortcut": "",
+      "Bound Hotkeys": [],
+      "Triggers": [
+        {
+          "regex": "https?://(jobs\\.lever\\.co|boards\\.greenhouse\\.io|jobs\\.ashbyhq\\.com)[^\\s\\]\\)\\\"']+",
+          "action": "HighlightTrigger",
+          "parameter": "0.35 0.75 0.95 0.35",
+          "partial": true
+        },
+        {
+          "regex": "mailto:[^\\s\\]\\)\\\"']+",
+          "action": "HighlightTrigger",
+          "parameter": "0.45 0.85 0.55 0.35",
+          "partial": true
+        },
+        {
+          "regex": "(★|▶|GOLD|fit [0-9]{2,3})",
+          "action": "HighlightTrigger",
+          "parameter": "0.95 0.75 0.2 0.4",
+          "partial": true
+        },
+        {
+          "regex": "(Built queue|Dispatched [0-9]+ new|JobPilot is up)",
+          "action": "HighlightTrigger",
+          "parameter": "0.3 0.9 0.45 0.45",
+          "partial": true
+        }
+      ]
+    },
+    {
+      "Name": "JobPilot · Radar",
+      "Guid": "A1B2C3D4-E5F6-7890-ABCD-EF1234567802",
+      "Tags": ["jobpilot"],
+      "Badge Text": "RADAR",
+      "Badge Color": {
+        "Red Component": 0.55,
+        "Green Component": 0.35,
+        "Blue Component": 0.95,
+        "Alpha Component": 0.9
+      },
+      "Custom Directory": "Yes",
+      "Working Directory": "__JPROOT__",
+      "Custom Command": "Yes",
+      "Command": "__JPROOT__/scripts/iterm/pane-radar.sh",
+      "Unlimited Scrollback": true,
+      "Scrollback Lines": 20000,
+      "Use Tab Color": true,
+      "Tab Color": {
+        "Red Component": 0.35,
+        "Green Component": 0.25,
+        "Blue Component": 0.7,
+        "Alpha Component": 1
+      },
+      "Background Color": {
+        "Red Component": 0.05,
+        "Green Component": 0.04,
+        "Blue Component": 0.09,
+        "Alpha Component": 1
+      },
+      "Foreground Color": {
+        "Red Component": 0.9,
+        "Green Component": 0.9,
+        "Blue Component": 0.95,
+        "Alpha Component": 1
+      },
+      "Link Color": {
+        "Red Component": 0.5,
+        "Green Component": 0.65,
+        "Blue Component": 1,
+        "Alpha Component": 1
+      }
+    },
+    {
+      "Name": "JobPilot · Board",
+      "Guid": "A1B2C3D4-E5F6-7890-ABCD-EF1234567803",
+      "Tags": ["jobpilot"],
+      "Badge Text": "BOARD",
+      "Custom Directory": "Yes",
+      "Working Directory": "__JPROOT__",
+      "Custom Command": "Yes",
+      "Command": "__JPROOT__/scripts/iterm/pane-board.sh",
+      "Unlimited Scrollback": true,
+      "Scrollback Lines": 20000,
+      "Use Tab Color": true,
+      "Tab Color": {
+        "Red Component": 0.15,
+        "Green Component": 0.55,
+        "Blue Component": 0.35,
+        "Alpha Component": 1
+      },
+      "Background Color": {
+        "Red Component": 0.04,
+        "Green Component": 0.06,
+        "Blue Component": 0.05,
+        "Alpha Component": 1
+      },
+      "Foreground Color": {
+        "Red Component": 0.92,
+        "Green Component": 0.95,
+        "Blue Component": 0.9,
+        "Alpha Component": 1
+      }
+    },
+    {
+      "Name": "JobPilot · Ops",
+      "Guid": "A1B2C3D4-E5F6-7890-ABCD-EF1234567804",
+      "Tags": ["jobpilot"],
+      "Badge Text": "OPS",
+      "Custom Directory": "Yes",
+      "Working Directory": "__JPROOT__",
+      "Custom Command": "No",
+      "Command": "",
+      "Initial Text": "",
+      "Unlimited Scrollback": true,
+      "Scrollback Lines": 100000,
+      "Use Tab Color": true,
+      "Tab Color": {
+        "Red Component": 0.45,
+        "Green Component": 0.45,
+        "Blue Component": 0.5,
+        "Alpha Component": 1
+      },
+      "Background Color": {
+        "Red Component": 0.07,
+        "Green Component": 0.07,
+        "Blue Component": 0.08,
+        "Alpha Component": 1
+      },
+      "Foreground Color": {
+        "Red Component": 0.88,
+        "Green Component": 0.9,
+        "Blue Component": 0.92,
+        "Alpha Component": 1
+      },
+      "Triggers": [
+        {
+          "regex": "(ERROR|error:|FAILED|✗)",
+          "action": "HighlightTrigger",
+          "parameter": "0.95 0.25 0.25 0.45",
+          "partial": true
+        },
+        {
+          "regex": "(✓|OK|200)",
+          "action": "HighlightTrigger",
+          "parameter": "0.25 0.85 0.35 0.35",
+          "partial": true
+        }
+      ]
+    },
+    {
+      "Name": "JobPilot · Outreach",
+      "Guid": "A1B2C3D4-E5F6-7890-ABCD-EF1234567805",
+      "Tags": ["jobpilot", "apply"],
+      "Badge Text": "SEND",
+      "Custom Directory": "Yes",
+      "Working Directory": "__JPROOT__",
+      "Custom Command": "Yes",
+      "Command": "__JPROOT__/scripts/iterm/pane-outreach.sh",
+      "Unlimited Scrollback": true,
+      "Use Tab Color": true,
+      "Tab Color": {
+        "Red Component": 0.75,
+        "Green Component": 0.45,
+        "Blue Component": 0.2,
+        "Alpha Component": 1
+      },
+      "Background Color": {
+        "Red Component": 0.08,
+        "Green Component": 0.06,
+        "Blue Component": 0.04,
+        "Alpha Component": 1
+      },
+      "Foreground Color": {
+        "Red Component": 0.95,
+        "Green Component": 0.92,
+        "Blue Component": 0.88,
+        "Alpha Component": 1
+      }
+    }
+  ]
+}

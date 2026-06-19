@@ -909,6 +909,7 @@ def hud(
     austin: bool = typer.Option(True, "--austin/--no-austin"),
     fresh_gigs: bool = typer.Option(True, "--fresh/--all-gigs", help="Only unseen gigs vs entire scan"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show numbered URL index for every row"),
+    plain: bool = typer.Option(False, "--plain", help="Plain-language labels (command center / non-dev view)"),
     export_txt: bool = typer.Option(False, "--export", help="Plain-text dump to stdout (all rows + URLs)"),
     pick: bool = typer.Option(False, "--pick", help="fzf fuzzy-pick a gig or job and open its URL"),
 ):
@@ -933,9 +934,59 @@ def hud(
         pick_hud(console, opts=opts)
         return
     if watch:
-        watch_hud(console, opts=opts, interval=interval, verbose=verbose)
+        watch_hud(console, opts=opts, interval=interval, verbose=verbose, plain=plain)
     else:
-        render_hud(console, opts=opts, verbose=verbose)
+        render_hud(console, opts=opts, verbose=verbose, plain=plain)
+
+
+@app.command("center-status")
+def center_status(
+    watch: bool = typer.Option(False, "--watch", "-w", help="Live status dashboard"),
+    interval: float = typer.Option(30.0, "--interval", help="Refresh seconds (--watch)"),
+):
+    """Plain-language status board for the iTerm command center left pane."""
+    from jobpilot.ui.center_panes import render_status_board, watch_status_board
+
+    if watch:
+        watch_status_board(console, interval=interval)
+    else:
+        render_status_board(console)
+
+
+@app.command("center-activity")
+def center_activity(
+    watch: bool = typer.Option(False, "--watch", "-w", help="Live activity feed"),
+    interval: float = typer.Option(5.0, "--interval", help="Refresh seconds (--watch)"),
+):
+    """Human-readable activity feed for the iTerm command center bottom pane."""
+    from jobpilot.ui.center_panes import render_activity_feed, watch_activity_feed
+
+    if watch:
+        watch_activity_feed(console, interval=interval)
+    else:
+        render_activity_feed(console)
+
+
+@app.command()
+def iterm(
+    install: bool = typer.Option(False, "--install", help="Install iTerm profiles + shell hook (one-time)"),
+    new_window: bool = typer.Option(False, "--new", help="Force a fresh command center (closes old JobPilot windows)"),
+):
+    """Open or focus the JobPilot iTerm command center (full-screen HUD)."""
+    import subprocess
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent
+    iterm_dir = root / "scripts" / "iterm"
+
+    if install:
+        subprocess.run(["bash", str(iterm_dir / "install.sh")], check=True)
+        return
+
+    args = ["bash", str(iterm_dir / "launch-command-center.sh")]
+    if new_window:
+        args.append("--new")
+    subprocess.run(args, check=True)
 
 
 @app.command()

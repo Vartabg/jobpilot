@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
 # boot.sh — start JobPilot Chrome CDP + dashboard server.
-# Usage: ./scripts/boot.sh
+# Usage: ./scripts/boot.sh [--quiet]
 # Stop:  ./scripts/stop.sh
 set -euo pipefail
+
+QUIET=false
+if [[ "${1:-}" == "--quiet" || "${1:-}" == "-q" ]]; then
+  QUIET=true
+fi
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -17,7 +22,7 @@ mkdir -p "$PID_DIR"
 
 # ── Python env ─────────────────────────────────────────────────────────────
 if [[ ! -d "$ROOT/.venv" ]]; then
-  echo "▶ Creating .venv..."
+  if $QUIET; then echo "Setting up JobPilot…"; else echo "▶ Creating .venv..."; fi
   python3 -m venv "$ROOT/.venv"
   "$ROOT/.venv/bin/pip" install -q -e "$ROOT"
 fi
@@ -26,10 +31,16 @@ source "$ROOT/.venv/bin/activate"
 
 # ── Chrome CDP ─────────────────────────────────────────────────────────────
 if curl -fsS --max-time 2 "http://127.0.0.1:${DEBUG_PORT}/json/version" >/dev/null 2>&1; then
-  echo "✓ Chrome CDP already up on port ${DEBUG_PORT}"
+  $QUIET || echo "✓ Chrome CDP already up on port ${DEBUG_PORT}"
 else
-  echo "▶ Launching Chrome (CDP port ${DEBUG_PORT})..."
-  "$ROOT/scripts/launch_chrome.sh"
+  if $QUIET; then echo "Opening browser helper…"; else echo "▶ Launching Chrome (CDP port ${DEBUG_PORT})..."; fi
+  if ! "$ROOT/scripts/launch_chrome.sh"; then
+    if $QUIET; then
+      echo "  Browser helper skipped (Chrome unavailable — apply assist needs it later)"
+    else
+      echo "⚠ Chrome did not start — dashboard and HUD still work"
+    fi
+  fi
 fi
 
 # ── Dashboard server ───────────────────────────────────────────────────────
@@ -43,9 +54,9 @@ if [[ -n "$TS_IP" && "$TS_IP" == 100.* ]]; then
 fi
 
 if [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
-  echo "✓ Dashboard already running (pid $(cat "$PID_FILE"))"
+  $QUIET || echo "✓ Dashboard already running (pid $(cat "$PID_FILE"))"
 else
-  echo "▶ Starting dashboard on ${SERVE_HOST}:${SERVE_PORT}..."
+  if $QUIET; then echo "Starting dashboard…"; else echo "▶ Starting dashboard on ${SERVE_HOST}:${SERVE_PORT}..."; fi
   nohup jobpilot serve --host "$SERVE_HOST" --port "$SERVE_PORT" >>"$LOG_FILE" 2>&1 &
   echo $! >"$PID_FILE"
   sleep 2
@@ -55,9 +66,24 @@ fi
 HEALTH_HOST="$SERVE_HOST"
 HTTP_CODE="$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 "http://${HEALTH_HOST}:${SERVE_PORT}/api/queue" 2>/dev/null || echo "000")"
 if [[ "$HTTP_CODE" != "200" ]]; then
-  echo "✗ Dashboard not responding on http://${HEALTH_HOST}:${SERVE_PORT}/api/queue"
-  echo "  Log: $LOG_FILE"
+  if $QUIET; then
+    echo "Dashboard isn't responding yet. Check $LOG_FILE"
+  else
+    echo "✗ Dashboard not responding on http://${HEALTH_HOST}:${SERVE_PORT}/api/queue"
+    echo "  Log: $LOG_FILE"
+  fi
   exit 1
+fi
+
+if $QUIET; then
+  echo "✓ JobPilot is ready"
+  if [[ "$HEALTH_HOST" == "127.0.0.1" ]]; then
+    echo "  Dashboard: http://127.0.0.1:${SERVE_PORT}/"
+  else
+    echo "  Dashboard: http://${HEALTH_HOST}:${SERVE_PORT}/"
+  fi
+  echo ""
+  exit 0
 fi
 
 echo ""

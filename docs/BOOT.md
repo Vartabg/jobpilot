@@ -24,6 +24,16 @@ jobpilot doctor --no-bro       # verify health
 ./scripts/stop.sh                # stop dashboard only
 ```
 
+## iTerm (recommended terminal)
+
+```bash
+jobpilot iterm --install   # once
+source ~/.zshrc
+jp                         # one window: boot + HUD + logs (reuses if open)
+```
+
+`jp` with arguments still runs the CLI: `jp queue --refresh`, `jp hud --pick`, etc.
+
 ## Troubleshooting
 
 | Problem | Fix |
