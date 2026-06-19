@@ -3,10 +3,11 @@ CDP Bridge - Manages a dedicated Playwright browser for JobPilot.
 
 On connect():
   1. If a debug Chrome is already running on the port, reuse it (CDP).
-  2. Otherwise, launch a persistent Chromium window with a dedicated profile
+  2. Otherwise, launch a persistent Chrome window with a dedicated profile
      so LinkedIn login is preserved across runs.
 """
 
+import os
 from pathlib import Path
 from typing import Optional
 from playwright.async_api import async_playwright, Browser, Page, BrowserContext
@@ -18,6 +19,20 @@ log = get_logger(__name__)
 
 _PROFILE_DIR = Path.home() / ".jobpilot-chrome-profile"
 _LINKEDIN_JOBS = "https://www.linkedin.com/jobs/"
+_SYSTEM_CHROME = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+
+
+def _chrome_executable() -> Optional[str]:
+    """Prefer system Chrome over Playwright's bundled Chrome for Testing."""
+    configured = os.environ.get("JOBPILOT_CHROME_EXECUTABLE", "").strip()
+    if configured:
+        candidate = Path(configured).expanduser()
+        if candidate.exists():
+            return str(candidate)
+        log.warning("JOBPILOT_CHROME_EXECUTABLE does not exist: %s", candidate)
+    if _SYSTEM_CHROME.exists():
+        return str(_SYSTEM_CHROME)
+    return None
 
 
 class CDPBridge:
@@ -53,15 +68,21 @@ class CDPBridge:
         # --- path 2: launch a fresh persistent window ---
         try:
             _PROFILE_DIR.mkdir(parents=True, exist_ok=True)
-            self._context = await self._playwright.chromium.launch_persistent_context(
-                str(_PROFILE_DIR),
-                headless=False,
-                args=[
+            launch_options = {
+                "headless": False,
+                "args": [
                     f"--remote-debugging-port={self.debug_port}",
                     "--remote-allow-origins=*",
                     "--no-first-run",
                     "--no-default-browser-check",
                 ],
+            }
+            executable = _chrome_executable()
+            if executable:
+                launch_options["executable_path"] = executable
+            self._context = await self._playwright.chromium.launch_persistent_context(
+                str(_PROFILE_DIR),
+                **launch_options,
             )
             # Reuse an existing LinkedIn tab or navigate the first page there
             self._page = await self.get_active_page()
