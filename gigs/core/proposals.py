@@ -194,14 +194,8 @@ def _tailored_hook(gig: Gig) -> str:
             skill_text = skills[0]
         else:
             skill_text = f"{skills[0]} and {skills[1]}"
-        return (
-            f" What caught my eye is {signal}, especially the overlap with "
-            f"{skill_text}; that maps closely to the practical systems I build."
-        )
-    return (
-        f" What caught my eye is {signal}; that is the kind of practical "
-        "implementation work I like."
-    )
+        return f" The part that fits me is {signal} — I work with {skill_text}."
+    return f" The part that fits me is {signal} — that's the kind of work I do."
 
 
 @dataclass(frozen=True)
@@ -391,21 +385,21 @@ def _is_contract_lead(gig: Gig) -> bool:
 # end), not a contractor pitching an audit. Phrasing draws on the user's stack.
 _FTE_CAPABILITY = {
     "RAG / internal knowledge assistant":
-        "I build local-first AI and document-retrieval systems end to end in "
-        "Python/React, careful about security boundaries and human review.",
+        "I build AI and document-retrieval systems in Python and React, and I "
+        "keep security and human review in mind.",
     "Interactive 3D performance rescue":
-        "I build interactive web and 3D front-ends end to end — React/Next.js "
-        "and Three.js/WebGPU, with an eye on performance and mobile.",
+        "I build web and 3D front-ends in React/Next.js and Three.js, including "
+        "performance work on mobile.",
     "AI workflow audit + one automation":
-        "I build practical LLM/agent workflow automation end to end — tools, "
-        "orchestration, and human-in-the-loop — not model training.",
+        "I work on practical LLM and automation workflows — tools, "
+        "orchestration, and human-in-the-loop. Not model training.",
     "AI workflow audit":
-        "I build practical AI and automation systems end to end — LLM APIs, "
-        "tools, and the glue between them, with human-review gates.",
+        "I build practical AI and automation with LLM APIs and tools, with "
+        "human review in the loop.",
 }
 _FTE_CAPABILITY_DEFAULT = (
-    "I'm a full-stack + AI engineer who ships end to end — LLM/agent systems, "
-    "web apps, and the automation between them."
+    "I'm a full-stack and AI engineer. I build web apps, LLM and agent tools, "
+    "and the automation around them."
 )
 
 # Contract framing: a bounded, service-shaped offer (appropriate for Upwork /

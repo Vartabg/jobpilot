@@ -58,9 +58,9 @@ def test_revenue_brief_adds_grounded_personalization_hook() -> None:
 
     brief = build_revenue_brief(gig)
 
-    assert "What caught my eye is the workflow orchestration piece" in brief.draft
+    assert "The part that fits me is the workflow orchestration piece" in brief.draft
     assert "Python" in brief.draft
-    assert "practical systems I build" in brief.draft
+    assert "that's the kind of work I do" in brief.draft or "I work with" in brief.draft
 
 
 def test_email_body_keeps_personalization_without_review_footer() -> None:
@@ -74,5 +74,5 @@ def test_email_body_keeps_personalization_without_review_footer() -> None:
 
     body = email_body(gig)
 
-    assert "What caught my eye is the need to turn scattered documents" in body
+    assert "The part that fits me is the need to turn scattered documents" in body
     assert "Review before sending" not in body

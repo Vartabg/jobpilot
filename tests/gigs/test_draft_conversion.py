@@ -19,9 +19,12 @@ def _gig(**kw):
 def test_fte_draft_leads_with_engineer_framing_and_cta():
     body = proposals.email_body(_gig(title="Founding Engineer"))
     assert "Is this still open?" in body          # low-friction CTA
-    assert "end to end" in body                   # builder/engineer framing
+    assert "I build" in body or "I work" in body  # plain builder/engineer framing
     assert "Service outline" not in body          # no contractor service pitch
     assert "example.com" not in body
+    # humble/straight: no flourish words
+    for flourish in ("end to end", "ships end to end", "the glue between"):
+        assert flourish not in body
 
 
 def test_contract_draft_keeps_service_framing():
