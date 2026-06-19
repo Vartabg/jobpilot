@@ -387,8 +387,8 @@ def _is_contract_lead(gig: Gig) -> bool:
     return bool(_CONTRACT_TITLE_RE.search(f"{gig.title or ''} {gig.description or ''}"))
 
 
-# Full-time framing: what Garo BUILDS (an engineer who ships end to end), not a
-# contractor pitching an audit. Grounded in his real stack.
+# Full-time framing: what the applicant BUILDS (an engineer who ships end to
+# end), not a contractor pitching an audit. Phrasing draws on the user's stack.
 _FTE_CAPABILITY = {
     "RAG / internal knowledge assistant":
         "I build local-first AI and document-retrieval systems end to end in "
