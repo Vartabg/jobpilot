@@ -1,0 +1,34 @@
+{
+  "_doc": "Copy to data/gigs/scoring.json (gitignored) to retune gig scoring without editing code. Each key deep-merges over the defaults in gigs/core/scoring_rules.py: dict tables merge per-key, scalars (the *_CAP values) replace. Unknown keys are ignored. Delete the keys you don't want to change.",
+
+  "_doc_title_patterns": "Lowercased job-title phrases -> weight added when the title contains them. A match here also rescues the role from the negative-title cap.",
+  "TITLE_ENGINEERING_PATTERNS": {
+    "frontend engineer": 30,
+    "react developer": 28,
+    "full stack engineer": 26
+  },
+
+  "_doc_title_tech": "Smaller title bonuses for stack signals.",
+  "TITLE_TECH_BONUS": {
+    "react": 8,
+    "typescript": 6
+  },
+
+  "_doc_skill_weights": "Full-text skill keyword -> weight (capped by SKILL_WEIGHTS_CAP).",
+  "SKILL_WEIGHTS": {
+    "react": 24,
+    "next.js": 20,
+    "typescript": 16,
+    "tailwind": 10
+  },
+
+  "_doc_caps": "Scalar caps replace the default outright.",
+  "SKILL_WEIGHTS_CAP": 40,
+  "TITLE_NEGATIVE_CAP": 45,
+
+  "_doc_negatives": "Lowercased title phrases that penalize / cap a role.",
+  "TITLE_NEGATIVES": {
+    "qa": -25,
+    "manager": -20
+  }
+}

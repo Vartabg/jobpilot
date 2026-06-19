@@ -42,6 +42,20 @@ Try it manually first:
 
 On first run the gigs lane writes `data/gigs/preferences.json` with neutral placeholder values (name, pay targets, skill keywords, background bullets). Edit that file to make scoring and drafts yours. It is gitignored — your personal details never leave your machine.
 
+## Tuning the scorer (optional)
+
+The default scoring favors AI-application-engineering roles. If your target stack is different (say React/Next, or data engineering), drop a `data/gigs/scoring.json` to retune without touching code — it deep-merges over the built-in weights (per-key for tables, replace for caps). Only the scoring tables are overridable; unknown keys are ignored. Example:
+
+```json
+{
+  "SKILL_WEIGHTS": { "react": 24, "next.js": 20, "typescript": 16 },
+  "TITLE_ENGINEERING_PATTERNS": { "frontend engineer": 30, "react developer": 28 },
+  "SKILL_WEIGHTS_CAP": 40
+}
+```
+
+See [gigs-scoring.example.json](gigs-scoring.example.json) for a fuller example. The defaults and the full list of overridable tables live in `gigs/core/scoring_rules.py`.
+
 ## Where things land
 
 - **Digests** — `Gigpilot_Digests/` in your iCloud Drive (so you can read them on your phone).

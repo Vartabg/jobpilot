@@ -1,7 +1,9 @@
 """Static scoring rules for gig revenue matching.
 
 These weights are the default calibration (an AI-application-engineering
-tech-stack weighting); a per-user override is a phase-3 follow-up.
+tech-stack weighting). Users with a different target stack can retune scoring
+without editing code via a `data/gigs/scoring.json` override — see
+apply_overrides() at the bottom of this file.
 
 Calibrated 2026-05-08 against:
 - `data/preferences.json` `tailoring.skill_keywords` (the target stack)
@@ -285,3 +287,57 @@ REVENUE_TERMS = (
 # title-level engineering signal get penalized — most WWR/RemoteOK postings
 # match an "automation" or "ai" keyword incidentally.
 JOB_BOARD_SOURCES = {"remoteok", "wwr", "himalayas", "hn"}
+
+
+# --- per-user overrides ---------------------------------------------------
+# The weights above are the default calibration. A user with a different target
+# stack (say, a React/Next dev rather than an AI engineer) can retune scoring
+# without editing code by dropping a `data/gigs/scoring.json` that deep-merges
+# over these tables. scorer.py reads everything through this module object, so
+# apply_overrides() rebinding the globals is picked up at scoring time.
+#
+# This is loaded lazily (from the gigs CLI callback), NOT at import — so merely
+# importing the module never touches the filesystem and tests see pure defaults.
+
+_OVERRIDABLE = (
+    "TITLE_ENGINEERING_PATTERNS", "TITLE_TECH_BONUS", "TITLE_NEGATIVES",
+    "TITLE_NEGATIVE_CAP", "SKILL_WEIGHTS", "SKILL_WEIGHTS_CAP", "SCAM_SIGNALS",
+    "NEGATIVE_TERMS", "STRONG_FIT_TERMS", "DOMAIN_BONUS", "REVENUE_TERMS",
+    "JOB_BOARD_SOURCES",
+)
+
+
+def _merge(default, override):
+    """Per-key merge for dicts; replace for everything else."""
+    if isinstance(default, dict) and isinstance(override, dict):
+        out = dict(default)
+        for k, v in override.items():
+            out[k] = _merge(out.get(k), v) if k in out else v
+        return out
+    return override
+
+
+def apply_overrides(path=None) -> bool:
+    """Deep-merge a user scoring config over the default tables, in place.
+
+    Returns True if an override file was found and applied. Safe to call
+    repeatedly; only the named _OVERRIDABLE tables can be tuned.
+    """
+    import json
+    from jobpilot.gigs.core.paths import data_dir
+
+    cfg = path or (data_dir() / "scoring.json")
+    try:
+        if not cfg.exists():
+            return False
+        loaded = json.loads(cfg.read_text())
+    except Exception:
+        return False
+    if not isinstance(loaded, dict):
+        return False
+
+    g = globals()
+    for key, override in loaded.items():
+        if key in _OVERRIDABLE and key in g:
+            g[key] = _merge(g[key], override)
+    return True
