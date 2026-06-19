@@ -8,12 +8,13 @@ from jobpilot.gigs.core.proposals import build_revenue_brief
 
 
 def fmt_pay(gig: Gig) -> str:
+    cur = "" if (gig.currency or "USD").upper() == "USD" else f" {gig.currency.upper()}"
     if gig.salary_max and gig.salary_min:
-        return f"${gig.salary_min/1000:.0f}-${gig.salary_max/1000:.0f}K/yr"
+        return f"${gig.salary_min/1000:.0f}-${gig.salary_max/1000:.0f}K{cur}/yr"
     if gig.salary_max:
-        return f"up to ${gig.salary_max/1000:.0f}K/yr"
+        return f"up to ${gig.salary_max/1000:.0f}K{cur}/yr"
     if gig.pay_hourly_est:
-        return f"${gig.pay_hourly_est:.0f}/hr"
+        return f"${gig.pay_hourly_est:.0f}{cur}/hr"
     return "pay not stated"
 
 

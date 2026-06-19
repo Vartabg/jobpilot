@@ -55,10 +55,15 @@ DEFAULTS: dict[str, Any] = {
         "work_page": "https://your-portfolio.example.com/work",
     },
     # Lowercase substrings that mark a role as in your home metro (drives the
-    # "currently located here" vs "willing to relocate" crib-sheet answer).
+    # crib-sheet relocate answer and the optional geo-eligibility filter).
     # Empty by default — set in data/preferences.json, e.g. ["new york", "nyc"].
     "location": {
         "home_metro_tags": [],
+        # When true (and home_metro_tags is set), the digest keeps only
+        # home-metro or remote roles and drops ones tied elsewhere. Off by
+        # default so the shipped tool stays neutral.
+        "require_home_or_remote": False,
+        "allow_remote": True,
     },
     # Drives the crib sheet's relocate / in-office answers. Neutral by default;
     # set real answers in data/gigs/preferences.json.
@@ -223,6 +228,10 @@ def links(prefs: dict[str, Any] | None = None) -> dict[str, str]:
 
 def home_metro_tags(prefs: dict[str, Any] | None = None) -> list[str]:
     return list((prefs or load())["location"]["home_metro_tags"])
+
+
+def location_config(prefs: dict[str, Any] | None = None) -> dict[str, Any]:
+    return dict((prefs or load())["location"])
 
 
 def work_style(prefs: dict[str, Any] | None = None) -> dict[str, str]:

@@ -38,6 +38,33 @@ _SALARY_RE = re.compile(
 )
 
 
+_CURRENCY_RE = re.compile(r"\b(USD|CAD|AUD|NZD|EUR|GBP|SGD)\b", re.IGNORECASE)
+
+
+def detect_currency(text: str) -> str:
+    """Best-effort currency for a comp string. Defaults to USD.
+
+    A bare '$' is ambiguous (USD/CAD/AUD), so an explicit token wins:
+    'C$' / 'CAD' -> CAD, '£' -> GBP, '€' -> EUR, etc. Without this, a
+    '$105K-$125K CAD' role is silently treated (and salary-anchored) as USD.
+    """
+    if not text:
+        return "USD"
+    m = _CURRENCY_RE.search(text)
+    if m:
+        return m.group(1).upper()
+    low = text.lower()
+    if "c$" in low:
+        return "CAD"
+    if "a$" in low:
+        return "AUD"
+    if "£" in text:
+        return "GBP"
+    if "€" in text:
+        return "EUR"
+    return "USD"
+
+
 def _to_number(group: str) -> float:
     return float(group.replace(",", ""))
 

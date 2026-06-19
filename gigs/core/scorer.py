@@ -46,15 +46,29 @@ def _pay_floor_hourly() -> float:
     return max(floor_hourly, floor_annual / 2000)
 
 
+# Static USD conversion (no network). Rough mid-rates — enough to keep a
+# sub-floor foreign salary (e.g. CAD 125K ≈ USD 91K) from passing the USD floor.
+_USD_PER = {
+    "USD": 1.0, "CAD": 0.73, "AUD": 0.66, "NZD": 0.61,
+    "EUR": 1.08, "GBP": 1.27, "SGD": 0.74,
+}
+
+
+def _to_usd(amount: float, currency: str) -> float:
+    return amount * _USD_PER.get((currency or "USD").upper(), 1.0)
+
+
 def _normalize_pay(gig: Gig) -> float:
-    """Reduce everything to a single hourly-equivalent for sorting."""
+    """Reduce everything to a single USD hourly-equivalent for sorting and the
+    pay floor — converting from the gig's currency first so a CAD/GBP band
+    isn't compared against the USD floor at face value."""
+    cur = gig.currency
     if gig.salary_max and gig.salary_max > 0:
-        # Annual max → hourly assuming 2000 hrs
-        return gig.salary_max / 2000
+        return _to_usd(gig.salary_max, cur) / 2000  # annual → hourly @ 2000 hrs
     if gig.salary_min and gig.salary_min > 0:
-        return gig.salary_min / 2000
+        return _to_usd(gig.salary_min, cur) / 2000
     if gig.pay_hourly_est:
-        return gig.pay_hourly_est
+        return _to_usd(gig.pay_hourly_est, cur)
     return 0.0
 
 
@@ -103,6 +117,53 @@ def _has_keyword(text: str, keyword: str) -> bool:
 def _phrase_in(text: str, phrase: str) -> bool:
     """Substring match; phrases are multi-word so word-boundary noise is rare."""
     return phrase in text
+
+
+_REMOTE_TOKENS = ("remote", "anywhere", "distributed", "worldwide", "global")
+# A location requirement naming one of these is compatible with a US/Austin
+# applicant ("must live in the US"); anything else ("must live in Canada")
+# means out of reach. Word-boundary so "us" matches "the US." but not "Russia".
+_HOME_OK_RE = re.compile(
+    r"\b(u\.?s\.?a?|united states|north america|remote|anywhere|worldwide|texas|tx)\b",
+    re.IGNORECASE,
+)
+# High-precision restriction phrasing. We only EXCLUDE on an explicit hard
+# requirement, never on an incidental city mention, to avoid dropping good
+# remote roles.
+_RESTRICTION_RE = re.compile(
+    r"must\s+(?:live|reside|be\s+located|be\s+based|work)\s+(?:in|from|near|within)?\s*([a-z .,/&'-]{2,40})",
+    re.IGNORECASE,
+)
+_UNKNOWN_LOC = ("", "see post", "not specified", "n/a", "unspecified")
+
+
+def _geo_eligible(gig: Gig, *, home_tags: list[str], allow_remote: bool) -> bool:
+    """True when a gig is reachable for an applicant who wants home-metro or
+    remote roles only. Conservative: keeps remote/home/unknown, and only drops
+    a role on clear evidence it's tied elsewhere (an explicit 'must live in
+    <non-home>' requirement, or a specific non-home onsite location)."""
+    loc = (gig.location or "").lower().strip()
+    text = " ".join([gig.location or "", gig.title or "", gig.description or ""]).lower()
+
+    def _is_home(s: str) -> bool:
+        return any(t in s for t in home_tags)
+
+    if _is_home(text):
+        return True
+
+    # Explicit hard location requirement → judge by the region it names.
+    for m in _RESTRICTION_RE.finditer(text):
+        region = m.group(1)
+        if _is_home(region) or _HOME_OK_RE.search(region):
+            return True  # requirement is satisfiable (US / home / remote)
+        return False     # requirement names somewhere else → out of reach
+
+    if allow_remote and any(t in text for t in _REMOTE_TOKENS):
+        return True
+    if loc in _UNKNOWN_LOC or any(tok in loc for tok in ("united states", "usa", "us")):
+        return True
+    # A specific, non-home, non-remote location → onsite elsewhere.
+    return False
 
 
 def score_gig(gig: Gig) -> Gig:
@@ -308,6 +369,13 @@ def filter_and_rank(
                 title=g.title or "",
             )
         ]
+    # Geo-eligibility: opt-in (preferences location.require_home_or_remote) and
+    # only when home_metro_tags are set, so the shipped default stays neutral.
+    loc_cfg = preferences.location_config()
+    home_tags = [t.lower() for t in loc_cfg.get("home_metro_tags", [])]
+    if loc_cfg.get("require_home_or_remote", False) and home_tags:
+        allow_remote = loc_cfg.get("allow_remote", True)
+        kept = [g for g in kept if _geo_eligible(g, home_tags=home_tags, allow_remote=allow_remote)]
     kept.sort(key=lambda g: (
         -g.fit_score,
         apply_friction(g),

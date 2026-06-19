@@ -10,6 +10,7 @@ import requests  # pyright: ignore[reportMissingModuleSource]
 
 from jobpilot.gigs.core.logger import get_logger
 from jobpilot.gigs.core.models import Gig
+from jobpilot.gigs.core.scrapers.comp import detect_currency as _detect_currency
 from jobpilot.gigs.core.scrapers.comp import parse_comp as _parse_comp
 from jobpilot.gigs.core.scrapers.ids import stable_url_suffix
 
@@ -254,6 +255,7 @@ def scrape_weworkremotely() -> list[Gig]:
             desc = _strip_html(entry.get("summary", entry.get("description", "")))
             combined = f"{title} {desc}"
             sal_min, sal_max, hourly = _parse_comp(combined)
+            currency = _detect_currency(combined)
 
             # Title on WWR is usually "Company: Position"
             company = ""
@@ -273,6 +275,7 @@ def scrape_weworkremotely() -> list[Gig]:
                 salary_min=sal_min,
                 salary_max=sal_max,
                 pay_hourly_est=hourly,
+                currency=currency,
                 tags=[cat],
             ))
 

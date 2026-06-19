@@ -17,9 +17,10 @@ class Gig:
     description: str = ""
     location: str = ""               # "Remote", "NYC", "Queens", etc.
     posted_at: str = ""              # ISO timestamp if available
-    salary_min: float = 0.0          # annual USD if available
+    salary_min: float = 0.0          # annual, in `currency` if available
     salary_max: float = 0.0
     pay_hourly_est: float = 0.0      # parsed hourly rate (fallback if no salary)
+    currency: str = "USD"            # ISO code for the pay figures above
     tags: list[str] = field(default_factory=list)
     fit_score: int = 0               # 0-100, filled by scorer
     fit_reasons: list[str] = field(default_factory=list)
