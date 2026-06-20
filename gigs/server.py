@@ -102,4 +102,6 @@ def run_server(host: str = "0.0.0.0", port: int = 8799) -> None:
     print(f"    http://localhost:{port}/   (this Mac)\n")
     if phone_url:
         _print_qr(phone_url)
-    uvicorn.run(app, host=host, port=port, log_level="warning")
+    # info level so page visits are logged — needed to confirm the phone is
+    # actually reaching the server.
+    uvicorn.run(app, host=host, port=port, log_level="info")

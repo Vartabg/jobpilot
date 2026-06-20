@@ -55,6 +55,8 @@ SERVE_HOST="127.0.0.1"
 if [[ -n "$TS_IP" && "$TS_IP" == 100.* ]]; then
   SERVE_HOST="$TS_IP"
 fi
+# LAN address (same-WiFi path to the phone — the most reliable for the swiper).
+LAN_IP="$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || true)"
 
 if [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
   $QUIET || echo "✓ Dashboard already running (pid $(cat "$PID_FILE"))"
@@ -69,8 +71,10 @@ fi
 if [[ -f "$SWIPE_PID_FILE" ]] && kill -0 "$(cat "$SWIPE_PID_FILE")" 2>/dev/null; then
   $QUIET || echo "✓ Swipe already running (pid $(cat "$SWIPE_PID_FILE"))"
 else
-  $QUIET || echo "▶ Starting swipe on ${SERVE_HOST}:${SWIPE_PORT}..."
-  nohup jobpilot gigs swipe --host "$SERVE_HOST" --port "$SWIPE_PORT" >>"$SWIPE_LOG_FILE" 2>&1 &
+  $QUIET || echo "▶ Starting swipe on 0.0.0.0:${SWIPE_PORT} (LAN + Tailscale)..."
+  # Bind all interfaces so the phone can reach it over plain WiFi (LAN IP) OR
+  # Tailscale — binding only the Tailscale IP left the LAN path dead.
+  nohup jobpilot gigs swipe --host 0.0.0.0 --port "$SWIPE_PORT" >>"$SWIPE_LOG_FILE" 2>&1 &
   echo $! >"$SWIPE_PID_FILE"
 fi
 
@@ -89,13 +93,8 @@ fi
 
 if $QUIET; then
   echo "✓ JobPilot is ready"
-  if [[ "$HEALTH_HOST" == "127.0.0.1" ]]; then
-    echo "  Dashboard: http://127.0.0.1:${SERVE_PORT}/"
-    echo "  Swipe:     http://127.0.0.1:${SWIPE_PORT}/"
-  else
-    echo "  Dashboard: http://${HEALTH_HOST}:${SERVE_PORT}/"
-    echo "  Swipe:     http://${HEALTH_HOST}:${SWIPE_PORT}/  (open on phone)"
-  fi
+  echo "  Dashboard: http://${HEALTH_HOST}:${SERVE_PORT}/"
+  echo "  Swipe:     http://${LAN_IP:-$HEALTH_HOST}:${SWIPE_PORT}/  (open on phone, same WiFi)"
   echo ""
   exit 0
 fi
@@ -112,11 +111,13 @@ fi
 if [[ -n "${TS_IP:-}" && "$HEALTH_HOST" != "$TS_IP" ]]; then
   echo "  Tailscale:  http://${TS_IP}:${SERVE_PORT}/"
 fi
-if [[ "$HEALTH_HOST" == "127.0.0.1" ]]; then
-  echo "  Swipe:      http://127.0.0.1:${SWIPE_PORT}/  (phone job swiper)"
-else
-  echo "  Swipe:      http://${HEALTH_HOST}:${SWIPE_PORT}/  (scan the QR below on your phone)"
-  python - "$HEALTH_HOST" "$SWIPE_PORT" <<'PY' 2>/dev/null || true
+# Swipe: prefer the LAN URL (same-WiFi, most reliable), Tailscale as backup.
+SWIPE_HOST="${LAN_IP:-$HEALTH_HOST}"
+echo "  Swipe:      http://${SWIPE_HOST}:${SWIPE_PORT}/  (scan the QR below on your phone)"
+if [[ -n "${TS_IP:-}" && "$TS_IP" != "$SWIPE_HOST" ]]; then
+  echo "              http://${TS_IP}:${SWIPE_PORT}/  (backup, via Tailscale anywhere)"
+fi
+python - "$SWIPE_HOST" "$SWIPE_PORT" <<'PY' 2>/dev/null || true
 import sys
 try:
     import qrcode
@@ -128,7 +129,6 @@ q.add_data(f"http://{host}:{port}/")
 q.make()
 q.print_ascii(invert=True)
 PY
-fi
 echo "  Chrome CDP: http://127.0.0.1:${DEBUG_PORT}/"
 echo ""
 echo "  Apply assist:  jobpilot start"
