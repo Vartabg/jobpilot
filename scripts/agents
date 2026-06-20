@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Drop into a persistent tmux session named "agents".
+#
+# The session lives on this machine and survives disconnects, so you can
+# reattach from a phone (Blink over SSH/mosh) exactly where you left off — run
+# `claude` (or anything) inside it; detach with Ctrl-b then d. See
+# docs/REMOTE_ACCESS.md.
+#
+# Install: copy or symlink onto your PATH, e.g.
+#   ln -sf "$PWD/scripts/agents" ~/.local/bin/agents
+exec tmux new-session -A -s agents
