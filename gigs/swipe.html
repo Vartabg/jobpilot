@@ -2,8 +2,13 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="GigPilot" />
+<meta name="theme-color" content="#0d1117" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23161b22'/%3E%3Ctext x='32' y='44' font-size='38' text-anchor='middle' fill='%2358a6ff'%3EG%3C/text%3E%3C/svg%3E" />
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' fill='%230d1117'/%3E%3Ctext x='32' y='44' font-size='38' text-anchor='middle' fill='%2358a6ff'%3EG%3C/text%3E%3C/svg%3E" />
 <title>GigPilot Swipe</title>
 <style>
   :root { --bg:#0d1117; --card:#161b22; --line:#30363d; --txt:#e6edf3; --dim:#8b949e;
@@ -49,6 +54,13 @@
   .pass { background:#2a1416; color:var(--red); border:1px solid #5b2326; }
   .apply { background:var(--green); color:#04140a; }
   .hint { color:var(--dim); font-size:13px; text-align:center; padding:6px 0 0; }
+  .srcrow { display:flex; gap:14px; align-items:center; font-size:13px; color:var(--dim); }
+  .srcrow a { color:var(--blue); text-decoration:none; }
+  #snack { position:fixed; left:50%; bottom:88px; transform:translateX(-50%); max-width:92%;
+    background:#1f2630; border:1px solid var(--line); color:var(--txt); padding:10px 14px;
+    border-radius:12px; font-size:14px; display:flex; gap:14px; align-items:center; z-index:50; box-shadow:0 6px 20px rgba(0,0,0,.4); }
+  #snack button { padding:6px 14px; font-size:14px; border:1px solid var(--blue); color:var(--blue);
+    background:transparent; border-radius:8px; font-weight:600; }
   .stamp { position:absolute; top:24px; font-size:30px; font-weight:800; padding:4px 14px; border-radius:10px; border:3px solid; opacity:0; transition:opacity .1s; }
   .stamp.apply { right:24px; color:var(--green); border-color:var(--green); transform:rotate(12deg); }
   .stamp.pass { left:24px; color:var(--red); border-color:var(--red); transform:rotate(-12deg); }
@@ -68,27 +80,43 @@
     <button class="pass" onclick="decide('pass')">✕ Pass</button>
     <button class="apply" onclick="decide('apply')">★ Apply</button>
   </div>
-  <div id="acthint" class="hint" hidden>Apply opens a prepped email — you just attach the resume and hit send.</div>
+  <div id="acthint" class="hint" hidden>Apply opens a prepped email — attach the resume and hit send.</div>
+  <div id="error" class="screen" hidden>
+    <div style="font-size:42px">⚠️</div>
+    <div id="errmsg" style="color:var(--dim)">Couldn't reach the server.</div>
+    <button class="primary" onclick="load(1)">Try again</button>
+  </div>
   <div id="done" class="screen" hidden>
     <div style="font-size:42px">✓</div>
     <div id="donemsg" style="color:var(--dim)">All caught up.</div>
     <button class="ghost" onclick="load(1)">Rescan</button>
   </div>
+  <div id="snack" hidden></div>
 </div>
 <script>
-let cards = [], i = 0;
+let cards = [], i = 0, busy = false, last = null, snackTimer = null;
 const $ = id => document.getElementById(id);
 const show = (id, on) => $(id).hidden = !on;
+const safeUrl = u => /^https?:\/\//i.test(u || "");
+const ageLabel = d => d == null ? "" : d <= 0 ? "today" : d === 1 ? "1d ago" : d + "d ago";
 
 async function load(refresh) {
-  ["start","deck","actions","acthint","done"].forEach(x => show(x, false));
+  ["start","deck","actions","acthint","done","error"].forEach(x => show(x, false));
+  hideSnack();
   show("loading", true);
+  let data = null, ok = false;
   try {
     const r = await fetch("/api/queue?refresh=" + (refresh ? 1 : 0));
-    const data = await r.json();
-    cards = data.cards || []; i = 0;
-  } catch (e) { cards = []; }
+    ok = r.ok;
+    data = await r.json();
+  } catch (e) { ok = false; }
   show("loading", false);
+  if (!ok || !data || data.error) {
+    $("errmsg").textContent = (data && data.error) || "Couldn't reach the server. Is the Mac on? Try again.";
+    show("error", true);
+    return;
+  }
+  cards = data.cards || []; i = 0;
   cards.length ? render() : finish("No fresh jobs right now.");
 }
 
@@ -108,6 +136,11 @@ function render() {
   const why = (c.why || []).map(w => `<span class="pill">${esc(w)}</span>`).join("");
   const tags = (c.tags || []).map(t => `<span class="pill">${esc(t)}</span>`).join("");
   const resume = c.resume ? `<div class="resume">Attach: <b>${esc(c.resume)}</b></div>` : "";
+  const age = ageLabel(c.posted_age_days);
+  const link = safeUrl(c.source_url) ? `<a href="${esc(c.source_url)}" target="_blank" rel="noopener noreferrer">View posting ↗</a>` : "";
+  const srcrow = (age || link || c.source)
+    ? `<div class="srcrow">${age ? `<span>Posted ${esc(age)}</span>` : ""}${link}<span style="margin-left:auto">${esc(c.source || "")}</span></div>`
+    : "";
   $("deck").innerHTML = `
     <div class="card" id="card">
       <div class="stamp apply" id="st-apply">APPLY</div>
@@ -119,6 +152,7 @@ function render() {
       <div class="offer">Angle: <b>${esc(c.offer)}</b></div>
       <div class="why">${why || tags}</div>
       ${resume}
+      ${srcrow}
       <details><summary>Preview the email</summary>
         <pre>${esc(c.subject)}\n\n${esc(c.draft)}</pre></details>
     </div>`;
@@ -126,38 +160,73 @@ function render() {
   wireSwipe($("card"));
 }
 
-async function decide(action) {
+async function decide(action, viaFling) {
+  if (busy) return;                  // guard against tap+swipe / fast double-tap
   const c = cards[i];
   if (!c) return;
-  if (action === "apply" && c.apply_target) {
-    // Open the prepped email / apply page so all that's left is hitting send.
-    if (c.is_mailto) { window.location.href = c.apply_target; }
-    else { window.open(c.apply_target, "_blank"); }
+  busy = true;
+  if (action === "apply") {          // open the prepped email / apply page (safe schemes only)
+    if (c.is_mailto) window.location.href = c.apply_target;
+    else if (safeUrl(c.apply_target)) window.open(c.apply_target, "_blank", "noopener,noreferrer");
   }
-  fetch("/api/decision", { method:"POST", headers:{"Content-Type":"application/json"},
-    body: JSON.stringify({ id: c.id, action }) }).catch(() => {});
-  i++; render();
+  let ok = false;
+  try {
+    const r = await fetch("/api/decision", { method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ id: c.id, action }) });
+    ok = r.ok;
+  } catch (e) { ok = false; }
+  if (!ok) {                         // don't advance — keep the card so he can retry
+    busy = false;
+    const el = $("card"); if (el) { el.style.transform = ""; el.style.opacity = 1; }
+    toast("Couldn't save — try again", null);
+    return;
+  }
+  last = c;
+  if (!viaFling) flingNow(action);   // button taps animate too
+  setTimeout(() => {                 // let the fling paint before swapping the card
+    i++; busy = false; render();
+    toast(action === "apply" ? "Applied" : "Passed", undo);
+  }, 220);
 }
+
+async function undo() {
+  if (!last) return;
+  const c = last; last = null; hideSnack();
+  try { await fetch("/api/undo", { method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({ id: c.id }) }); } catch (e) {}
+  cards.splice(i, 0, c);             // put it back at the current spot
+  render();
+}
+
+function toast(msg, onUndo) {
+  $("snack").innerHTML = `<span>${esc(msg)}</span>` + (onUndo ? `<button id="undo-btn">Undo</button>` : "");
+  show("snack", true);
+  if (onUndo) $("undo-btn").onclick = onUndo;
+  clearTimeout(snackTimer); snackTimer = setTimeout(hideSnack, 4000);
+}
+function hideSnack() { show("snack", false); }
+function flingNow(action) { const el = $("card"); if (el) flingEl(el, action === "apply" ? 1 : -1); }
 
 function wireSwipe(el) {
   let x0 = null, dx = 0;
   const T = 90;
-  el.addEventListener("touchstart", e => { x0 = e.touches[0].clientX; }, { passive:true });
+  el.addEventListener("touchstart", e => { if (!busy) x0 = e.touches[0].clientX; }, { passive:true });
   el.addEventListener("touchmove", e => {
-    if (x0 === null) return;
+    if (x0 === null || busy) return;
     dx = e.touches[0].clientX - x0;
     el.style.transform = `translateX(${dx}px) rotate(${dx / 20}deg)`;
     $("st-apply").style.opacity = dx > 30 ? Math.min(1, dx / T) : 0;
     $("st-pass").style.opacity = dx < -30 ? Math.min(1, -dx / T) : 0;
   }, { passive:true });
   el.addEventListener("touchend", () => {
-    if (dx > T) { fling(el, 1); decide("apply"); }
-    else if (dx < -T) { fling(el, -1); decide("pass"); }
+    if (busy) { x0 = null; dx = 0; return; }
+    if (dx > T) { flingEl(el, 1); decide("apply", true); }
+    else if (dx < -T) { flingEl(el, -1); decide("pass", true); }
     else { el.style.transform = ""; $("st-apply").style.opacity = 0; $("st-pass").style.opacity = 0; }
     x0 = null; dx = 0;
   });
 }
-function fling(el, dir) { el.style.transform = `translateX(${dir * 600}px) rotate(${dir * 30}deg)`; el.style.opacity = 0; }
+function flingEl(el, dir) { el.style.transform = `translateX(${dir * 600}px) rotate(${dir * 30}deg)`; el.style.opacity = 0; }
 </script>
 </body>
 </html>

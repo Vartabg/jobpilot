@@ -72,6 +72,41 @@ def _normalize_pay(gig: Gig) -> float:
     return 0.0
 
 
+def _posted_age_days(posted_at: str) -> int | None:
+    """Best-effort age in days from a posted_at string (ISO or RSS/email date).
+    None if absent/unparseable — callers treat that as neutral, not newest."""
+    if not posted_at:
+        return None
+    from datetime import datetime
+    dt = None
+    try:
+        dt = datetime.fromisoformat(posted_at.replace("Z", "+00:00"))
+    except ValueError:
+        try:
+            from email.utils import parsedate_to_datetime
+            dt = parsedate_to_datetime(posted_at)
+        except (TypeError, ValueError):
+            dt = None
+    if dt is None:
+        return None
+    now = datetime.now(dt.tzinfo) if dt.tzinfo else datetime.now()
+    return max(0, (now - dt).days)
+
+
+def _freshness_bucket(gig: Gig) -> int:
+    """2 = posted within a week, 1 = within two weeks, 0 = older/unknown.
+    A coarse tiebreaker so today's roles edge out month-old HN comments at
+    equal fit, without letting recency override fit."""
+    age = _posted_age_days(getattr(gig, "posted_at", ""))
+    if age is None:
+        return 0
+    if age <= 7:
+        return 2
+    if age <= 14:
+        return 1
+    return 0
+
+
 def _source_priority(gig: Gig) -> int:
     source = gig.source.lower()
     if "upwork" in source:
@@ -380,6 +415,7 @@ def filter_and_rank(
         kept = [g for g in kept if _geo_eligible(g, home_tags=home_tags, allow_remote=allow_remote)]
     kept.sort(key=lambda g: (
         -g.fit_score,
+        -_freshness_bucket(g),   # fresher first when fit ties (don't outweigh fit)
         apply_friction(g),
         -_source_priority(g),
         -_normalize_pay(g),
