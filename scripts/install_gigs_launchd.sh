@@ -12,7 +12,7 @@
 # with GIGPILOT_INTERVAL_SECONDS=NNNN to fall back to interval-based runs.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LABEL="com.vartny.jobpilot.gigs.digest"
 PLIST="$HOME/Library/LaunchAgents/${LABEL}.plist"
 LOG_DIR="$HOME/Library/Logs/jobpilot-gigs"

@@ -4,7 +4,7 @@
 # before its own failure handler could run (import error, missing venv, OOM, ...).
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # GIGPILOT_PYTHON overrides the interpreter; default is the repo venv.
 VENV_PY="${GIGPILOT_PYTHON:-$ROOT/.venv/bin/python}"
 LOG_DIR="$HOME/Library/Logs/jobpilot-gigs"
