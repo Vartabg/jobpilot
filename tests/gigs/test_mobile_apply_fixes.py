@@ -57,6 +57,23 @@ def test_explicit_links_are_kept():
     assert out["service_page"] == "https://www.atxbro.com/services"
 
 
+def test_resume_for_maps_offer_then_default():
+    prefs = {"resumes": {"default": "general.pdf", "AI workflow audit": "ai.pdf"}}
+    assert preferences.resume_for("AI workflow audit", prefs) == "ai.pdf"
+    assert preferences.resume_for("Something else", prefs) == "general.pdf"
+
+
+def test_resume_for_empty_when_unset():
+    assert preferences.resume_for("anything", {"resumes": {"default": ""}}) == ""
+
+
+def test_apply_friction_marks_aggregators():
+    from jobpilot.gigs.core import scorer
+    assert scorer.apply_friction(_gig(apply_url="https://himalayas.app/jobs/1")) == 6
+    assert scorer.apply_friction(_gig(apply_url="https://remoteok.com/remote-jobs/1")) == 5
+    assert scorer.apply_friction(_gig(apply_url="mailto:x@y.com")) == 1
+
+
 def test_placeholder_portfolio_does_not_propagate():
     # A fresh clone (portfolio still the default placeholder) must NOT copy the
     # placeholder portfolio into the link pages — they stay the link defaults.
