@@ -85,6 +85,12 @@ DEFAULTS: dict[str, Any] = {
             "vercel", "tailscale",
         ],
     },
+    # Which tailored resume to attach per offer type. Map offer name -> resume
+    # filename (kept in iCloud so it's reachable from the phone). "default" is
+    # the fallback. Empty by default — set in data/gigs/preferences.json.
+    "resumes": {
+        "default": "",
+    },
     # Copy-paste sources for ATS essay questions ("Tell us about your
     # background", "Why this role"). Placeholders only — put your real bullets
     # in data/preferences.json (gitignored).
@@ -244,6 +250,12 @@ def skill_keywords(prefs: dict[str, Any] | None = None) -> list[str]:
 
 def background_bullets(prefs: dict[str, Any] | None = None) -> dict[str, str]:
     return dict((prefs or load())["background_bullets"])
+
+
+def resume_for(offer: str, prefs: dict[str, Any] | None = None) -> str:
+    """Tailored resume filename to attach for an offer type, '' if unset."""
+    resumes = (prefs or load()).get("resumes", {})
+    return resumes.get(offer) or resumes.get("default", "") or ""
 
 
 def signoff_block(prefs: dict[str, Any] | None = None) -> str:

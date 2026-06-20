@@ -97,8 +97,10 @@ def apply_friction(gig: Gig) -> int:
         return 3  # ATS form: autofill + upload + screening Qs + CAPTCHA
     if "google.com/search" in apply:
         return 5  # Google search → find result → land on careers → form
-    if "weworkremotely.com" in apply:
-        return 6  # paywalled aggregator
+    if "weworkremotely.com" in apply or "himalayas.app" in apply or "himalayas.co" in apply:
+        return 6  # paywalled / aggregator detail page
+    if "remoteok.com" in apply or "remoteok.io" in apply:
+        return 5  # aggregator → off-site apply
     if "/careers" in apply or "/jobs" in apply or "/apply" in apply:
         return 3  # company-hosted careers page
     if "news.ycombinator.com/item" in apply:

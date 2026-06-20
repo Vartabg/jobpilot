@@ -128,7 +128,7 @@ def _gig_section(index: int, gig: Gig) -> list[str]:
     apply_target = gig.apply_url or gig.url
     company = gig.company or "the company"
     role = (gig.title or "the role").split("|")[0].strip()
-    return [
+    lines = [
         f"### {index}. [{gig.fit_score}/100] {company} — {role}",
         "",
         f"- **Apply:** {apply_target}",
@@ -137,6 +137,11 @@ def _gig_section(index: int, gig: Gig) -> list[str]:
         f"- **Your anchor (don't paste):** {_salary_note(gig)}",
         f"- **Relocate answer:** {_relocate_answer(gig)} (this role is in {gig.location or 'unspecified'})",
         f"- **Offer angle:** {brief.offer}",
+    ]
+    resume = preferences.resume_for(brief.offer)
+    if resume:
+        lines.append(f"- **Resume to attach:** {resume}")
+    return lines + [
         "",
         "**Cover-letter / first-message body** (copy as-is, edit if needed):",
         "",
