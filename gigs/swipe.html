@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<title>GigPilot Swipe</title>
+<style>
+  :root { --bg:#0d1117; --card:#161b22; --line:#30363d; --txt:#e6edf3; --dim:#8b949e;
+          --green:#3fb950; --red:#f85149; --blue:#58a6ff; --yellow:#d29922; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  [hidden] { display:none !important; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--txt);
+    font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; overscroll-behavior:none; }
+  #app { max-width:520px; margin:0 auto; min-height:100%; display:flex; flex-direction:column;
+    padding:env(safe-area-inset-top) 14px calc(env(safe-area-inset-bottom) + 14px); }
+  header { display:flex; align-items:center; justify-content:space-between; padding:14px 2px 8px; }
+  header h1 { font-size:18px; font-weight:600; margin:0; }
+  #count { color:var(--dim); font-size:14px; }
+  .screen { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; gap:18px; padding:24px; }
+  button { font:inherit; border:none; border-radius:14px; padding:16px 22px; font-weight:600; cursor:pointer; }
+  .primary { background:var(--blue); color:#04122b; font-size:18px; }
+  .ghost { background:transparent; color:var(--dim); border:1px solid var(--line); }
+  .spinner { width:38px; height:38px; border:4px solid var(--line); border-top-color:var(--blue); border-radius:50%; animation:spin 0.9s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  #deck { flex:1; position:relative; }
+  .card { position:absolute; inset:0; background:var(--card); border:1px solid var(--line);
+    border-radius:20px; padding:20px; display:flex; flex-direction:column; gap:12px; overflow-y:auto;
+    transition:transform .25s ease, opacity .25s ease; will-change:transform; }
+  .scorerow { display:flex; align-items:center; gap:10px; }
+  .score { background:var(--green); color:#04140a; font-weight:700; border-radius:10px; padding:4px 10px; font-size:15px; }
+  .score.mid { background:var(--yellow); color:#241a02; }
+  .role { font-size:22px; font-weight:600; line-height:1.25; }
+  .company { color:var(--blue); font-size:16px; }
+  .meta { display:flex; flex-wrap:wrap; gap:8px; color:var(--dim); font-size:14px; }
+  .pill { background:#1f2630; border:1px solid var(--line); border-radius:999px; padding:3px 10px; font-size:13px; }
+  .offer { font-size:14px; color:var(--txt); }
+  .offer b { color:var(--yellow); font-weight:600; }
+  .why { display:flex; flex-wrap:wrap; gap:6px; }
+  .why .pill { color:var(--dim); }
+  details { border-top:1px solid var(--line); padding-top:10px; }
+  summary { color:var(--blue); font-size:14px; cursor:pointer; }
+  pre { white-space:pre-wrap; word-wrap:break-word; font:13px/1.45 ui-monospace,Menlo,monospace;
+    background:#0b0f14; border:1px solid var(--line); border-radius:10px; padding:12px; margin:10px 0 0; color:var(--txt); }
+  .resume { font-size:13px; color:var(--dim); }
+  .resume b { color:var(--txt); }
+  .actions { display:flex; gap:12px; padding-top:12px; }
+  .actions button { flex:1; font-size:17px; }
+  .pass { background:#2a1416; color:var(--red); border:1px solid #5b2326; }
+  .apply { background:var(--green); color:#04140a; }
+  .hint { color:var(--dim); font-size:13px; text-align:center; padding:6px 0 0; }
+  .stamp { position:absolute; top:24px; font-size:30px; font-weight:800; padding:4px 14px; border-radius:10px; border:3px solid; opacity:0; transition:opacity .1s; }
+  .stamp.apply { right:24px; color:var(--green); border-color:var(--green); transform:rotate(12deg); }
+  .stamp.pass { left:24px; color:var(--red); border-color:var(--red); transform:rotate(-12deg); }
+</style>
+</head>
+<body>
+<div id="app">
+  <header><h1>GigPilot</h1><span id="count"></span></header>
+  <div id="start" class="screen">
+    <div style="font-size:42px">🧭</div>
+    <div style="color:var(--dim)">Austin &amp; remote roles, scored and prepped. Swipe right to apply, left to pass.</div>
+    <button class="primary" onclick="load(0)">Get jobs</button>
+  </div>
+  <div id="loading" class="screen" hidden><div class="spinner"></div><div style="color:var(--dim)">Scanning sources…</div></div>
+  <div id="deck" hidden></div>
+  <div id="actions" class="actions" hidden>
+    <button class="pass" onclick="decide('pass')">✕ Pass</button>
+    <button class="apply" onclick="decide('apply')">★ Apply</button>
+  </div>
+  <div id="acthint" class="hint" hidden>Apply opens a prepped email — you just attach the resume and hit send.</div>
+  <div id="done" class="screen" hidden>
+    <div style="font-size:42px">✓</div>
+    <div id="donemsg" style="color:var(--dim)">All caught up.</div>
+    <button class="ghost" onclick="load(1)">Rescan</button>
+  </div>
+</div>
+<script>
+let cards = [], i = 0;
+const $ = id => document.getElementById(id);
+const show = (id, on) => $(id).hidden = !on;
+
+async function load(refresh) {
+  ["start","deck","actions","acthint","done"].forEach(x => show(x, false));
+  show("loading", true);
+  try {
+    const r = await fetch("/api/queue?refresh=" + (refresh ? 1 : 0));
+    const data = await r.json();
+    cards = data.cards || []; i = 0;
+  } catch (e) { cards = []; }
+  show("loading", false);
+  cards.length ? render() : finish("No fresh jobs right now.");
+}
+
+function finish(msg) {
+  ["deck","actions","acthint"].forEach(x => show(x, false));
+  $("count").textContent = "";
+  $("donemsg").textContent = msg || "All caught up.";
+  show("done", true);
+}
+
+function esc(s) { const d = document.createElement("div"); d.textContent = s == null ? "" : s; return d.innerHTML; }
+
+function render() {
+  if (i >= cards.length) return finish(`Done — ${cards.length} reviewed.`);
+  const c = cards[i];
+  $("count").textContent = `${i + 1} / ${cards.length}`;
+  const why = (c.why || []).map(w => `<span class="pill">${esc(w)}</span>`).join("");
+  const tags = (c.tags || []).map(t => `<span class="pill">${esc(t)}</span>`).join("");
+  const resume = c.resume ? `<div class="resume">Attach: <b>${esc(c.resume)}</b></div>` : "";
+  $("deck").innerHTML = `
+    <div class="card" id="card">
+      <div class="stamp apply" id="st-apply">APPLY</div>
+      <div class="stamp pass" id="st-pass">PASS</div>
+      <div class="scorerow"><span class="score ${c.score < 90 ? "mid" : ""}">${esc(c.score)}</span>
+        <div class="meta"><span class="pill">${esc(c.pay)}</span><span class="pill">${esc(c.location)}</span></div></div>
+      <div class="role">${esc(c.role)}</div>
+      <div class="company">${esc(c.company)}</div>
+      <div class="offer">Angle: <b>${esc(c.offer)}</b></div>
+      <div class="why">${why || tags}</div>
+      ${resume}
+      <details><summary>Preview the email</summary>
+        <pre>${esc(c.subject)}\n\n${esc(c.draft)}</pre></details>
+    </div>`;
+  show("deck", true); show("actions", true); show("acthint", true);
+  wireSwipe($("card"));
+}
+
+async function decide(action) {
+  const c = cards[i];
+  if (!c) return;
+  if (action === "apply" && c.apply_target) {
+    // Open the prepped email / apply page so all that's left is hitting send.
+    if (c.is_mailto) { window.location.href = c.apply_target; }
+    else { window.open(c.apply_target, "_blank"); }
+  }
+  fetch("/api/decision", { method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({ id: c.id, action }) }).catch(() => {});
+  i++; render();
+}
+
+function wireSwipe(el) {
+  let x0 = null, dx = 0;
+  const T = 90;
+  el.addEventListener("touchstart", e => { x0 = e.touches[0].clientX; }, { passive:true });
+  el.addEventListener("touchmove", e => {
+    if (x0 === null) return;
+    dx = e.touches[0].clientX - x0;
+    el.style.transform = `translateX(${dx}px) rotate(${dx / 20}deg)`;
+    $("st-apply").style.opacity = dx > 30 ? Math.min(1, dx / T) : 0;
+    $("st-pass").style.opacity = dx < -30 ? Math.min(1, -dx / T) : 0;
+  }, { passive:true });
+  el.addEventListener("touchend", () => {
+    if (dx > T) { fling(el, 1); decide("apply"); }
+    else if (dx < -T) { fling(el, -1); decide("pass"); }
+    else { el.style.transform = ""; $("st-apply").style.opacity = 0; $("st-pass").style.opacity = 0; }
+    x0 = null; dx = 0;
+  });
+}
+function fling(el, dir) { el.style.transform = `translateX(${dir * 600}px) rotate(${dir * 30}deg)`; el.style.opacity = 0; }
+</script>
+</body>
+</html>

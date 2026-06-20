@@ -60,6 +60,7 @@ include = [
     "*.py",
     "core/*.py",
     "gigs/**/*.py",
+    "gigs/**/*.html",
     "ui/*.py",
     "learning/*.py",
     "scripts/*.sh",
