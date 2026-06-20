@@ -75,14 +75,31 @@ def _tailscale_ip() -> str | None:
         return None
 
 
+def _print_qr(url: str) -> None:
+    """Print a scannable terminal QR for the phone URL (no-op if qrcode absent)."""
+    try:
+        import qrcode
+    except ImportError:
+        return
+    q = qrcode.QRCode(border=1)
+    q.add_data(url)
+    q.make()
+    print("  Scan with your phone camera:")
+    q.print_ascii(invert=True)
+    print()
+
+
 def run_server(host: str = "0.0.0.0", port: int = 8799) -> None:
     """Serve the swiper. Binds all interfaces by default so the phone can reach
-    it over Tailscale; prints the URL to open."""
+    it over Tailscale; prints the URL (and a scannable QR) to open."""
     import uvicorn
 
     ts = _tailscale_ip()
+    phone_url = f"http://{ts}:{port}/" if ts else ""
     print("\n  GigPilot Swipe — open on your phone:")
-    if ts:
-        print(f"    http://{ts}:{port}   (Tailscale — works anywhere)")
-    print(f"    http://localhost:{port}   (this Mac)\n")
+    if phone_url:
+        print(f"    {phone_url}   (Tailscale — works anywhere)")
+    print(f"    http://localhost:{port}/   (this Mac)\n")
+    if phone_url:
+        _print_qr(phone_url)
     uvicorn.run(app, host=host, port=port, log_level="warning")
