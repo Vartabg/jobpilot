@@ -3,7 +3,7 @@
 Run `jobpilot gigs swipe`; open the printed Tailscale URL on your phone. Tap
 "Get jobs" to scan, then swipe: right/Apply opens the prefilled email (or apply
 page) so you just hit send and logs it as sent; left/Pass logs the pass. One
-card at a time. The scan/score/Austin-geo/currency engine is shared with the
+card at a time. The scan/score/geo/currency engine is shared with the
 digest — this is just the interactive front end.
 """
 
