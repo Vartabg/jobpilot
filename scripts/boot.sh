@@ -15,8 +15,11 @@ cd "$ROOT"
 PID_DIR="${HOME}/.jobpilot"
 PID_FILE="${PID_DIR}/serve.pid"
 LOG_FILE="${PID_DIR}/serve.log"
+SWIPE_PID_FILE="${PID_DIR}/swipe.pid"
+SWIPE_LOG_FILE="${PID_DIR}/swipe.log"
 DEBUG_PORT="${JOBPILOT_DEBUG_PORT:-9222}"
 SERVE_PORT="${JOBPILOT_SERVE_PORT:-8767}"
+SWIPE_PORT="${JOBPILOT_SWIPE_PORT:-8799}"
 
 mkdir -p "$PID_DIR"
 
@@ -62,6 +65,15 @@ else
   sleep 2
 fi
 
+# ── Swipe server (phone-first job swiper) ────────────────────────────────────
+if [[ -f "$SWIPE_PID_FILE" ]] && kill -0 "$(cat "$SWIPE_PID_FILE")" 2>/dev/null; then
+  $QUIET || echo "✓ Swipe already running (pid $(cat "$SWIPE_PID_FILE"))"
+else
+  $QUIET || echo "▶ Starting swipe on ${SERVE_HOST}:${SWIPE_PORT}..."
+  nohup jobpilot gigs swipe --host "$SERVE_HOST" --port "$SWIPE_PORT" >>"$SWIPE_LOG_FILE" 2>&1 &
+  echo $! >"$SWIPE_PID_FILE"
+fi
+
 # ── Health ─────────────────────────────────────────────────────────────────
 HEALTH_HOST="$SERVE_HOST"
 HTTP_CODE="$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 "http://${HEALTH_HOST}:${SERVE_PORT}/api/queue" 2>/dev/null || echo "000")"
@@ -79,8 +91,10 @@ if $QUIET; then
   echo "✓ JobPilot is ready"
   if [[ "$HEALTH_HOST" == "127.0.0.1" ]]; then
     echo "  Dashboard: http://127.0.0.1:${SERVE_PORT}/"
+    echo "  Swipe:     http://127.0.0.1:${SWIPE_PORT}/"
   else
     echo "  Dashboard: http://${HEALTH_HOST}:${SERVE_PORT}/"
+    echo "  Swipe:     http://${HEALTH_HOST}:${SWIPE_PORT}/  (open on phone)"
   fi
   echo ""
   exit 0
@@ -97,6 +111,11 @@ else
 fi
 if [[ -n "${TS_IP:-}" && "$HEALTH_HOST" != "$TS_IP" ]]; then
   echo "  Tailscale:  http://${TS_IP}:${SERVE_PORT}/"
+fi
+if [[ "$HEALTH_HOST" == "127.0.0.1" ]]; then
+  echo "  Swipe:      http://127.0.0.1:${SWIPE_PORT}/  (phone job swiper)"
+else
+  echo "  Swipe:      http://${HEALTH_HOST}:${SWIPE_PORT}/  (open this on your phone)"
 fi
 echo "  Chrome CDP: http://127.0.0.1:${DEBUG_PORT}/"
 echo ""

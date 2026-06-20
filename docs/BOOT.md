@@ -13,6 +13,7 @@ cd ~/AI_Workspace/projects/jobpilot
 |---------|------|---------|
 | Chrome (CDP) | 9222 | LinkedIn / ATS browser control |
 | Dashboard | **8767** | Queue, applications, mobile via Tailscale |
+| Swipe | **8799** | Phone-first job swiper — open on your phone via Tailscale |
 | EYE backend | 8766 | Code visualizer — do not use for JobPilot |
 
 ## Daily workflow
