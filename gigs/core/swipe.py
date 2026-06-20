@@ -2,8 +2,8 @@
 
 Builds a ranked queue of fresh gigs (same scan/score/geo/currency path as the
 digest), renders a phone card per gig with the apply prepped, and records a
-swipe decision (apply -> sent, pass -> passed) back into pipeline.md. This is
-the model Garo wants: "give me the jobs", swipe through, apply with one tap.
+swipe decision (apply -> sent, pass -> passed) back into pipeline.md. The
+on-demand model: "give me the jobs", swipe through, apply with one tap.
 """
 
 from __future__ import annotations
@@ -32,8 +32,8 @@ def build_queue(
     *, limit: int = 40, min_score: int = 55, fresh_only: bool = True,
     on_progress: Optional[Callable[[str], None]] = None,
 ) -> list[Gig]:
-    """Ranked fresh gigs to swipe — Austin/remote + currency-aware (same filters
-    as the digest), minus anything already decided in the pipeline."""
+    """Ranked fresh gigs to swipe — home-metro/remote + currency-aware (same
+    filters as the digest), minus anything already decided in the pipeline."""
     gigs, _results = collect_all(on_progress=on_progress)
     if fresh_only:
         fresh = set(filter_new([g.id for g in gigs]))
