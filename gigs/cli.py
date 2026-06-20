@@ -401,6 +401,18 @@ def weekly_summary():
 
 
 @app.command()
+def swipe(
+    port: int = typer.Option(8799, "--port", help="Port to serve on"),
+    host: str = typer.Option("0.0.0.0", "--host", help="Bind address (0.0.0.0 = reachable from phone via Tailscale)"),
+):
+    """Phone-first job swiper. Run this, open the printed URL on your phone,
+    tap Get jobs, then swipe: right to apply (opens a prepped email), left to
+    pass. Decisions land in pipeline.md."""
+    from jobpilot.gigs.server import run_server
+    run_server(host=host, port=port)
+
+
+@app.command()
 def stats():
     """Show dedupe, pipeline, health, and last run."""
     console.print(f"Total unique gigs remembered (seen): {seen_count()}")
