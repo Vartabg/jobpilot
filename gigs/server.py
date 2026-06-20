@@ -10,7 +10,9 @@ digest — this is just the interactive front end.
 from __future__ import annotations
 
 import subprocess
+import threading
 from pathlib import Path
+from typing import Literal
 
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -26,8 +28,10 @@ app = FastAPI(title="GigPilot Swipe", version="1.0.0")
 _PAGE = Path(__file__).parent / "swipe.html"
 
 # In-memory queue for the current session: full Gigs (to record decisions) +
-# the card payloads the phone renders.
+# the card payloads the phone renders. _SCAN_LOCK serializes the ~15s scan so
+# a double pull-to-refresh can't mutate _GIGS mid-iteration.
 _GIGS: dict[str, Gig] = {}
+_SCAN_LOCK = threading.Lock()
 
 
 @app.get("/", include_in_schema=False)
@@ -38,19 +42,28 @@ def index() -> HTMLResponse:
 @app.get("/api/queue")
 def queue(refresh: int = 0) -> JSONResponse:
     """Return the swipe queue. Scans on first call (or refresh=1); the scan hits
-    the network so the phone shows a loading state meanwhile."""
-    if refresh or not _GIGS:
-        _GIGS.clear()
-        gigs = swipe.build_queue()
-        for g in gigs:
-            _GIGS[g.id] = g
-    cards = [swipe.card(_GIGS[g]) for g in _GIGS]
-    return JSONResponse({"cards": cards, "count": len(cards)})
+    the network so the phone shows a loading state meanwhile. Shows every
+    undecided role (not just digest-leftovers) — fresh_only=False so the
+    digest's best finds, sitting in pipeline.md as `new`, surface here too."""
+    try:
+        with _SCAN_LOCK:
+            if refresh or not _GIGS:
+                gigs = swipe.build_queue(fresh_only=False)
+                _GIGS.clear()
+                _GIGS.update({g.id: g for g in gigs})
+            snapshot = list(_GIGS.values())
+    except Exception:
+        log.exception("queue scan failed")
+        return JSONResponse(
+            {"cards": [], "count": 0, "error": "Scan failed — is the Mac online?"},
+            status_code=503,
+        )
+    return JSONResponse({"cards": [swipe.card(g) for g in snapshot], "count": len(snapshot)})
 
 
 class Decision(BaseModel):
     id: str
-    action: str  # "apply" | "pass"
+    action: Literal["apply", "pass"]
     reason: str = ""
 
 
@@ -58,10 +71,34 @@ class Decision(BaseModel):
 def decide(d: Decision) -> JSONResponse:
     gig = _GIGS.get(d.id)
     if gig is None:
-        return JSONResponse({"ok": False, "error": "unknown gig id"}, status_code=404)
-    status = swipe.record_decision(gig, d.action, d.reason)
-    _GIGS.pop(d.id, None)  # don't show it again this session
-    return JSONResponse({"ok": True, "status": status, "remaining": len(_GIGS)})
+        return JSONResponse(
+            {"ok": False, "error": "unknown gig (queue may have refreshed)"},
+            status_code=404,
+        )
+    try:
+        status = swipe.record_decision(gig, d.action, d.reason)
+    except Exception as exc:  # write refused / pipeline error — don't fake success
+        log.error("decision not recorded for %s: %s", d.id, exc)
+        return JSONResponse({"ok": False, "error": "Couldn't save — try again"}, status_code=503)
+    # Keep the gig in _GIGS so an Undo can revert it; the phone owns the deck.
+    return JSONResponse({"ok": True, "status": status})
+
+
+class UndoReq(BaseModel):
+    id: str
+
+
+@app.post("/api/undo")
+def undo(u: UndoReq) -> JSONResponse:
+    gig = _GIGS.get(u.id)
+    if gig is None:
+        return JSONResponse({"ok": False, "error": "unknown gig"}, status_code=404)
+    try:
+        swipe.undo_decision(gig)
+    except Exception as exc:
+        log.error("undo failed for %s: %s", u.id, exc)
+        return JSONResponse({"ok": False, "error": "undo failed"}, status_code=503)
+    return JSONResponse({"ok": True})
 
 
 def _tailscale_ip() -> str | None:

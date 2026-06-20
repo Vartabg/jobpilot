@@ -75,6 +75,21 @@ def mark_seen(gig_ids: list[str]) -> None:
         atomic_write_text(SEEN_PATH, json.dumps(seen, indent=2))
 
 
+def unmark_seen(gig_ids: list[str]) -> None:
+    """Remove these IDs from seen (used to undo a swipe so the gig can resurface)."""
+    if not gig_ids:
+        return
+    with file_lock(SEEN_PATH):
+        seen = _load_unlocked()
+        changed = False
+        for gid in gig_ids:
+            if gid in seen:
+                del seen[gid]
+                changed = True
+        if changed:
+            atomic_write_text(SEEN_PATH, json.dumps(seen, indent=2))
+
+
 def mark_archived(gig_ids: list[str]) -> None:
     """Record these IDs as permanently retired (auto-archived or collapsed
     away). Unlike mark_seen, the entry survives pruning forever and

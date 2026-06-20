@@ -24,16 +24,23 @@ from jobpilot.gigs.core.proposals import (
     email_body,
     email_subject,
 )
-from jobpilot.gigs.core.scorer import filter_and_rank
-from jobpilot.gigs.core.store import filter_new, mark_seen
+from jobpilot.gigs.core.scorer import _posted_age_days, filter_and_rank
+from jobpilot.gigs.core.scrapers.weworkremotely import enrich_apply_urls
+from jobpilot.gigs.core.store import filter_new, mark_seen, unmark_seen
 
 
 def build_queue(
-    *, limit: int = 40, min_score: int = 55, fresh_only: bool = True,
+    *, limit: int = 40, min_score: int = 55, fresh_only: bool = False,
     on_progress: Optional[Callable[[str], None]] = None,
 ) -> list[Gig]:
-    """Ranked fresh gigs to swipe — home-metro/remote + currency-aware (same
-    filters as the digest), minus anything already decided in the pipeline."""
+    """Ranked roles to swipe — home-metro/remote + currency-aware (same filters
+    as the digest), minus anything already DECIDED in the pipeline.
+
+    fresh_only defaults False so the swiper shows every undecided role: the
+    digest marks its best finds seen, so fresh_only=True would hide exactly the
+    high-fit jobs sitting in pipeline.md as `new`. 'Decided' (the pipeline-status
+    gate) is what keeps already-handled roles out — not seen.json.
+    """
     gigs, _results = collect_all(on_progress=on_progress)
     if fresh_only:
         fresh = set(filter_new([g.id for g in gigs]))
@@ -41,10 +48,18 @@ def build_queue(
     gigs, _ = dedupe_cross_source(gigs)
     decided = {r.gig_id for r in pipeline.parse() if r.gig_id and r.status != "new"}
     gigs = [g for g in gigs if g.id not in decided]
-    return filter_and_rank(
+    ranked = filter_and_rank(
         gigs, min_score=min_score, top_n=limit,
         contract_first=True, drop_rigid_schedule=True,
     )
+    # Resolve WWR listings to a real apply target (mailto/ATS/careers) so the
+    # Apply tap doesn't dead-end on the paywalled aggregator page. Network
+    # fetches are capped inside enrich_apply_urls.
+    try:
+        enrich_apply_urls(ranked)
+    except Exception:
+        pass
+    return ranked
 
 
 def _apply_target(gig: Gig) -> tuple[str, bool]:
@@ -80,11 +95,18 @@ def card(gig: Gig) -> dict:
         "is_mailto": is_mailto,
         "resume": preferences.resume_for(brief.offer),
         "source_url": gig.url,
+        "source": gig.source,
+        "posted_age_days": _posted_age_days(gig.posted_at),
         "tags": (gig.tags or [])[:6],
     }
 
 
-def _upsert_row(gig: Gig, status: str, note: str = "") -> None:
+def _upsert_row(gig: Gig, status: str, note: str = ""):
+    """Set this gig's pipeline status to `status` and persist. Returns the
+    WriteResult so the caller can tell if the write was refused (shrink guard)
+    and avoid reporting a false success. The status is passed as authoritative
+    so the writer's disk-wins merge can't revert the swipe back to its old
+    status."""
     rows = pipeline.parse()
     today = datetime.now().strftime("%-m/%-d")
     for r in rows:
@@ -106,17 +128,24 @@ def _upsert_row(gig: Gig, status: str, note: str = "") -> None:
             notes=note,
             gig_id=gig.id,
         ))
-    pipeline.write(rows)
+    return pipeline.write(rows, authoritative_status={gig.id: status})
 
 
 def record_decision(gig: Gig, action: str, reason: str = "") -> str:
     """Record a swipe. apply -> 'sent', pass -> 'passed' (+ optional reason).
-    Marks the gig seen so it won't resurface. Returns the stored status."""
-    if action == "apply":
-        _upsert_row(gig, "sent")
-        mark_seen([gig.id])
-        return "sent"
-    note = f"pass:{reason}" if reason else ""
-    _upsert_row(gig, "passed", note)
+    Only marks the gig seen if the pipeline write actually persisted — a
+    refused write must not silently swallow the decision. Returns the stored
+    status, or raises RuntimeError if the write was refused."""
+    status = "sent" if action == "apply" else "passed"
+    note = f"pass:{reason}" if (action != "apply" and reason) else ""
+    result = _upsert_row(gig, status, note)
+    if getattr(result, "refused", False):
+        raise RuntimeError(f"pipeline write refused — {gig.id} not recorded")
     mark_seen([gig.id])
-    return "passed"
+    return status
+
+
+def undo_decision(gig: Gig) -> None:
+    """Revert a swipe: status back to 'new' and un-mark seen so it resurfaces."""
+    _upsert_row(gig, "new")
+    unmark_seen([gig.id])

@@ -617,6 +617,7 @@ def _preserve_user_edits(
     merged: list[Row],
     on_disk: list[Row],
     removed_ids: set[str] | frozenset[str] = frozenset(),
+    authoritative_status: dict[str, str] | None = None,
 ) -> list[Row]:
     """Keep phone/Mac edits made while a digest run is in progress.
 
@@ -627,7 +628,12 @@ def _preserve_user_edits(
     only on disk (hand-added mid-run, or unknown to this run) are always
     carried over — never dropped — UNLESS their gig_id is in removed_ids:
     those were deliberately retired this run (auto-archived, or collapsed
-    by the hygiene migration) and already preserved in the archive sidecar."""
+    by the hygiene migration) and already preserved in the archive sidecar.
+
+    `authoritative_status` lets a deliberate, programmatic status change (the
+    phone swiper marking a gig sent/passed) win over disk for those gig_ids —
+    otherwise disk-wins would silently revert the swipe to its old status."""
+    authoritative_status = authoritative_status or {}
     disk_by_id = {r.gig_id: r for r in on_disk if r.gig_id}
     out: list[Row] = []
     for row in merged:
@@ -636,7 +642,7 @@ def _preserve_user_edits(
             out.append(row)
             continue
         out.append(Row(
-            status=disk.status,
+            status=authoritative_status.get(row.gig_id, disk.status),
             score=row.score,
             company=row.company or disk.company,
             role=row.role or disk.role,
@@ -761,6 +767,7 @@ def write(
     path: Path = PIPELINE_PATH,
     *,
     removed_ids: set[str] | frozenset[str] = frozenset(),
+    authoritative_status: dict[str, str] | None = None,
 ) -> WriteResult:
     """Write rows, merging in any on-disk edits first. removed_ids names
     gig_ids deliberately retired this run (auto-archived or collapsed by
@@ -769,7 +776,10 @@ def write(
     deliberate move, not row loss."""
     with file_lock(path):
         on_disk = parse(path) if path.exists() else []
-        rows = _preserve_user_edits(rows, on_disk, removed_ids=removed_ids)
+        rows = _preserve_user_edits(
+            rows, on_disk, removed_ids=removed_ids,
+            authoritative_status=authoritative_status,
+        )
         removed_on_disk = sum(
             1 for r in on_disk if r.gig_id and r.gig_id in removed_ids
         )
