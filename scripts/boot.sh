@@ -68,12 +68,17 @@ else
 fi
 
 # ── Swipe server (phone-first job swiper) ────────────────────────────────────
-if [[ -f "$SWIPE_PID_FILE" ]] && kill -0 "$(cat "$SWIPE_PID_FILE")" 2>/dev/null; then
+# Bound to all interfaces so the phone reaches it over plain WiFi (LAN IP) OR
+# Tailscale. Prefer the always-on LaunchAgent (install_swipe_launchd.sh) when
+# present; boot just restarts it so it's running the latest code.
+SWIPE_LABEL="com.vartny.jobpilot.swipe"
+if launchctl print "gui/${UID}/${SWIPE_LABEL}" >/dev/null 2>&1; then
+  launchctl kickstart -k "gui/${UID}/${SWIPE_LABEL}" >/dev/null 2>&1 || true
+  $QUIET || echo "✓ Swipe managed by always-on LaunchAgent — restarted"
+elif [[ -f "$SWIPE_PID_FILE" ]] && kill -0 "$(cat "$SWIPE_PID_FILE")" 2>/dev/null; then
   $QUIET || echo "✓ Swipe already running (pid $(cat "$SWIPE_PID_FILE"))"
 else
-  $QUIET || echo "▶ Starting swipe on 0.0.0.0:${SWIPE_PORT} (LAN + Tailscale)..."
-  # Bind all interfaces so the phone can reach it over plain WiFi (LAN IP) OR
-  # Tailscale — binding only the Tailscale IP left the LAN path dead.
+  $QUIET || echo "▶ Starting swipe on 0.0.0.0:${SWIPE_PORT}  (always-on: ./scripts/install_swipe_launchd.sh)"
   nohup jobpilot gigs swipe --host 0.0.0.0 --port "$SWIPE_PORT" >>"$SWIPE_LOG_FILE" 2>&1 &
   echo $! >"$SWIPE_PID_FILE"
 fi

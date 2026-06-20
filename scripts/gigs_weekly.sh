@@ -3,7 +3,7 @@
 # LaunchAgent (see scripts/install_gigs_launchd.sh).
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # GIGPILOT_PYTHON overrides the interpreter; default is the repo venv.
 VENV_PY="${GIGPILOT_PYTHON:-$ROOT/.venv/bin/python}"
 LOG_DIR="$HOME/Library/Logs/jobpilot-gigs"
