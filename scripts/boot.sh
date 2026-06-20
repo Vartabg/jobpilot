@@ -115,7 +115,19 @@ fi
 if [[ "$HEALTH_HOST" == "127.0.0.1" ]]; then
   echo "  Swipe:      http://127.0.0.1:${SWIPE_PORT}/  (phone job swiper)"
 else
-  echo "  Swipe:      http://${HEALTH_HOST}:${SWIPE_PORT}/  (open this on your phone)"
+  echo "  Swipe:      http://${HEALTH_HOST}:${SWIPE_PORT}/  (scan the QR below on your phone)"
+  python - "$HEALTH_HOST" "$SWIPE_PORT" <<'PY' 2>/dev/null || true
+import sys
+try:
+    import qrcode
+except ImportError:
+    sys.exit(0)
+host, port = sys.argv[1], sys.argv[2]
+q = qrcode.QRCode(border=2)
+q.add_data(f"http://{host}:{port}/")
+q.make()
+q.print_ascii(invert=True)
+PY
 fi
 echo "  Chrome CDP: http://127.0.0.1:${DEBUG_PORT}/"
 echo ""
