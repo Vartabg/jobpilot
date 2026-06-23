@@ -101,3 +101,18 @@ def test_aligned_commercial_company_no_alignment_penalty():
     assert "deprioritized" not in result.recommendation.lower()
     # Alignment component should be 0 (not penalized)
     assert result.components.get("Alignment", 0) == 0
+
+
+def test_labeled_jd_parses_role_and_company_correctly():
+    """JD files that lead with `Company:` / `Role:` labels must not swap fields."""
+    scorer = JobScorer(profile_store=DummyProfileStore(_aligned_profile()), use_bro=False)
+    jd = (
+        "Company: Entech Sales & Service LLC\n"
+        "Role: Service Technician - Security / Access Control Systems\n"
+        "Location: Austin, TX\n"
+        "\n"
+        "Install, troubleshoot, and service access control systems at commercial sites."
+    )
+    result = scorer.score_text(jd)
+    assert result.parsed_jd.title == "Service Technician - Security / Access Control Systems"
+    assert result.parsed_jd.company == "Entech Sales & Service LLC"

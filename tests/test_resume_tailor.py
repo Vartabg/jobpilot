@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from jobpilot.core import resume_tailor as resume_tailor_module
 from jobpilot.core.profile_store import ProfileStore
 from jobpilot.core.resume_tailor import ResumeTailor
 
@@ -99,6 +100,106 @@ Requirements
     assert manifest["html_path"] == str(result.html_path)
     assert manifest["title"] == "Senior Frontend Engineer"
     assert manifest["company"] == "Acme AI"
+
+
+def test_tailor_selects_facilities_resume_for_field_service_role(tmp_path: Path, monkeypatch):
+    resume_sources = tmp_path / "resume_sources"
+    resume_sources.mkdir()
+    facilities_resume = resume_sources / "garo_facilities_v1.md"
+    facilities_resume.write_text(
+        """
+# Alex Sample
+
+Field Service Engineer who commissioned smart electrochromic systems across customer sites.
+Resolved electro-mechanical failures, controller issues, and BMS integrations under schedule pressure.
+""".strip()
+    )
+    solutions_resume = resume_sources / "garo_solutions_v1.md"
+    solutions_resume.write_text(
+        """
+# Alex Sample
+
+Solutions Engineer who built React dashboards and Python automation for software teams.
+""".strip()
+    )
+    monkeypatch.setattr(resume_tailor_module, "RESUME_SOURCE_DIR", resume_sources)
+
+    store = ProfileStore(data_dir=tmp_path)
+    profile = store.load()
+    profile.first_name = "Alex"
+    profile.last_name = "Sample"
+    profile.current_title = "Independent Contractor"
+    profile.resume_path = str(solutions_resume)
+    store.save(profile)
+
+    tailor = ResumeTailor(profile_store=store, output_dir=tmp_path / "output", use_bro=False)
+    result = tailor.generate_from_text(
+        """
+Field Service Technician II
+Acme Controls
+Requirements
+- Maintain field service equipment across customer sites
+- Troubleshoot electrical and mechanical systems
+- Support building automation and BMS integrations
+""",
+        title="Field Service Technician II",
+        company="Acme Controls",
+    )
+
+    content = result.output_path.read_text()
+    assert "production software" not in content
+    assert "commissioned smart electrochromic systems" in content
+    assert "React dashboards" not in content
+    assert "Field Service Engineer**" not in content
+
+
+def test_tailor_keeps_solutions_resume_for_software_role(tmp_path: Path, monkeypatch):
+    resume_sources = tmp_path / "resume_sources"
+    resume_sources.mkdir()
+    facilities_resume = resume_sources / "garo_facilities_v1.md"
+    facilities_resume.write_text(
+        """
+# Alex Sample
+
+Field Service Engineer who commissioned smart electrochromic systems across customer sites.
+""".strip()
+    )
+    solutions_resume = resume_sources / "garo_solutions_v1.md"
+    solutions_resume.write_text(
+        """
+# Alex Sample
+
+Solutions Engineer who built React dashboards and Python automation for software teams.
+Designed human-in-the-loop workflows for ATS sourcing and application review.
+""".strip()
+    )
+    monkeypatch.setattr(resume_tailor_module, "RESUME_SOURCE_DIR", resume_sources)
+
+    store = ProfileStore(data_dir=tmp_path)
+    profile = store.load()
+    profile.first_name = "Alex"
+    profile.last_name = "Sample"
+    profile.current_title = "Independent Contractor"
+    profile.resume_path = str(solutions_resume)
+    store.save(profile)
+
+    tailor = ResumeTailor(profile_store=store, output_dir=tmp_path / "output", use_bro=False)
+    result = tailor.generate_from_text(
+        """
+Solutions Engineer
+Acme AI
+Requirements
+- Python automation
+- React dashboards
+- Customer-facing implementation work
+""",
+        title="Solutions Engineer",
+        company="Acme AI",
+    )
+
+    content = result.output_path.read_text()
+    assert "React dashboards" in content
+    assert "smart electrochromic systems" not in content
 
 
 def test_tailor_reads_text_from_pdf_resume(tmp_path: Path):
