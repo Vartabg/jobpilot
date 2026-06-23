@@ -194,7 +194,34 @@ def _load_score_source(source: str) -> tuple[str, str]:
                 "into a .txt file, or pass a URL.[/red]"
             )
             raise typer.Exit(1) from exc
+
+    # The source doesn't exist as a file. If it *looks* like a path (a single
+    # token with a doc suffix or a path separator), the user almost certainly
+    # meant a file and mistyped it. Fail loudly instead of silently treating the
+    # path string as the job description — that quietly produces a wrong resume.
+    if _looks_like_path(source):
+        console.print(
+            f"[red]No such file:[/red] {source}\n"
+            "[yellow]Check the path, or paste the job description text directly.[/yellow]"
+        )
+        raise typer.Exit(1)
+
     return source, "inline text"
+
+
+def _looks_like_path(source: str) -> bool:
+    """Heuristic: does this string look like a (mistyped) file path, not JD prose?
+
+    Real pasted job descriptions are multi-word prose with whitespace. A path is
+    a single token, often with a known document suffix or a separator.
+    """
+    text = source.strip()
+    if not text or "\n" in text or len(text) > 250:
+        return False
+    has_doc_suffix = Path(text).suffix.lower() in {".txt", ".md", ".rst", ".pdf"}
+    has_separator = "/" in text or "\\" in text
+    is_single_token = " " not in text
+    return has_doc_suffix or (has_separator and is_single_token)
 
 
 def _parse_years_of_experience(raw: str) -> Optional[int]:
@@ -346,22 +373,110 @@ def _render_resume_result(result, source_label: str) -> None:
         console.print(f"[green]•[/green] {line}")
 
 
-def _render_scan_results(jobs, *, limit: int = 20) -> None:
-    """Display scanned ATS matches in a terminal table."""
-    from rich.table import Table
+_BOILERPLATE_PHRASES = (
+    "we are an equal opportunity employer",
+    "equal opportunity",
+    "we offer competitive",
+    "join our team",
+    "about the company",
+    "about us",
+    "who we are",
+    "our mission",
+    "we believe in",
+    "we are committed to",
+    "drug test",
+    "background check",
+    "we look forward to",
+    "apply now",
+    "click here to apply",
+)
 
+_DUTY_MARKERS = (
+    "what you'll do",
+    "what you will do",
+    "responsibilities",
+    "your role",
+    "in this role",
+    "you will",
+    "key duties",
+    "day-to-day",
+    "day to day",
+    "essential duties",
+    "position summary",
+    "job summary",
+)
+
+
+def _format_description(raw: str) -> str:
+    """Extract and clean the duties section from a raw job description.
+
+    No API calls — uses local heuristics to find the relevant section,
+    strip boilerplate, and format bullet points readably.
+    """
+    if not raw:
+        return ""
+
+    # Find where the actual duties start.
+    lower = raw.lower()
+    best_pos = 0
+    for marker in _DUTY_MARKERS:
+        pos = lower.find(marker)
+        if pos != -1 and (best_pos == 0 or pos < best_pos):
+            best_pos = pos
+
+    text = raw[best_pos:].strip() if best_pos else raw.strip()
+
+    # Split into lines and filter out boilerplate lines.
+    lines = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        lower_line = stripped.lower()
+        if any(phrase in lower_line for phrase in _BOILERPLATE_PHRASES):
+            continue
+        # Normalise bullet characters to a consistent "•"
+        if stripped.startswith(("- ", "* ", "· ", "• ")):
+            stripped = "• " + stripped[2:]
+        lines.append(stripped)
+
+    return "\n".join(lines)
+
+
+def _render_scan_results(jobs, *, limit: int = 20, describe: bool = False) -> None:
+    """Display scanned ATS matches — table view or descriptive card view."""
     if not jobs:
         console.print("[yellow]No matching jobs found.[/yellow]")
         return
 
-    table = Table(title=f"Portal Matches ({min(len(jobs), limit)} shown / {len(jobs)} total)")
+    shown = jobs[:limit]
+
+    if describe:
+        console.print(
+            f"[bold cyan]Portal Matches[/bold cyan] "
+            f"[dim]({len(shown)} shown / {len(jobs)} total)[/dim]\n"
+        )
+        for i, job in enumerate(shown, 1):
+            header = (
+                f"[dim]{i}[/dim]  "
+                f"[bold green]{job.company}[/bold green] [dim]·[/dim] [bold]{job.title}[/bold]"
+            )
+            loc_line = f"[magenta]{job.location}[/magenta]  [dim]via {job.portal}[/dim]"
+            blurb = _format_description(job.description) if job.description else ""
+            body = f"{loc_line}\n\n{blurb}" if blurb else f"{loc_line}\n\n[dim italic]No description available.[/dim italic]"
+            console.print(Panel(body, title=header, title_align="left", padding=(0, 1)))
+        return
+
+    from rich.table import Table
+
+    table = Table(title=f"Portal Matches ({len(shown)} shown / {len(jobs)} total)")
     table.add_column("Portal", style="cyan", width=10)
     table.add_column("Company", style="white", max_width=20)
     table.add_column("Role", style="green", max_width=34)
     table.add_column("Location", style="magenta", max_width=18)
     table.add_column("Match", style="yellow", max_width=18)
 
-    for job in jobs[:limit]:
+    for job in shown:
         table.add_row(
             job.portal,
             job.company or "—",
@@ -656,6 +771,7 @@ def scan(
     config: Optional[Path] = typer.Option(None, "--config", help="Optional JSON file of scan targets."),
     limit: int = typer.Option(20, help="Maximum number of rows to show"),
     save: bool = typer.Option(True, "--save/--no-save", help="Persist scan results to `data/reports/`"),
+    describe: bool = typer.Option(False, "--describe", "-d", help="Show a plain-English description of what each role involves."),
 ):
     """Scan public ATS boards for roles worth reviewing before you apply."""
     targets: list[ScanTarget] = []
@@ -678,7 +794,7 @@ def scan(
     scanner = PortalScanner(keywords=keyword)
     jobs = scanner.scan_targets(targets)
     jobs.sort(key=lambda item: (item.company.lower(), item.title.lower()))
-    _render_scan_results(jobs, limit=limit)
+    _render_scan_results(jobs, limit=limit, describe=describe)
 
     if save:
         report_path = scanner.save_report(jobs)

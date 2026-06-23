@@ -346,16 +346,55 @@ class JobScorer:
 
     @staticmethod
     def _guess_title(text: str) -> str:
+        labeled = JobScorer._labeled_value(text, ("role", "title", "position", "job title"))
+        if labeled:
+            return labeled
         for line in text.splitlines():
             stripped = line.strip()
+            # Skip explicit label lines so they don't become the guessed title.
+            if JobScorer._is_labeled_line(stripped):
+                continue
             if 4 <= len(stripped) <= 80:
                 return stripped
         return ""
 
     @staticmethod
     def _guess_company(text: str) -> str:
-        candidates = [line.strip() for line in text.splitlines() if line.strip()]
+        labeled = JobScorer._labeled_value(text, ("company", "employer", "organization"))
+        if labeled:
+            return labeled
+        candidates = [
+            line.strip()
+            for line in text.splitlines()
+            if line.strip() and not JobScorer._is_labeled_line(line.strip())
+        ]
         return candidates[1] if len(candidates) > 1 and len(candidates[1]) <= 80 else ""
+
+    @staticmethod
+    def _labeled_value(text: str, labels: tuple[str, ...]) -> str:
+        """Return the value of the first `Label: value` line matching `labels`."""
+        for line in text.splitlines():
+            stripped = line.strip()
+            if ":" not in stripped:
+                continue
+            label, _, value = stripped.partition(":")
+            if label.strip().lower() in labels:
+                value = value.strip()
+                if 1 <= len(value) <= 80:
+                    return value
+        return ""
+
+    @staticmethod
+    def _is_labeled_line(line: str) -> bool:
+        """True if a line looks like a `Label: value` metadata header."""
+        if ":" not in line:
+            return False
+        label = line.partition(":")[0].strip().lower()
+        return label in {
+            "company", "employer", "organization", "role", "title",
+            "position", "job title", "location", "compensation", "pay",
+            "salary", "source", "source links", "apply",
+        }
 
     @staticmethod
     def _extract_salary(text: str) -> str:

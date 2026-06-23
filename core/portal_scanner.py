@@ -12,7 +12,7 @@ import urllib.parse
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 import requests  # pyright: ignore[reportMissingModuleSource]
 
@@ -23,6 +23,22 @@ log = get_logger(__name__)
 
 REPORTS_DIR = DATA_DIR / "reports"
 DEFAULT_TARGETS_PATH = DATA_DIR / "portals.json"
+
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+_WHITESPACE_RE = re.compile(r"\s+")
+
+
+def _extract_snippet(raw: str) -> str:
+    """Return a clean plain-text version of a raw (possibly HTML) job description.
+
+    Strips HTML tags and normalizes whitespace. No length truncation — the
+    full text is stored so that downstream consumers (LLM rewrite, display) can
+    decide how much to use.
+    """
+    if not raw:
+        return ""
+    text = _HTML_TAG_RE.sub(" ", raw)
+    return _WHITESPACE_RE.sub(" ", text).strip()
 
 
 @dataclass
@@ -45,12 +61,13 @@ class PortalJob:
     location: str = ""
     portal: str = ""
     matched_keywords: list[str] = field(default_factory=lambda: cast(list[str], []))
+    description: str = ""
 
 
 class PortalScanner:
     """Fetch and filter jobs from common ATS boards."""
 
-    def __init__(self, keywords: Optional[list[str]] = None, timeout: int = TIMEOUT_SHORT):
+    def __init__(self, keywords: list[str] | None = None, timeout: int = TIMEOUT_SHORT):
         cleaned = [k.strip().lower() for k in (keywords or []) if k and k.strip()]
         self.keywords = list(dict.fromkeys(cleaned))
         self.timeout = timeout
@@ -230,8 +247,15 @@ class PortalScanner:
         try:
             response = requests.get(url, timeout=self.timeout)
             response.raise_for_status()
+        except requests.HTTPError as exc:
+            status = exc.response.status_code if exc.response is not None else "unknown"
+            log.warning("Adzuna request failed for %r: HTTP %s", query, status)
+            return []
+        except requests.RequestException as exc:
+            log.warning("Adzuna request failed for %r: %s", query, exc.__class__.__name__)
+            return []
         except Exception as exc:
-            log.warning("Adzuna request failed for %r: %s", query, exc)
+            log.warning("Adzuna request failed for %r: unexpected %s", query, exc.__class__.__name__)
             return []
 
         payload: dict[str, Any] = response.json()
@@ -254,6 +278,7 @@ class PortalScanner:
                 location=loc,
                 portal="adzuna",
                 matched_keywords=matched,
+                description=_extract_snippet(str(item.get("description", ""))),
             ))
 
         log.info("Adzuna scan for %r in %r: %d matches", query, where, len(jobs))
@@ -374,11 +399,6 @@ class PortalScanner:
         if match:
             try:
                 initial = json.loads(match.group(1))
-                job_list = (
-                    initial.get("jobKeysWithTitles")
-                    or initial.get("serpState", {}).get("jobKeys")
-                    or []
-                )
                 # Flatten whatever structure Indeed uses to get title+company+url.
                 results_raw = (
                     initial.get("jobKeysWithTitles")
@@ -454,7 +474,7 @@ class PortalScanner:
         return "; ".join(dict.fromkeys(locations))
 
     @staticmethod
-    def load_targets(path: Optional[Path] = None) -> list[ScanTarget]:
+    def load_targets(path: Path | None = None) -> list[ScanTarget]:
         """Load scan targets from JSON if configured."""
         target_path = path or DEFAULT_TARGETS_PATH
         if not target_path.exists():
@@ -485,7 +505,7 @@ class PortalScanner:
             )
         return targets
 
-    def save_report(self, jobs: list[PortalJob], directory: Optional[Path] = None) -> Path:
+    def save_report(self, jobs: list[PortalJob], directory: Path | None = None) -> Path:
         """Persist scan results as JSON for later review."""
         report_dir = directory or REPORTS_DIR
         report_dir.mkdir(parents=True, exist_ok=True)
