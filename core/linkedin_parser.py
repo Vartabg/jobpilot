@@ -140,8 +140,14 @@ class LinkedInParser:
         if progress:
             value = await progress.get_attribute("value")
             max_val = await progress.get_attribute("max")
-            app_page.current_step = int(value) if value else 1
-            app_page.total_steps = int(max_val) if max_val else 1
+            try:
+                app_page.current_step = int(float(value)) if value else 1
+            except (TypeError, ValueError):
+                app_page.current_step = 1
+            try:
+                app_page.total_steps = int(float(max_val)) if max_val else 1
+            except (TypeError, ValueError):
+                app_page.total_steps = 1
         
         # Find all form fields
         app_page.fields = await self._extract_fields()

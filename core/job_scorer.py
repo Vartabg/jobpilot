@@ -13,7 +13,7 @@ from typing import Optional, Protocol
 
 from jobpilot.core import llm_client
 from jobpilot.core.bro_client import is_bro_running, query_rag
-from jobpilot.core.jd_parser import JDParser, ParsedJD
+from jobpilot.core.jd_parser import _SALARY_PATTERN, JDParser, ParsedJD
 from jobpilot.core.policy_config import Policy, get_policy
 from jobpilot.core.work_style import score_work_style, title_seniority_penalty
 from jobpilot.core.profile_store import ProfileStore, UserProfile, get_profile_store
@@ -230,9 +230,22 @@ class JobScorer:
         ratio = len(matched_skills) / max(len(jd_skills), 1)
         return min(35, max(0, int(round(35 * ratio))))
 
+    # "N years" only counts as a requirement in an experience context
+    # (e.g. "5+ years of experience", "minimum 3 years") — not "founded 20 years ago".
+    _EXPERIENCE_RE = re.compile(
+        r"(\d+)\+?\s*(?:years|yrs)\.?\s*(?:of\s+)?"
+        r"(?:experience|exp\b|professional|relevant|industry|work|hands-on|building|in\b)"
+        r"|(?:experience|minimum|at least|require[sd]?|least)\D{0,15}?(\d+)\+?\s*(?:years|yrs)",
+        re.IGNORECASE,
+    )
+
     @staticmethod
     def _score_experience(years_of_experience: int, raw_text: str) -> tuple[int, str]:
-        matches = [int(m.group(1)) for m in re.finditer(r"(\d+)\+?\s*(?:years|yrs)", raw_text, re.IGNORECASE)]
+        matches = []
+        for m in JobScorer._EXPERIENCE_RE.finditer(raw_text):
+            n = m.group(1) or m.group(2)
+            if n:
+                matches.append(int(n))
         required_years = max(matches) if matches else 0
 
         if required_years <= 0:
@@ -344,12 +357,26 @@ class JobScorer:
             return "Stretch fit — apply selectively"
         return "Low fit — likely skip"
 
+    _NON_TITLE_RE = re.compile(
+        r"^(apply|apply now|save|share|back to|home|jobs?|careers?|menu|search|login|"
+        r"sign in|about|posted|full[- ]?time|part[- ]?time|contract|remote|hybrid|on[- ]?site)\b",
+        re.IGNORECASE,
+    )
+
     @staticmethod
     def _guess_title(text: str) -> str:
         for line in text.splitlines():
             stripped = line.strip()
-            if 4 <= len(stripped) <= 80:
-                return stripped
+            if not (4 <= len(stripped) <= 80):
+                continue
+            # Skip nav/button text, URLs, and lines with no letters (dates, prices).
+            if stripped.startswith(("http://", "https://", "www.")):
+                continue
+            if JobScorer._NON_TITLE_RE.match(stripped):
+                continue
+            if not re.search(r"[A-Za-z]", stripped):
+                continue
+            return stripped
         return ""
 
     @staticmethod
@@ -359,11 +386,8 @@ class JobScorer:
 
     @staticmethod
     def _extract_salary(text: str) -> str:
-        match = re.search(
-            r"\$[\d,]+(?:\s*[-–]\s*\$[\d,]+)?(?:\s*/?\s*(?:yr|year|annually|hr|hour))?",
-            text,
-            re.IGNORECASE,
-        )
+        # Shared with jd_parser so the two salary extractors can't drift apart.
+        match = _SALARY_PATTERN.search(text)
         return match.group(0).strip() if match else ""
 
     @staticmethod

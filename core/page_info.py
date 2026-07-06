@@ -43,7 +43,10 @@ async def build_page_info(page: Page) -> PageInfo:
             )
             if progress:
                 value = await progress.get_attribute("value")
-                application_step = int(value) if value else 1
+                try:
+                    application_step = int(float(value)) if value else 1
+                except (TypeError, ValueError):
+                    application_step = 1
 
     return PageInfo(
         url=url,

@@ -453,8 +453,10 @@ def tracker_status_for_job(tracker, url: str, company: str) -> Optional[str]:
     tracker_company_status = tracker.company_status(company)
     if tracker.has_applied(url):
         return tracker.get_status(url) or "applied"
-    if tracker_company_status:
-        return tracker_company_status
+    # Company-level status is only used to mark dead ground (a rejection), never
+    # to hide a brand-new role at a company applied to under a different URL.
+    if tracker_company_status == "rejected":
+        return "rejected"
     return None
 
 
@@ -464,7 +466,13 @@ def load_queue() -> list[QueueJob]:
         return []
     try:
         data = json.loads(QUEUE_PATH.read_text())
-        return [QueueJob(**item) for item in data]
+        # Drop unknown keys so a schema change in queue.json (e.g. a field added
+        # in a newer version) doesn't crash the load and wipe applied/skipped history.
+        known = QueueJob.__dataclass_fields__
+        return [
+            QueueJob(**{k: v for k, v in item.items() if k in known})
+            for item in data
+        ]
     except Exception as e:
         log.warning("Could not load queue: %s", e)
         return []
