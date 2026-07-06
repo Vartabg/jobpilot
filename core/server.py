@@ -25,7 +25,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
 from jobpilot.core.logger import get_logger
 from jobpilot.core.profile_store import get_profile_store
@@ -106,10 +106,9 @@ def _bookmarklet_js() -> tuple[str, str]:
 
 
 @app.get("/install", include_in_schema=False)
-async def install_page() -> "Response":
+async def install_page() -> HTMLResponse:
     """Install-the-bookmarklet page — user loads this in Safari, gets
     step-by-step instructions to save the bookmark on their phone."""
-    from fastapi.responses import HTMLResponse
     # Generate the bookmarklet URL
     import urllib.parse as _up
     _, js_min = _bookmarklet_js()
