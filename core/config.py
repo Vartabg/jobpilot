@@ -8,6 +8,13 @@ instead of defining their own magic numbers.
 import os
 from pathlib import Path
 
+# Load .env if python-dotenv is available (dev convenience).
+try:
+    from dotenv import load_dotenv  # type: ignore
+    load_dotenv(Path(__file__).parent.parent / ".env")
+except ImportError:
+    pass
+
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
@@ -50,3 +57,9 @@ FILL_RETRY_DELAY_MS: int = 500
 # Polling
 # ---------------------------------------------------------------------------
 WATCH_LOOP_INTERVAL: float = 1.0  # seconds between main-loop iterations
+
+# ---------------------------------------------------------------------------
+# Adzuna Job Search API
+# ---------------------------------------------------------------------------
+ADZUNA_APP_ID: str = os.environ.get("ADZUNA_APP_ID", "")
+ADZUNA_API_KEY: str = os.environ.get("ADZUNA_API_KEY", "")

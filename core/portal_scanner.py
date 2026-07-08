@@ -8,20 +8,37 @@ from __future__ import annotations
 
 import json
 import re
+import urllib.parse
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 import requests  # pyright: ignore[reportMissingModuleSource]
 
-from jobpilot.core.config import DATA_DIR, TIMEOUT_SHORT
+from jobpilot.core.config import ADZUNA_API_KEY, ADZUNA_APP_ID, DATA_DIR, TIMEOUT_SHORT
 from jobpilot.core.logger import get_logger
 
 log = get_logger(__name__)
 
 REPORTS_DIR = DATA_DIR / "reports"
 DEFAULT_TARGETS_PATH = DATA_DIR / "portals.json"
+
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+_WHITESPACE_RE = re.compile(r"\s+")
+
+
+def _extract_snippet(raw: str) -> str:
+    """Return a clean plain-text version of a raw (possibly HTML) job description.
+
+    Strips HTML tags and normalizes whitespace. No length truncation — the
+    full text is stored so that downstream consumers (LLM rewrite, display) can
+    decide how much to use.
+    """
+    if not raw:
+        return ""
+    text = _HTML_TAG_RE.sub(" ", raw)
+    return _WHITESPACE_RE.sub(" ", text).strip()
 
 
 @dataclass
@@ -44,12 +61,13 @@ class PortalJob:
     location: str = ""
     portal: str = ""
     matched_keywords: list[str] = field(default_factory=lambda: cast(list[str], []))
+    description: str = ""
 
 
 class PortalScanner:
     """Fetch and filter jobs from common ATS boards."""
 
-    def __init__(self, keywords: Optional[list[str]] = None, timeout: int = TIMEOUT_SHORT):
+    def __init__(self, keywords: list[str] | None = None, timeout: int = TIMEOUT_SHORT):
         cleaned = [k.strip().lower() for k in (keywords or []) if k and k.strip()]
         self.keywords = list(dict.fromkeys(cleaned))
         self.timeout = timeout
@@ -69,6 +87,12 @@ class PortalScanner:
                     results.extend(self.scan_lever_board(target.value, label=target.label))
                 elif portal == "ashby":
                     results.extend(self.scan_ashby_board(target.value, label=target.label))
+                elif portal == "google_jobs":
+                    results.extend(self.scan_google_jobs(target.value, label=target.label))
+                elif portal == "indeed":
+                    results.extend(self.scan_indeed(target.value, label=target.label))
+                elif portal == "adzuna":
+                    results.extend(self.scan_adzuna(target.value, label=target.label))
                 else:
                     log.info("Skipping unsupported portal target: %s", target.portal)
             except Exception as exc:
@@ -188,6 +212,246 @@ class PortalScanner:
             )
         return jobs
 
+    def scan_adzuna(
+        self,
+        query: str,
+        *,
+        label: str = "",
+        location: str = "Austin, TX",
+        country: str = "us",
+        max_results: int = 50,
+    ) -> list[PortalJob]:
+        """Search Adzuna's job API — covers iCIMS, Workday, and other ATS boards.
+
+        The `query` value in portals.json is the keyword string (e.g.
+        "field service technician"). Location defaults to Austin TX.
+        Requires ADZUNA_APP_ID and ADZUNA_API_KEY in the environment / .env.
+        """
+        if not ADZUNA_APP_ID or not ADZUNA_API_KEY:
+            log.warning("Adzuna scan skipped — ADZUNA_APP_ID / ADZUNA_API_KEY not set")
+            return []
+
+        # Adzuna location: split "Austin, TX" → what="field service" where="Austin"
+        where = location.split(",")[0].strip()
+        url = (
+            f"https://api.adzuna.com/v1/api/jobs/{country}/search/1"
+            f"?app_id={ADZUNA_APP_ID}"
+            f"&app_key={ADZUNA_API_KEY}"
+            f"&results_per_page={max_results}"
+            f"&what={urllib.parse.quote_plus(query)}"
+            f"&where={urllib.parse.quote_plus(where)}"
+            "&distance=15"
+            "&sort_by=date"
+            "&content-type=application/json"
+        )
+        try:
+            response = requests.get(url, timeout=self.timeout)
+            response.raise_for_status()
+        except requests.HTTPError as exc:
+            status = exc.response.status_code if exc.response is not None else "unknown"
+            log.warning("Adzuna request failed for %r: HTTP %s", query, status)
+            return []
+        except requests.RequestException as exc:
+            log.warning("Adzuna request failed for %r: %s", query, exc.__class__.__name__)
+            return []
+        except Exception as exc:
+            log.warning("Adzuna request failed for %r: unexpected %s", query, exc.__class__.__name__)
+            return []
+
+        payload: dict[str, Any] = response.json()
+        jobs: list[PortalJob] = []
+
+        for item in payload.get("results", []):
+            title = str(item.get("title", "")).strip()
+            company = str((item.get("company") or {}).get("display_name", label or query)).strip()
+            loc_raw = item.get("location") or {}
+            loc_parts: list[str] = loc_raw.get("area", []) if isinstance(loc_raw, dict) else []
+            loc = ", ".join(loc_parts) if loc_parts else location
+            job_url = str(item.get("redirect_url", "")).strip()
+            matched = self._matched_keywords(title, company, loc)
+            if self.keywords and not matched:
+                continue
+            jobs.append(PortalJob(
+                company=company,
+                title=title,
+                url=job_url,
+                location=loc,
+                portal="adzuna",
+                matched_keywords=matched,
+                description=_extract_snippet(str(item.get("description", ""))),
+            ))
+
+        log.info("Adzuna scan for %r in %r: %d matches", query, where, len(jobs))
+        return jobs
+
+    _BROWSER_UA = (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/125.0.0.0 Safari/537.36"
+    )
+
+    def scan_google_jobs(self, query: str, *, label: str = "") -> list[PortalJob]:
+        """Search Google Jobs and extract JobPosting JSON-LD from the response.
+
+        Google embeds schema.org JobPosting blocks in the initial HTML for some
+        queries. When it does, this gives us cross-ATS discovery (iCIMS, Workday,
+        etc.) with a single requests call. When Google renders the jobs widget
+        entirely in JS the list will be empty — that's a silent miss, not an error.
+        """
+        url = (
+            "https://www.google.com/search"
+            f"?q={urllib.parse.quote_plus(query)}&ibp=htl;jobs&hl=en&gl=us"
+        )
+        headers = {
+            "User-Agent": self._BROWSER_UA,
+            "Accept-Language": "en-US,en;q=0.9",
+        }
+        try:
+            response = requests.get(url, headers=headers, timeout=self.timeout)
+            response.raise_for_status()
+        except Exception as exc:
+            log.warning("Google Jobs request failed for %r: %s", query, exc)
+            return []
+
+        ld_pattern = re.compile(
+            r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+            re.DOTALL | re.IGNORECASE,
+        )
+        jobs: list[PortalJob] = []
+
+        for m in ld_pattern.finditer(response.text):
+            try:
+                data = json.loads(m.group(1))
+            except json.JSONDecodeError:
+                continue
+
+            items: list[dict[str, Any]] = []
+            if isinstance(data, list):
+                items = [d for d in data if isinstance(d, dict)]
+            elif isinstance(data, dict):
+                if data.get("@type") == "JobPosting":
+                    items = [data]
+                elif data.get("@type") == "ItemList":
+                    for entry in data.get("itemListElement") or []:
+                        if isinstance(entry, dict) and isinstance(entry.get("item"), dict):
+                            items.append(entry["item"])
+
+            for item in items:
+                if item.get("@type") != "JobPosting":
+                    continue
+                title = str(item.get("title", "")).strip()
+                org = item.get("hiringOrganization") or {}
+                company = str(org.get("name", label or query)).strip() if isinstance(org, dict) else (label or query)
+                loc_raw = item.get("jobLocation") or {}
+                addr = loc_raw.get("address") or {} if isinstance(loc_raw, dict) else {}
+                if isinstance(addr, dict):
+                    city = str(addr.get("addressLocality", "")).strip()
+                    state = str(addr.get("addressRegion", "")).strip()
+                    location = ", ".join(filter(None, [city, state]))
+                else:
+                    location = str(addr).strip()
+                job_url = str(item.get("url") or item.get("sameAs") or "").strip()
+                matched = self._matched_keywords(title, company, location)
+                if self.keywords and not matched:
+                    continue
+                jobs.append(PortalJob(
+                    company=company,
+                    title=title,
+                    url=job_url,
+                    location=location,
+                    portal="google_jobs",
+                    matched_keywords=matched,
+                ))
+
+        log.info("Google Jobs scan for %r: %d matches", query, len(jobs))
+        return jobs
+
+    def scan_indeed(self, query: str, *, label: str = "", location: str = "Austin, TX") -> list[PortalJob]:
+        """Search Indeed job listings by keyword query.
+
+        Indeed renders job cards server-side and embeds structured data in the
+        initial HTML, making it more reliably parseable than Google Jobs.
+        The `query` value in portals.json is the keyword string (e.g.
+        "field service technician").
+        """
+        url = (
+            "https://www.indeed.com/jobs"
+            f"?q={urllib.parse.quote_plus(query)}"
+            f"&l={urllib.parse.quote_plus(location)}"
+            "&radius=15&fromage=30&sort=date"
+        )
+        headers = {
+            "User-Agent": self._BROWSER_UA,
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        }
+        try:
+            response = requests.get(url, headers=headers, timeout=self.timeout)
+            response.raise_for_status()
+        except Exception as exc:
+            log.warning("Indeed request failed for %r: %s", query, exc)
+            return []
+
+        # Indeed embeds job data in a window._initialData JSON blob.
+        match = re.search(r'window\._initialData\s*=\s*(\{.*?\});\s*</script>', response.text, re.DOTALL)
+        jobs: list[PortalJob] = []
+
+        if match:
+            try:
+                initial = json.loads(match.group(1))
+                # Flatten whatever structure Indeed uses to get title+company+url.
+                results_raw = (
+                    initial.get("jobKeysWithTitles")
+                    or initial.get("results")
+                    or []
+                )
+                for item in results_raw if isinstance(results_raw, list) else []:
+                    if not isinstance(item, dict):
+                        continue
+                    title = str(item.get("title") or item.get("jobTitle") or "").strip()
+                    company = str(item.get("company") or item.get("companyName") or label or query).strip()
+                    loc = str(item.get("formattedLocation") or item.get("location") or location).strip()
+                    job_key = str(item.get("jobkey") or item.get("jobKey") or "").strip()
+                    job_url = f"https://www.indeed.com/viewjob?jk={job_key}" if job_key else ""
+                    if not title:
+                        continue
+                    matched = self._matched_keywords(title, company, loc)
+                    if self.keywords and not matched:
+                        continue
+                    jobs.append(PortalJob(
+                        company=company,
+                        title=title,
+                        url=job_url,
+                        location=loc,
+                        portal="indeed",
+                        matched_keywords=matched,
+                    ))
+            except (json.JSONDecodeError, AttributeError, TypeError) as exc:
+                log.warning("Indeed JSON parse failed: %s", exc)
+
+        # Fallback: extract job cards from HTML anchors when JSON blob is absent.
+        if not jobs:
+            card_pattern = re.compile(
+                r'data-jk="([^"]+)"[^>]*>.*?class="[^"]*jobTitle[^"]*"[^>]*><[^>]+>([^<]+)',
+                re.DOTALL,
+            )
+            for jk, title in card_pattern.findall(response.text):
+                title = title.strip()
+                matched = self._matched_keywords(title, label or query, location)
+                if self.keywords and not matched:
+                    continue
+                jobs.append(PortalJob(
+                    company=label or query,
+                    title=title,
+                    url=f"https://www.indeed.com/viewjob?jk={jk}",
+                    location=location,
+                    portal="indeed",
+                    matched_keywords=matched,
+                ))
+
+        log.info("Indeed scan for %r in %r: %d matches", query, location, len(jobs))
+        return jobs
+
     @staticmethod
     def _coerce_ashby_location(item: dict[str, Any]) -> str:
         """Return Ashby's primary + secondary location text.
@@ -210,7 +474,7 @@ class PortalScanner:
         return "; ".join(dict.fromkeys(locations))
 
     @staticmethod
-    def load_targets(path: Optional[Path] = None) -> list[ScanTarget]:
+    def load_targets(path: Path | None = None) -> list[ScanTarget]:
         """Load scan targets from JSON if configured."""
         target_path = path or DEFAULT_TARGETS_PATH
         if not target_path.exists():
@@ -241,7 +505,7 @@ class PortalScanner:
             )
         return targets
 
-    def save_report(self, jobs: list[PortalJob], directory: Optional[Path] = None) -> Path:
+    def save_report(self, jobs: list[PortalJob], directory: Path | None = None) -> Path:
         """Persist scan results as JSON for later review."""
         report_dir = directory or REPORTS_DIR
         report_dir.mkdir(parents=True, exist_ok=True)

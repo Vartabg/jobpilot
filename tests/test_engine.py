@@ -306,7 +306,7 @@ class TestFillField:
 class TestReviewGate:
     def test_build_review_fields_include_fit_and_resume_context(self, engine, mock_profile_store):
         profile = mock_profile_store.load.return_value
-        profile.resume_path = "/tmp/garo_resume.pdf"
+        profile.resume_path = "/tmp/alex_resume.pdf"
         profile.authorized_to_work = True
         profile.requires_sponsorship = False
 
@@ -318,7 +318,7 @@ class TestReviewGate:
 
         app = FakeApplicationPage(
             submit_button_text="Submit application",
-            fields=[FakeFormField(current_value="garo@example.com")],
+            fields=[FakeFormField(current_value="alex@example.com")],
         )
 
         with patch(
@@ -339,7 +339,7 @@ class TestReviewGate:
         assert values["Fit Score"].startswith("82/100")
         assert "Matched Skills" in labels
         assert "Resume" in labels
-        assert values["Resume"] == "garo_resume.pdf"
+        assert values["Resume"] == "alex_resume.pdf"
         assert "Work Auth" in labels
         assert "Tailored Draft" in labels
         assert values["Tailored Draft"] == "resume_acme.pdf"

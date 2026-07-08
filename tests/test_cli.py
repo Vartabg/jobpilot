@@ -79,6 +79,27 @@ def test_resume_command_generates_output(tmp_path: Path):
     assert "ATS Resume Draft Ready" in result.stdout
 
 
+def test_missing_jd_path_errors_instead_of_treating_as_text(tmp_path: Path):
+    """A mistyped JD path must fail loudly, not become the resume's JD text."""
+    missing = tmp_path / "does_not_exist.txt"
+    result = runner.invoke(app, ["resume", str(missing), "--no-bro"])
+
+    assert result.exit_code == 1
+    assert "No such file" in result.stdout
+
+
+def test_looks_like_path_distinguishes_paths_from_jd_prose():
+    # Mistyped paths — should be treated as paths (and error if missing).
+    assert cli._looks_like_path("data/jds/entech_access_control.txt")
+    assert cli._looks_like_path("resume.md")
+    assert cli._looks_like_path("~/jobs/role.txt")
+    # Real pasted JD text — multi-word prose, must NOT be read as a path.
+    assert not cli._looks_like_path(
+        "Field service technician for building automation systems and low voltage wiring"
+    )
+    assert not cli._looks_like_path("Senior Engineer\nAcme\nRequirements")
+
+
 def test_board_command_renders_dashboard():
     with patch("jobpilot.ui.terminal_board.render_board") as render:
         result = runner.invoke(app, ["board", "--austin", "--limit", "5"])
