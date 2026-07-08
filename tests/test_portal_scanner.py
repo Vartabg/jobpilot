@@ -1,7 +1,10 @@
 """Tests for core/portal_scanner.py — job-board scanning and filtering."""
 
+import logging
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import requests
 
 from jobpilot.core.portal_scanner import PortalJob, PortalScanner, ScanTarget
 
@@ -91,6 +94,29 @@ class TestPortalScanner:
         assert len(jobs) == 2
         assert jobs[0].location == "New York City; Remote (United States); Remote (Canada)"
         assert jobs[1].location == "London"
+
+    @patch("jobpilot.core.portal_scanner.ADZUNA_APP_ID", "test_app_id")
+    @patch("jobpilot.core.portal_scanner.ADZUNA_API_KEY", "secret_api_key")
+    @patch("jobpilot.core.portal_scanner.requests.get")
+    def test_adzuna_http_error_logs_without_credentials(self, mock_get: MagicMock, caplog):
+        response = requests.Response()
+        response.status_code = 429
+        response.url = "https://api.adzuna.com/jobs?app_id=test_app_id&app_key=secret_api_key"
+        error = requests.HTTPError(
+            "429 Client Error: Too Many Requests for url: "
+            "https://api.adzuna.com/jobs?app_id=test_app_id&app_key=secret_api_key",
+            response=response,
+        )
+        mock_get.return_value = MagicMock(raise_for_status=MagicMock(side_effect=error))
+
+        scanner = PortalScanner()
+        with caplog.at_level(logging.WARNING, logger="jobpilot.jobpilot.core.portal_scanner"):
+            jobs = scanner.scan_adzuna("field service technician")
+
+        assert jobs == []
+        assert "HTTP 429" in caplog.text
+        assert "secret_api_key" not in caplog.text
+        assert "app_key" not in caplog.text
 
     def test_save_report_writes_json(self, tmp_path: Path):
         scanner = PortalScanner(keywords=["python"])

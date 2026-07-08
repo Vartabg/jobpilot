@@ -15,7 +15,7 @@ import subprocess
 from dataclasses import dataclass, field
 from html import escape
 from pathlib import Path
-from typing import Optional, cast
+from typing import cast
 
 from jobpilot.core import llm_client
 from jobpilot.core.bro_client import is_bro_running, query_rag
@@ -26,7 +26,79 @@ from jobpilot.core.profile_store import ProfileStore, UserProfile, get_profile_s
 log = get_logger(__name__)
 
 OUTPUT_DIR = Path(__file__).parent.parent / "data" / "resumes"
+RESUME_SOURCE_DIR = OUTPUT_DIR
 LATEST_DRAFT_FILENAME = "latest_draft.json"
+SETTINGS_FILENAME = "settings.json"
+
+# Resume "lanes" let a user keep more than one base resume (e.g. a hands-on
+# field-service version and a software version) and have the tailor pick the
+# right one per role. The mapping is NOT hardcoded here — it lives in the
+# user's own (gitignored) data/settings.json so the shipped code carries no
+# personal filenames:
+#
+#   "resume_lanes": {"facilities": "my_field_resume", "default": "my_sw_resume"}
+#
+# Values are file stems resolved against RESUME_SOURCE_DIR. With no mapping
+# configured the tailor simply uses the profile's resume_path.
+FACILITIES_LANE = "facilities"
+DEFAULT_LANE = "default"
+
+
+def _load_resume_lanes(data_dir: Path | None) -> dict[str, str]:
+    """Load the optional ``resume_lanes`` mapping from ``<data_dir>/settings.json``.
+
+    Returns an empty mapping when the file, the key, or the value is missing or
+    malformed — the tailor then falls back to the profile's ``resume_path``.
+    """
+    if data_dir is None:
+        return {}
+    path = Path(data_dir) / SETTINGS_FILENAME
+    try:
+        data = json.loads(path.read_text())
+    except Exception:
+        return {}
+    lanes = data.get("resume_lanes") if isinstance(data, dict) else None
+    if not isinstance(lanes, dict):
+        return {}
+    return {str(k): str(v) for k, v in lanes.items() if v}
+
+
+FACILITIES_STRONG_SIGNALS = (
+    "field service",
+    "service technician",
+    "field technician",
+    "field engineer",
+    "maintenance technician",
+    "building automation",
+    "bms",
+    "biomedical equipment",
+    "medical equipment",
+    "ev charging",
+    "evse",
+    "low voltage",
+    "electro-mechanical",
+    "electromechanical",
+    "security systems",
+    "x-ray",
+    "trace detection",
+    "airport equipment",
+    "installation technician",
+    "controls technician",
+)
+FACILITIES_WEAK_SIGNALS = (
+    "hardware",
+    "mechanical",
+    "electrical",
+    "facilities",
+    "hvac",
+    "plc",
+    "scada",
+    "onsite service",
+    "commissioning",
+    "installation",
+    "repair",
+    "troubleshooting",
+)
 
 
 @dataclass
@@ -35,8 +107,8 @@ class ResumeDraftResult:
 
     output_path: Path
     fit_result: JobFitResult
-    html_path: Optional[Path] = None
-    pdf_path: Optional[Path] = None
+    html_path: Path | None = None
+    pdf_path: Path | None = None
     matched_skills: list[str] = field(default_factory=lambda: cast(list[str], []))
     summary_lines: list[str] = field(default_factory=lambda: cast(list[str], []))
     highlight_bullets: list[str] = field(default_factory=lambda: cast(list[str], []))
@@ -48,14 +120,22 @@ class ResumeTailor:
 
     def __init__(
         self,
-        profile_store: Optional[ProfileStore] = None,
+        profile_store: ProfileStore | None = None,
         *,
-        output_dir: Optional[Path] = None,
+        output_dir: Path | None = None,
         use_bro: bool = True,
+        resume_lanes: dict[str, str] | None = None,
     ) -> None:
         self.profile_store = profile_store or get_profile_store()
         self.output_dir = output_dir or OUTPUT_DIR
         self.use_bro = use_bro
+        # Lane→stem mapping. Explicit arg wins (used by tests); otherwise load
+        # from the profile store's own data dir so it stays co-located with the
+        # user's private config and test runs stay hermetic.
+        if resume_lanes is not None:
+            self.resume_lanes = resume_lanes
+        else:
+            self.resume_lanes = _load_resume_lanes(getattr(self.profile_store, "data_dir", None))
         self.scorer = JobScorer(profile_store=self.profile_store, use_bro=use_bro)
 
     def generate_from_text(
@@ -64,7 +144,7 @@ class ResumeTailor:
         *,
         title: str = "",
         company: str = "",
-        output_path: Optional[Path] = None,
+        output_path: Path | None = None,
         export_html: bool = True,
         export_pdf: bool = False,
     ) -> ResumeDraftResult:
@@ -81,7 +161,7 @@ class ResumeTailor:
         self,
         fit_result: JobFitResult,
         *,
-        output_path: Optional[Path] = None,
+        output_path: Path | None = None,
         export_html: bool = True,
         export_pdf: bool = False,
     ) -> ResumeDraftResult:
@@ -97,12 +177,13 @@ class ResumeTailor:
         self,
         fit_result: JobFitResult,
         *,
-        output_path: Optional[Path] = None,
+        output_path: Path | None = None,
         export_html: bool = True,
         export_pdf: bool = False,
     ) -> ResumeDraftResult:
         profile = self.profile_store.load()
-        resume_text = self._load_resume_text(profile.resume_path)
+        resume_path = self._select_resume_source(profile, fit_result)
+        resume_text = self._load_resume_text(resume_path)
         summary_lines = self._build_summary_lines(profile, fit_result, resume_text)
         highlight_bullets = self._build_highlights(profile, fit_result, resume_text)
         keywords = self._build_keywords(fit_result)
@@ -119,8 +200,8 @@ class ResumeTailor:
         target_path.parent.mkdir(parents=True, exist_ok=True)
         target_path.write_text(rendered)
 
-        html_path: Optional[Path] = None
-        pdf_path: Optional[Path] = None
+        html_path: Path | None = None
+        pdf_path: Path | None = None
         if export_html or export_pdf:
             html_content = self._render_html(
                 profile,
@@ -164,11 +245,29 @@ class ResumeTailor:
         role = parsed.title or profile.current_title or "Software Engineer"
         years = profile.years_of_experience
         company = parsed.company or "the company"
-        summary_lines = [
-            f"{role} with {years}+ years building production software and user-facing workflows." if years else f"{role} with hands-on experience shipping production software.",
-            f"Strong alignment to {company} needs across {', '.join(matched)}." if matched else f"Targeting {company} with a focus on practical delivery and fast ramp-up.",
-            self._work_auth_line(profile),
-        ]
+        if self._is_facilities_target(fit_result):
+            facilities_focus = (
+                ", ".join(matched)
+                if matched
+                else "electrical troubleshooting, field service operations, customer support, and service documentation"
+            )
+            summary_lines = [
+                f"{role} with {years}+ years across electronics, field service, customer-site troubleshooting, and technical operations."
+                if years
+                else f"{role} with hands-on electronics, field service, and customer-site troubleshooting experience.",
+                f"Strong alignment to {company} needs across {facilities_focus}.",
+                self._work_auth_line(profile),
+            ]
+        else:
+            summary_lines = [
+                f"{role} with {years}+ years building production software and user-facing workflows."
+                if years
+                else f"{role} with hands-on experience shipping production software.",
+                f"Strong alignment to {company} needs across {', '.join(matched)}."
+                if matched
+                else f"Targeting {company} with a focus on practical delivery and fast ramp-up.",
+                self._work_auth_line(profile),
+            ]
 
         resume_snippets = self._extract_resume_snippets(resume_text, limit=1)
         if resume_snippets:
@@ -213,13 +312,16 @@ class ResumeTailor:
         ))
 
         if not keywords:
-            requirement_words: list[str] = []
-            for item in parsed.requirements[:6]:
-                requirement_words.extend(
-                    word for word in re.findall(r"[A-Za-z][A-Za-z0-9+/.-]{2,}", item)
-                    if word.lower() not in {"with", "and", "the", "for", "you", "our"}
-                )
-            keywords = list(dict.fromkeys(requirement_words))
+            # Fall back to short requirement *phrases*, not individual words —
+            # "Document service reports" reads as a skill; "Document • service •
+            # reports" is word-salad on a resume.
+            phrases: list[str] = []
+            for item in parsed.requirements:
+                phrase = re.sub(r"\s+", " ", item).strip(" .;:-•*")
+                # Keep concise, skill-like phrases (drop long sentences).
+                if 2 <= len(phrase) <= 60 and len(phrase.split()) <= 7:
+                    phrases.append(phrase)
+            keywords = list(dict.fromkeys(phrases))
 
         return keywords[:12]
 
@@ -387,7 +489,7 @@ class ResumeTailor:
 """
 
     @staticmethod
-    def _export_pdf(html_content: str, pdf_path: Path) -> Optional[Path]:
+    def _export_pdf(html_content: str, pdf_path: Path) -> Path | None:
         """Render the styled HTML as a PDF via Playwright when available."""
         try:
             from playwright.sync_api import sync_playwright
@@ -451,14 +553,28 @@ class ResumeTailor:
     def _extract_resume_snippets(text: str, *, limit: int = 3) -> list[str]:
         snippets: list[str] = []
         for line in text.splitlines():
-            stripped = line.strip().lstrip("-•* ").strip()
+            raw = line.strip()
+            stripped = raw.lstrip("-•* ").strip()
             if not stripped or stripped.startswith("#"):
                 continue
-            if 35 <= len(stripped) <= 180:
-                snippets.append(stripped)
+            if raw.startswith("**") and raw.endswith("**") and ":" not in raw:
+                continue
+
+            cleaned = ResumeTailor._clean_resume_snippet(stripped)
+            if not cleaned or "@" in cleaned or "http" in cleaned.lower():
+                continue
+            if 35 <= len(cleaned) <= 320:
+                snippets.append(cleaned)
             if len(snippets) >= limit:
                 break
         return snippets
+
+    @staticmethod
+    def _clean_resume_snippet(text: str) -> str:
+        cleaned = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+        cleaned = re.sub(r"\*\*([^:*]+):\*\*\s*", r"\1: ", cleaned)
+        cleaned = cleaned.replace("**", "").replace("__", "")
+        return " ".join(cleaned.split()).strip()
 
     @staticmethod
     def _work_auth_line(profile: UserProfile) -> str:
@@ -467,6 +583,73 @@ class ResumeTailor:
         if profile.requires_sponsorship:
             return "Requires sponsorship; review job authorization requirements carefully."
         return "Review work authorization wording before submitting."
+
+    def _select_resume_source(self, profile: UserProfile, fit_result: JobFitResult) -> str:
+        """Choose the strongest local base resume for the target lane.
+
+        Lanes come from the user's ``resume_lanes`` config. With no config the
+        profile's ``resume_path`` is used unchanged.
+        """
+        lanes = self.resume_lanes
+
+        if self._is_facilities_target(fit_result):
+            stem = lanes.get(FACILITIES_LANE)
+            if stem:
+                facilities_resume = self._first_existing_resume_source(stem)
+                if facilities_resume:
+                    return str(facilities_resume)
+
+        default_stem = lanes.get(DEFAULT_LANE)
+        if default_stem and self._is_lane_managed_resume(profile.resume_path, lanes):
+            default_resume = self._first_existing_resume_source(default_stem)
+            if default_resume:
+                return str(default_resume)
+
+        return profile.resume_path
+
+    @staticmethod
+    def _is_facilities_target(fit_result: JobFitResult) -> bool:
+        parsed = fit_result.parsed_jd
+        text = " ".join(
+            filter(
+                None,
+                [
+                    parsed.title,
+                    parsed.company,
+                    parsed.raw_text,
+                    parsed.summary(),
+                    " ".join(parsed.skills),
+                    " ".join(parsed.requirements),
+                    " ".join(parsed.nice_to_haves),
+                ],
+            )
+        ).lower()
+
+        if any(signal in text for signal in FACILITIES_STRONG_SIGNALS):
+            return True
+
+        weak_matches = sum(1 for signal in FACILITIES_WEAK_SIGNALS if signal in text)
+        return weak_matches >= 2
+
+    @staticmethod
+    def _first_existing_resume_source(stem: str) -> Path | None:
+        for suffix in (".md", ".txt", ".pdf"):
+            candidate = RESUME_SOURCE_DIR / f"{stem}{suffix}"
+            if candidate.exists() and candidate.is_file():
+                return candidate
+        return None
+
+    @staticmethod
+    def _is_lane_managed_resume(resume_path: str, lanes: dict[str, str]) -> bool:
+        """True when the profile's resume is empty or is itself a lane resume.
+
+        In either case the tailor is free to swap in the default-lane resume;
+        a resume the user explicitly points at outside the lanes is left alone.
+        """
+        if not resume_path:
+            return True
+        stem = Path(resume_path).expanduser().stem
+        return stem in set(lanes.values())
 
     @staticmethod
     def _load_resume_text(resume_path: str) -> str:
@@ -576,7 +759,7 @@ class ResumeTailor:
             log.debug("Could not save latest tailored resume manifest: %s", exc)
 
     @staticmethod
-    def load_latest_draft_summary(output_dir: Optional[Path] = None) -> Optional[dict[str, object]]:
+    def load_latest_draft_summary(output_dir: Path | None = None) -> dict[str, object] | None:
         """Load the most recent tailored resume metadata if available."""
         manifest_path = (output_dir or OUTPUT_DIR) / LATEST_DRAFT_FILENAME
         if not manifest_path.exists():
