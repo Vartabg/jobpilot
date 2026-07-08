@@ -41,6 +41,7 @@ from jobpilot.core.job_scorer import JobScorer
 from jobpilot.core.portal_scanner import PortalScanner, ScanTarget
 from jobpilot.core.doctor import run_doctor
 from jobpilot.core.resume_tailor import ResumeTailor
+from jobpilot.core.interview_prep import InterviewPrepGenerator
 from jobpilot.core.application_answerer import ApplicationAnswerer, TRUE_ACCOUNTS_PATH
 from jobpilot.learning.action_recorder import get_action_recorder
 
@@ -861,6 +862,91 @@ def resume(
         export_pdf=pdf,
     )
     _render_resume_result(result, label)
+
+
+def _render_prep_result(result, source_label: str) -> None:
+    """Display the output of an interview prep brief."""
+    parsed = result.fit_result.parsed_jd
+    console.print(Panel.fit(
+        f"[bold cyan]Interview Brief Ready[/bold cyan]\n"
+        f"[white]{parsed.title or 'Target role'} @ {parsed.company or 'Target company'}[/white]\n"
+        f"[bold]{result.fit_result.score}/100[/bold] • {result.fit_result.recommendation}\n"
+        f"[dim]{source_label}\nHTML: {result.output_path}[/dim]",
+        border_style="cyan",
+    ))
+    if result.likely_questions:
+        console.print("[green]Likely questions:[/green]")
+        for q in result.likely_questions[:3]:
+            console.print(f"  [green]•[/green] {q}")
+    for note in result.gap_notes[:2]:
+        console.print(f"[yellow]⚠ {note}[/yellow]")
+
+
+async def _prep_active_page(
+    port: int,
+    *,
+    output: Optional[Path],
+    use_bro: bool,
+    export_pdf: bool,
+) -> bool:
+    """Generate an interview brief from the active LinkedIn job page."""
+    console.print("\n[cyan]Connecting to Chrome for interview prep...[/cyan]")
+    bridge = await connect_to_chrome(port)
+
+    if not bridge:
+        console.print("\n[yellow]💡 Tip: Run ./scripts/launch_chrome.sh first[/yellow]")
+        return False
+
+    try:
+        await bridge.get_active_page()
+        page_info = await bridge.get_page_info()
+        if not page_info.is_linkedin:
+            console.print("[yellow]Open a LinkedIn job listing first, or pass JD text/file directly.[/yellow]")
+            return False
+
+        parsed_jd = await JDParser(bridge.page).parse()
+    finally:
+        await bridge.disconnect()
+
+    if not parsed_jd or not (parsed_jd.raw_text or parsed_jd.summary()):
+        console.print("[yellow]Could not read the active job description.[/yellow]")
+        return False
+
+    fit_result = JobScorer(use_bro=use_bro).score_parsed_jd(parsed_jd)
+    generator = InterviewPrepGenerator(use_bro=use_bro)
+    result = generator.generate_from_fit_result(fit_result, output_path=output, export_pdf=export_pdf)
+    _render_prep_result(result, page_info.url)
+    return True
+
+
+@app.command()
+def prep(
+    source: Optional[str] = typer.Argument(
+        None,
+        help="Job description text or a path to a JD text file. Omit to use the active LinkedIn page.",
+    ),
+    port: int = typer.Option(9222, help="Chrome debugging port for --active mode"),
+    active: bool = typer.Option(False, "--active", help="Use the active LinkedIn job tab in Chrome"),
+    output: Optional[Path] = typer.Option(None, "--output", "-o", help="Optional HTML output path for the brief"),
+    pdf: bool = typer.Option(False, "--pdf", help="Also export a PDF version using Playwright/Chromium"),
+    bro: bool = typer.Option(True, "--bro/--no-bro", help="Use the AI backend (local Bro or Gemini) to sharpen the brief when available"),
+):
+    """Generate a one-page interview prep brief for a target role."""
+    if active or not source:
+        if not asyncio.run(
+            _prep_active_page(port, output=output, use_bro=bro, export_pdf=pdf)
+        ):
+            raise typer.Exit(1)
+        return
+
+    if source.startswith(("http://", "https://")):
+        console.print("[yellow]Open the job in Chrome and run `jobpilot prep --active`, or paste the JD text directly.[/yellow]")
+        raise typer.Exit(1)
+
+    text, label = _load_score_source(source)
+    generator = InterviewPrepGenerator(use_bro=bro)
+    result = generator.generate_from_text(text, output_path=output, export_pdf=pdf)
+    _render_prep_result(result, label)
 
 
 @app.command()
