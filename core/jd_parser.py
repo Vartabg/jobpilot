@@ -31,9 +31,18 @@ _NICE_TO_HAVE_HEADERS = re.compile(
     re.IGNORECASE,
 )
 
+# Only match dollar amounts that actually look like compensation — comma-grouped
+# thousands ($120,000), k-suffixed ($120k), or an explicit hourly rate ($50/hr).
+# This avoids capturing bare amounts like "$5 fee", "$20 gift card", or "$5M ARR".
 _SALARY_PATTERN = re.compile(
-    r"\$[\d,]+(?:\s*[-–]\s*\$[\d,]+)?(?:\s*/?\s*(?:yr|year|annually|hr|hour))?",
-    re.IGNORECASE,
+    r"""
+    \$\s?\d{1,3}(?:,\d{3})+(?:\s*[-–—]\s*\$?\s?\d{1,3}(?:,\d{3})+)?(?:\s*/?\s*(?:yr|year|annually|hr|hour))?
+    |
+    \$\s?\d{2,3}\s?[kK]\b(?:\s*[-–—]\s*\$?\s?\d{2,3}\s?[kK]\b)?(?:\s*/?\s*(?:yr|year|annually|hr|hour))?
+    |
+    \$\s?\d{2,3}(?:\.\d+)?\s*/\s*(?:hr|hour)
+    """,
+    re.IGNORECASE | re.VERBOSE,
 )
 
 _LOCATION_KEYWORDS = {

@@ -340,7 +340,7 @@ class ApplicationAnswerer:
             {question}
 
             TRUE ACCOUNTS:
-            {"\n\n".join(account_blocks)}
+            {(chr(10) * 2).join(account_blocks)}
         """).strip()
 
     def _fallback_answer(
