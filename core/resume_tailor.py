@@ -28,8 +28,41 @@ log = get_logger(__name__)
 OUTPUT_DIR = Path(__file__).parent.parent / "data" / "resumes"
 RESUME_SOURCE_DIR = OUTPUT_DIR
 LATEST_DRAFT_FILENAME = "latest_draft.json"
-FACILITIES_RESUME_STEM = "garo_facilities_v1"
-SOLUTIONS_RESUME_STEM = "garo_solutions_v1"
+SETTINGS_FILENAME = "settings.json"
+
+# Resume "lanes" let a user keep more than one base resume (e.g. a hands-on
+# field-service version and a software version) and have the tailor pick the
+# right one per role. The mapping is NOT hardcoded here — it lives in the
+# user's own (gitignored) data/settings.json so the shipped code carries no
+# personal filenames:
+#
+#   "resume_lanes": {"facilities": "my_field_resume", "default": "my_sw_resume"}
+#
+# Values are file stems resolved against RESUME_SOURCE_DIR. With no mapping
+# configured the tailor simply uses the profile's resume_path.
+FACILITIES_LANE = "facilities"
+DEFAULT_LANE = "default"
+
+
+def _load_resume_lanes(data_dir: Path | None) -> dict[str, str]:
+    """Load the optional ``resume_lanes`` mapping from ``<data_dir>/settings.json``.
+
+    Returns an empty mapping when the file, the key, or the value is missing or
+    malformed — the tailor then falls back to the profile's ``resume_path``.
+    """
+    if data_dir is None:
+        return {}
+    path = Path(data_dir) / SETTINGS_FILENAME
+    try:
+        data = json.loads(path.read_text())
+    except Exception:
+        return {}
+    lanes = data.get("resume_lanes") if isinstance(data, dict) else None
+    if not isinstance(lanes, dict):
+        return {}
+    return {str(k): str(v) for k, v in lanes.items() if v}
+
+
 FACILITIES_STRONG_SIGNALS = (
     "field service",
     "service technician",
@@ -91,10 +124,18 @@ class ResumeTailor:
         *,
         output_dir: Path | None = None,
         use_bro: bool = True,
+        resume_lanes: dict[str, str] | None = None,
     ) -> None:
         self.profile_store = profile_store or get_profile_store()
         self.output_dir = output_dir or OUTPUT_DIR
         self.use_bro = use_bro
+        # Lane→stem mapping. Explicit arg wins (used by tests); otherwise load
+        # from the profile store's own data dir so it stays co-located with the
+        # user's private config and test runs stay hermetic.
+        if resume_lanes is not None:
+            self.resume_lanes = resume_lanes
+        else:
+            self.resume_lanes = _load_resume_lanes(getattr(self.profile_store, "data_dir", None))
         self.scorer = JobScorer(profile_store=self.profile_store, use_bro=use_bro)
 
     def generate_from_text(
@@ -543,18 +584,26 @@ class ResumeTailor:
             return "Requires sponsorship; review job authorization requirements carefully."
         return "Review work authorization wording before submitting."
 
-    @classmethod
-    def _select_resume_source(cls, profile: UserProfile, fit_result: JobFitResult) -> str:
-        """Choose the strongest local base resume for the target lane."""
-        if cls._is_facilities_target(fit_result):
-            facilities_resume = cls._first_existing_resume_source(FACILITIES_RESUME_STEM)
-            if facilities_resume:
-                return str(facilities_resume)
+    def _select_resume_source(self, profile: UserProfile, fit_result: JobFitResult) -> str:
+        """Choose the strongest local base resume for the target lane.
 
-        if cls._is_known_garo_resume(profile.resume_path):
-            solutions_resume = cls._first_existing_resume_source(SOLUTIONS_RESUME_STEM)
-            if solutions_resume:
-                return str(solutions_resume)
+        Lanes come from the user's ``resume_lanes`` config. With no config the
+        profile's ``resume_path`` is used unchanged.
+        """
+        lanes = self.resume_lanes
+
+        if self._is_facilities_target(fit_result):
+            stem = lanes.get(FACILITIES_LANE)
+            if stem:
+                facilities_resume = self._first_existing_resume_source(stem)
+                if facilities_resume:
+                    return str(facilities_resume)
+
+        default_stem = lanes.get(DEFAULT_LANE)
+        if default_stem and self._is_lane_managed_resume(profile.resume_path, lanes):
+            default_resume = self._first_existing_resume_source(default_stem)
+            if default_resume:
+                return str(default_resume)
 
         return profile.resume_path
 
@@ -591,11 +640,16 @@ class ResumeTailor:
         return None
 
     @staticmethod
-    def _is_known_garo_resume(resume_path: str) -> bool:
+    def _is_lane_managed_resume(resume_path: str, lanes: dict[str, str]) -> bool:
+        """True when the profile's resume is empty or is itself a lane resume.
+
+        In either case the tailor is free to swap in the default-lane resume;
+        a resume the user explicitly points at outside the lanes is left alone.
+        """
         if not resume_path:
             return True
         stem = Path(resume_path).expanduser().stem
-        return stem in {FACILITIES_RESUME_STEM, SOLUTIONS_RESUME_STEM}
+        return stem in set(lanes.values())
 
     @staticmethod
     def _load_resume_text(resume_path: str) -> str:
