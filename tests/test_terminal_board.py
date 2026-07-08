@@ -51,7 +51,7 @@ def test_build_board_renderable_with_mocks(monkeypatch):
         status="queued",
         psyche_score=7,
     )
-    profile = SimpleNamespace(first_name="Garo", last_name="Vartabedian", city="Austin", state="TX")
+    profile = SimpleNamespace(first_name="Alex", last_name="Sample", city="Rivertown", state="OH")
     tracker = SimpleNamespace(
         get_stats=lambda: {"total": 1, "submitted": 0, "interview": 0, "in_progress": 0},
         get_recent=lambda limit: [],
