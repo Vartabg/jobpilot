@@ -69,6 +69,43 @@ def test_geo_excludes_specific_other_city_onsite():
     assert scorer._geo_eligible(g, home_tags=_HOME, allow_remote=True) is False
 
 
+def test_geo_excludes_nyc_even_when_body_says_remote():
+    """Bug: soft 'remote'/'distributed' in the body used to rescue NYC pins."""
+    g = _gig(
+        title="Forward Deployed Engineer",
+        location="New York, NY",
+        description="Hybrid / remote-friendly team. Distributed product org.",
+    )
+    assert scorer._geo_eligible(g, home_tags=_HOME, allow_remote=True) is False
+
+
+def test_geo_excludes_nyc_in_title_with_remote_location():
+    g = _gig(
+        title="AI Engineer — NYC",
+        location="Remote",
+        description="Remote role for candidates in the New York area.",
+    )
+    assert scorer._geo_eligible(g, home_tags=_HOME, allow_remote=True) is False
+
+
+def test_geo_excludes_remote_nyc_location_string():
+    g = _gig(
+        title="Solutions Engineer",
+        location="Remote - New York, NY",
+        description="Fully remote but must be based in NYC for meetups.",
+    )
+    assert scorer._geo_eligible(g, home_tags=_HOME, allow_remote=True) is False
+
+
+def test_geo_keeps_austin_onsite():
+    g = _gig(
+        title="Implementation Engineer",
+        location="Austin, TX",
+        description="Onsite in Austin.",
+    )
+    assert scorer._geo_eligible(g, home_tags=_HOME, allow_remote=True) is True
+
+
 def test_geo_keeps_unknown_location():
     g = _gig(location="See post", description="great team building things")
     assert scorer._geo_eligible(g, home_tags=_HOME, allow_remote=True) is True

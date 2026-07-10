@@ -157,6 +157,15 @@ def _phrase_in(text: str, phrase: str) -> bool:
 
 
 _REMOTE_TOKENS = ("remote", "anywhere", "distributed", "worldwide", "global")
+# Strong "you can work from anywhere" signals — not soft "remote interviews".
+_FULLY_REMOTE_RE = re.compile(
+    r"\b("
+    r"fully\s+remote|remote[- ]first|work\s+from\s+anywhere|"
+    r"remote\s+us|remote,?\s+us|us[- ]remote|remote\s+within\s+the\s+us|"
+    r"distributed\s+(?:team|company)|remote\s+worldwide"
+    r")\b",
+    re.IGNORECASE,
+)
 # A location requirement naming one of these is compatible with a US/home-metro
 # applicant ("must live in the US"); anything else ("must live in Canada")
 # means out of reach. Word-boundary so "us" matches the US but not Russia.
@@ -171,7 +180,23 @@ _RESTRICTION_RE = re.compile(
     r"must\s+(?:live|reside|be\s+located|be\s+based|work)\s+(?:in|from|near|within)?\s*([a-z .,/&'-]{2,40})",
     re.IGNORECASE,
 )
-_UNKNOWN_LOC = ("", "see post", "not specified", "n/a", "unspecified")
+_UNKNOWN_LOC = ("", "see post", "not specified", "n/a", "unspecified", "remote", "worldwide")
+
+# Non-home US metros commonly used as location pins. Matched on title +
+# location + URL only (not full description — HQ noise). An NYC/SF pin must
+# not be rescued by a soft "remote" / "distributed" mention in the body.
+_OTHER_US_METRO_RE = re.compile(
+    r"\b("
+    r"new\s*york(?:\s*city)?|\bnyc\b|brooklyn|manhattan|queens|"
+    r"san\s*francisco|sf\s*bay|bay\s*area|"
+    r"los\s*angeles|"
+    r"seattle|chicago|boston|denver|miami|atlanta|"
+    r"washington\s*d\.?c\.?|arlington,?\s*va|"
+    r"philadelphia|phoenix|portland|san\s*diego|"
+    r"jersey\s*city|hoboken"
+    r")\b",
+    re.IGNORECASE,
+)
 
 # Region locks visible in title / URL / location even when the feed hardcodes
 # "Remote". Intentionally NOT full-description: body text often names HQ
@@ -202,40 +227,74 @@ _REGION_LOCK_RES = (
 )
 
 
+def _pin_blob(gig: Gig) -> str:
+    """Title + location + URLs — where market pins usually live."""
+    return " ".join([
+        gig.title or "",
+        gig.location or "",
+        gig.url or "",
+        gig.apply_url or "",
+    ]).lower()
+
+
+def _is_home_blob(s: str, home_tags: list[str]) -> bool:
+    return any(t in s for t in home_tags)
+
+
+def _other_us_metro_pinned(gig: Gig, *, home_tags: list[str]) -> bool:
+    """True when title/location/URL pins a non-home US metro (e.g. NYC, SF)."""
+    blob = _pin_blob(gig)
+    if _is_home_blob(blob, home_tags):
+        return False
+    return bool(_OTHER_US_METRO_RE.search(blob))
+
+
 def _region_locked_away(gig: Gig, *, home_tags: list[str]) -> bool:
     """True when title/URL/location pins the role to a non-home market.
 
     Used only for high-precision markers (parenthetical markets, *-only /
     *-based, slug/title market pins). Does not scan the full description.
     """
-    blob = " ".join([
-        gig.title or "",
-        gig.url or "",
-        gig.location or "",
-        gig.apply_url or "",
-    ]).lower()
-    if any(t in blob for t in home_tags):
+    blob = _pin_blob(gig)
+    if _is_home_blob(blob, home_tags):
         return False
-    # Explicit US / home-compatible framing in the same fields wins.
+    # Explicit US / home-compatible framing in the same fields wins only when
+    # there is no competing non-home metro pin (e.g. "Remote US" ok;
+    # "NYC — US" still NYC-pinned).
+    if _OTHER_US_METRO_RE.search(blob):
+        return True
     if re.search(r"\b(u\.?s\.?a?|united states|north america|texas|tx)\b", blob):
         return False
     return any(rx.search(blob) for rx in _REGION_LOCK_RES)
 
 
+def _location_is_remote(loc: str) -> bool:
+    loc = (loc or "").lower().strip()
+    if not loc or loc in _UNKNOWN_LOC:
+        return False
+    if _OTHER_US_METRO_RE.search(loc):
+        return False  # "Remote - NYC" / "New York (Remote)" still metro-pinned
+    return any(t in loc for t in _REMOTE_TOKENS) or bool(_FULLY_REMOTE_RE.search(loc))
+
+
 def _geo_eligible(gig: Gig, *, home_tags: list[str], allow_remote: bool) -> bool:
-    """True when a gig is reachable for an applicant who wants home-metro or
-    remote roles only. Conservative: keeps remote/home/unknown, and only drops
-    a role on clear evidence it's tied elsewhere (an explicit 'must live in
-    <non-home>' requirement, a title/URL region lock, or a specific non-home
-    onsite location)."""
+    """True when a gig is reachable for home-metro or *fully* remote roles.
+
+    Non-home metro pins (NYC, SF, …) in title/location/URL are excluded even
+    if the description casually says "remote" or "distributed". Soft remote
+    keywords no longer rescue a city-pinned role.
+    """
     loc = (gig.location or "").lower().strip()
+    pin = _pin_blob(gig)
     text = " ".join([gig.location or "", gig.title or "", gig.description or ""]).lower()
 
-    def _is_home(s: str) -> bool:
-        return any(t in s for t in home_tags)
-
-    if _is_home(text):
+    # Home metro in title/location wins.
+    if _is_home_blob(pin, home_tags):
         return True
+
+    # Non-home US metro pin (NYC job when home is Austin) — hard no.
+    if _other_us_metro_pinned(gig, home_tags=home_tags):
+        return False
 
     if _region_locked_away(gig, home_tags=home_tags):
         return False
@@ -243,13 +302,27 @@ def _geo_eligible(gig: Gig, *, home_tags: list[str], allow_remote: bool) -> bool
     # Explicit hard location requirement → judge by the region it names.
     for m in _RESTRICTION_RE.finditer(text):
         region = m.group(1)
-        if _is_home(region) or _HOME_OK_RE.search(region):
-            return True  # requirement is satisfiable (US / home / remote)
+        if _is_home_blob(region, home_tags) or _HOME_OK_RE.search(region):
+            # "must live in NYC" is not home-ok for Austin even if "remote" elsewhere
+            if _OTHER_US_METRO_RE.search(region) and not _is_home_blob(region, home_tags):
+                return False
+            return True
         return False     # requirement names somewhere else → out of reach
 
-    if allow_remote and any(t in text for t in _REMOTE_TOKENS):
-        return True
-    if loc in _UNKNOWN_LOC or any(tok in loc for tok in ("united states", "usa", "us")):
+    # Fully remote (location field or strong phrasing) — not soft body keywords.
+    if allow_remote:
+        if _location_is_remote(loc):
+            return True
+        if _FULLY_REMOTE_RE.search(text) and not _OTHER_US_METRO_RE.search(pin):
+            return True
+        # Bare location "Remote" with no metro pin
+        if loc in ("remote", "worldwide", "global", "anywhere") or loc.startswith("remote "):
+            if not _OTHER_US_METRO_RE.search(pin):
+                return True
+
+    if loc in _UNKNOWN_LOC or any(
+        re.search(rf"\b{re.escape(tok)}\b", loc) for tok in ("united states", "usa")
+    ):
         return True
     # A specific, non-home, non-remote location → onsite elsewhere.
     return False
