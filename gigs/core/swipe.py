@@ -30,17 +30,25 @@ from jobpilot.gigs.core.store import filter_new, mark_seen, unmark_seen
 
 
 def build_queue(
-    *, limit: int = 40, min_score: int = 55, fresh_only: bool = False,
+    *, limit: int | None = None, min_score: int | None = None, fresh_only: bool = False,
     on_progress: Optional[Callable[[str], None]] = None,
 ) -> list[Gig]:
-    """Ranked roles to swipe — home-metro/remote + currency-aware (same filters
-    as the digest), minus anything already DECIDED in the pipeline.
+    """Ranked roles to swipe — same search gate as `gigs now` (prefs.search),
+    minus anything already DECIDED in the pipeline.
 
     fresh_only defaults False so the swiper shows every undecided role: the
     digest marks its best finds seen, so fresh_only=True would hide exactly the
     high-fit jobs sitting in pipeline.md as `new`. 'Decided' (the pipeline-status
     gate) is what keeps already-handled roles out — not seen.json.
     """
+    cfg = preferences.search_config()
+    if min_score is None:
+        min_score = int(cfg.get("min_score", 60))
+    if limit is None:
+        limit = max(int(cfg.get("top_n", 12)) * 3, 40)
+    contract_first = bool(cfg.get("contract_first", False))
+    drop_rigid = bool(cfg.get("drop_rigid_schedule", True))
+
     gigs, _results = collect_all(on_progress=on_progress)
     if fresh_only:
         fresh = set(filter_new([g.id for g in gigs]))
@@ -50,7 +58,7 @@ def build_queue(
     gigs = [g for g in gigs if g.id not in decided]
     ranked = filter_and_rank(
         gigs, min_score=min_score, top_n=limit,
-        contract_first=True, drop_rigid_schedule=True,
+        contract_first=contract_first, drop_rigid_schedule=drop_rigid,
     )
     # Resolve WWR listings to a real apply target (mailto/ATS/careers) so the
     # Apply tap doesn't dead-end on the paywalled aggregator page. Network
