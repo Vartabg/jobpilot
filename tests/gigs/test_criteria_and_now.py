@@ -28,7 +28,7 @@ def test_format_criteria_report_includes_pay_and_resumes(monkeypatch) -> None:
     monkeypatch.setattr(preferences, "load", lambda path=None: prefs)
 
     text = preferences.format_criteria_report()
-    assert "115,000" in text or "115000" in text.replace(",", "")
+    assert "not a hard filter" in text
     assert "garo_solutions_v1.pdf" in text
     assert "min_score=60" in text
     assert "austin" in text.lower()

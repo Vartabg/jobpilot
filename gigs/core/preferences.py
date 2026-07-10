@@ -93,7 +93,7 @@ DEFAULTS: dict[str, Any] = {
     },
     # Active job-search gate used by `gigs now` / `gigs criteria` and as
     # defaults for digest ranking. Keep in sync with the job-queue thesis
-    # (Austin/remote, mid-level, floor pay) — not seniority theater.
+    # (Austin/remote, mid-level) — pay is informational, not a hard gate.
     "search": {
         "min_score": 60,
         "top_n": 12,
@@ -114,7 +114,7 @@ DEFAULTS: dict[str, Any] = {
             "Austin-area or fully remote only — not relocating",
             "Aim mid, not Senior/Staff/Lead SWE bars",
             "No company SWE tenure — portfolio + field/customer track",
-            "Floor ~$115k FTE / equivalent; small-mid builder teams preferred",
+            "Pay is not a hard filter — great-fit roles pass even if pay is low or unstated",
         ],
     },
     # Copy-paste sources for ATS essay questions ("Tell us about your
@@ -311,10 +311,9 @@ def format_criteria_report(prefs: dict[str, Any] | None = None) -> str:
     resumes = resumes_map(p)
     lines = [
         "=== Active job-search criteria ===",
-        f"Pay floor:  ${pay.get('floor_annual_usd', 0):,.0f}/yr  ·  "
-        f"${pay.get('floor_hourly_usd', 0):.0f}/hr",
-        f"Pay target: ${pay.get('target_annual_usd', 0):,.0f}/yr  ·  "
-        f"${pay.get('target_hourly_usd', 0):.0f}/hr",
+        f"Pay:        not a hard filter (crib anchor only)  ·  "
+        f"target ${pay.get('target_annual_usd', 0):,.0f}/yr / "
+        f"${pay.get('target_hourly_usd', 0):.0f}/hr when discussing rate",
         f"Location:   home tags={loc.get('home_metro_tags') or '—'}  ·  "
         f"require_home_or_remote={loc.get('require_home_or_remote')}  ·  "
         f"allow_remote={loc.get('allow_remote')}",
