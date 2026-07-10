@@ -84,10 +84,50 @@ def _apply_target(gig: Gig) -> tuple[str, bool]:
     return base, False
 
 
+def criteria_pills() -> list[str]:
+    """Short gate labels for the mobile header (not the full CLI report)."""
+    loc = preferences.location_config()
+    search = preferences.search_config()
+    pills: list[str] = []
+    tags = loc.get("home_metro_tags") or []
+    if tags:
+        pills.append(str(tags[0]).title() if isinstance(tags[0], str) else str(tags[0]))
+    if loc.get("require_home_or_remote"):
+        pills.append("Home/remote only")
+    elif loc.get("allow_remote"):
+        pills.append("Remote OK")
+    pills.append(f"Score ≥{search.get('min_score', 60)}")
+    if search.get("drop_rigid_schedule"):
+        pills.append("Anti 9–5")
+    if search.get("contract_first"):
+        pills.append("Contract first")
+    pills.append("Pay not filtered")
+    titles = search.get("target_titles") or []
+    if titles:
+        # First two targets so the strip stays scannable on a phone.
+        pills.append(" · ".join(str(t) for t in titles[:2]))
+    return pills
+
+
+def session_meta() -> dict:
+    """Session-level payload for the phone (criteria + default resume)."""
+    resumes = preferences.resumes_map()
+    return {
+        "criteria_pills": criteria_pills(),
+        "default_resume": resumes.get("default") or "",
+        "resumes": resumes,
+        "notes": list(preferences.search_config().get("notes") or []),
+        "on_demand": True,
+    }
+
+
 def card(gig: Gig) -> dict:
-    """Everything the phone card needs for one gig."""
+    """Everything the phone card needs for one gig — including crib paste pack."""
+    from jobpilot.gigs.core.crib import mobile_crib
+
     brief = build_revenue_brief(gig)
     target, is_mailto = _apply_target(gig)
+    resume = preferences.resume_for(brief.offer)
     return {
         "id": gig.id,
         "company": gig.company or gig.source,
@@ -101,11 +141,12 @@ def card(gig: Gig) -> dict:
         "draft": email_body(gig),
         "apply_target": target,
         "is_mailto": is_mailto,
-        "resume": preferences.resume_for(brief.offer),
+        "resume": resume,
         "source_url": gig.url,
         "source": gig.source,
         "posted_age_days": _posted_age_days(gig.posted_at),
         "tags": (gig.tags or [])[:6],
+        "crib": mobile_crib(gig),
     }
 
 
