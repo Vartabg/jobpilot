@@ -21,6 +21,7 @@ from jobpilot.gigs.core.pipeline import Row
 from jobpilot.gigs.core.proposals import (
     build_revenue_brief,
     contains_placeholder,
+    draft_mode,
     email_body,
     email_subject,
 )
@@ -125,9 +126,12 @@ def card(gig: Gig) -> dict:
     """Everything the phone card needs for one gig — including crib paste pack."""
     from jobpilot.gigs.core.crib import mobile_crib
 
+    from jobpilot.gigs.core.proposals import draft_mode
+
     brief = build_revenue_brief(gig)
     target, is_mailto = _apply_target(gig)
     resume = preferences.resume_for(brief.offer)
+    mode = draft_mode(gig)
     return {
         "id": gig.id,
         "company": gig.company or gig.source,
@@ -137,6 +141,7 @@ def card(gig: Gig) -> dict:
         "location": gig.location or "—",
         "why": [r for r in (gig.fit_reasons or [])[:4]],
         "offer": brief.offer,
+        "draft_mode": mode,  # "fte" | "contract" — phone shows which pitch
         "subject": email_subject(gig),
         "draft": email_body(gig),
         "apply_target": target,
