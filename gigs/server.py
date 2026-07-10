@@ -40,6 +40,12 @@ def index() -> HTMLResponse:
     return HTMLResponse(_PAGE.read_text())
 
 
+@app.get("/api/meta")
+def meta() -> JSONResponse:
+    """Lightweight criteria + resume map for the phone start screen (no scan)."""
+    return JSONResponse(swipe.session_meta())
+
+
 @app.get("/api/queue")
 def queue(refresh: int = 0) -> JSONResponse:
     """Return the swipe queue. Scans on first call (or refresh=1); the scan hits
@@ -59,7 +65,11 @@ def queue(refresh: int = 0) -> JSONResponse:
             {"cards": [], "count": 0, "error": "Scan failed — is the Mac online?"},
             status_code=503,
         )
-    return JSONResponse({"cards": [swipe.card(g) for g in snapshot], "count": len(snapshot)})
+    return JSONResponse({
+        "cards": [swipe.card(g) for g in snapshot],
+        "count": len(snapshot),
+        "meta": swipe.session_meta(),
+    })
 
 
 class Decision(BaseModel):
