@@ -1,6 +1,7 @@
 """Mobile swipe server — a phone-first, on-demand job swiper.
 
-Run `jobpilot gigs swipe`; open the printed Tailscale URL on your phone. Tap
+Run `jobpilot gigs swipe --host <tailscale-ip>`; open the printed Tailscale URL
+on your phone. Tap
 "Get jobs" to scan, then swipe: right/Apply opens the prefilled email (or apply
 page) so you just hit send and logs it as sent; left/Pass logs the pass. One
 card at a time. The scan/score/geo/currency engine is shared with the
@@ -126,13 +127,12 @@ def _print_qr(url: str) -> None:
     print()
 
 
-def run_server(host: str = "0.0.0.0", port: int = 8799) -> None:
-    """Serve the swiper. Binds all interfaces by default so the phone can reach
-    it over Tailscale; prints the URL (and a scannable QR) to open."""
+def run_server(host: str = "127.0.0.1", port: int = 8799) -> None:
+    """Serve the swiper, defaulting to loopback for local-only access."""
     import uvicorn
 
     ts = _tailscale_ip()
-    phone_url = f"http://{ts}:{port}/" if ts else ""
+    phone_url = f"http://{ts}:{port}/" if ts and host == ts else ""
     print("\n  GigPilot Swipe — open on your phone:")
     if phone_url:
         print(f"    {phone_url}   (Tailscale — works anywhere)")

@@ -403,7 +403,11 @@ def weekly_summary():
 @app.command()
 def swipe(
     port: int = typer.Option(8799, "--port", help="Port to serve on"),
-    host: str = typer.Option("0.0.0.0", "--host", help="Bind address (0.0.0.0 = reachable from phone via Tailscale)"),
+    host: str = typer.Option(
+        "127.0.0.1",
+        "--host",
+        help="Bind address (loopback by default; use your 100.x Tailscale IP for phone access)",
+    ),
 ):
     """Phone-first job swiper. Run this, open the printed URL on your phone,
     tap Get jobs, then swipe: right to apply (opens a prepped email), left to
