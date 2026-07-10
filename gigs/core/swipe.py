@@ -126,8 +126,6 @@ def card(gig: Gig) -> dict:
     """Everything the phone card needs for one gig — including crib paste pack."""
     from jobpilot.gigs.core.crib import mobile_crib
 
-    from jobpilot.gigs.core.proposals import draft_mode
-
     brief = build_revenue_brief(gig)
     target, is_mailto = _apply_target(gig)
     resume = preferences.resume_for(brief.offer)
