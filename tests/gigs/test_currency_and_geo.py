@@ -28,16 +28,15 @@ def test_normalize_pay_converts_to_usd():
     assert scorer._normalize_pay(cad) < scorer._normalize_pay(usd)
 
 
-def test_sub_floor_cad_role_drops_when_usd_equivalent_is_low(monkeypatch):
-    # 125K CAD ≈ 91K USD ≈ $45/hr — below the default $65 floor → dropped
-    # (a confident two-ended salary parse).
+def test_sub_floor_cad_role_is_not_hard_dropped(monkeypatch):
+    # Pay is not a hard filter — low USD-equivalent CAD bands still rank.
     monkeypatch.setattr(preferences, "location_config",
                         lambda prefs=None: {"home_metro_tags": [], "require_home_or_remote": False})
     g = _gig(id="hn-cad", title="Founding Engineer", currency="CAD",
              salary_min=105000, salary_max=125000,
              description="agentic workflows, python, claude")
     kept = scorer.filter_and_rank([g], min_score=0)
-    assert kept == []  # the USD-equivalent falls below the pay floor
+    assert [x.id for x in kept] == ["hn-cad"]
 
 
 # --- geo eligibility -------------------------------------------------------

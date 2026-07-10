@@ -291,7 +291,8 @@ def test_three_js_role_is_recognized() -> None:
     assert scored.fit_score >= 70
 
 
-def test_pay_below_preferences_floor_is_dropped_from_rank() -> None:
+def test_low_pay_does_not_hard_drop_from_rank() -> None:
+    """Pay is never a hard filter — a strong-fit low-stated rate still ranks."""
     low = Gig(
         id="low-pay",
         source="wwr",
@@ -310,8 +311,10 @@ def test_pay_below_preferences_floor_is_dropped_from_rank() -> None:
     )
 
     ranked = filter_and_rank([low, ok], min_score=55, top_n=5)
-
-    assert [g.id for g in ranked] == ["ok-pay"]
+    ids = {g.id for g in ranked}
+    assert "low-pay" in ids and "ok-pay" in ids
+    # Higher stated pay still sorts first as a soft signal.
+    assert ranked[0].id == "ok-pay"
 
 
 def test_overlapping_title_patterns_score_only_the_longest() -> None:
@@ -378,10 +381,8 @@ def test_qa_automation_title_is_not_rescued_by_bare_automation_engineer() -> Non
     assert not any("title:automation engineer" in r for r in scored.fit_reasons)
 
 
-def test_below_floor_pay_only_drops_when_parse_is_confident() -> None:
-    """A confident parse (explicit range / hourly) below the floor is
-    dropped; a single-ended salary is too weak to hard-drop on — the -25
-    score penalty still applies, but the gig survives the rank filter."""
+def test_stated_pay_never_hard_drops_even_when_parse_is_confident() -> None:
+    """Confident low bands used to hard-drop; pay is no longer a gate."""
     confident = Gig(
         id="confident-low",
         source="hn",
@@ -389,7 +390,7 @@ def test_below_floor_pay_only_drops_when_parse_is_confident() -> None:
         url="https://example.com/1",
         description="Build RAG workflows and internal tools using Python.",
         salary_min=70000,
-        salary_max=80000,  # $40/hr equivalent — explicit range, below floor
+        salary_max=80000,
     )
     unconfident = Gig(
         id="unconfident-low",
@@ -397,12 +398,12 @@ def test_below_floor_pay_only_drops_when_parse_is_confident() -> None:
         title="Applied AI Engineer",
         url="https://example.com/2",
         description="Build RAG workflows and internal tools using Python.",
-        salary_max=80000,  # single-ended — not confident enough to drop
+        salary_max=80000,
     )
 
     ranked = filter_and_rank([confident, unconfident], min_score=55, top_n=5)
-
-    assert [g.id for g in ranked] == ["unconfident-low"]
+    ids = {g.id for g in ranked}
+    assert "confident-low" in ids and "unconfident-low" in ids
 
 
 def test_skill_bonus_is_capped_so_ad_keyword_spam_cannot_saturate() -> None:

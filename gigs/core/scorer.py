@@ -397,13 +397,11 @@ def score_gig(gig: Gig) -> Gig:
         score -= 25
         reasons.append("-25 generic job-board role (no AI title signal)")
 
-    # ----- Pay -----
+    # ----- Pay (bonus only — never a hard block or score penalty) -----
+    # Unstated / low posted pay must not hide a great role. High stated pay
+    # still gets a small ranking bump; the user judges rate after triage.
     hourly_eq = _normalize_pay(gig)
-    floor_h = _pay_floor_hourly()
-    if hourly_eq and hourly_eq < floor_h:
-        score -= 25
-        reasons.append(f"-25 pay ${hourly_eq:.0f}/hr (below floor ${floor_h:.0f}/hr)")
-    elif hourly_eq >= 125:
+    if hourly_eq >= 125:
         score += 15
         reasons.append(f"+15 pay ${hourly_eq:.0f}/hr")
     elif hourly_eq >= 75:
@@ -433,10 +431,9 @@ def score_gig(gig: Gig) -> Gig:
 def _pay_parse_is_confident(gig: Gig) -> bool:
     """True when the comp came from an explicit salary range or hourly figure.
 
-    Hourly estimates only exist when the text carried a per-hour marker, and
-    a salary range needs both ends — a single-ended salary (or partial data
-    from a cross-source merge) is too weak to hard-drop a gig on. The -25
-    below-floor penalty in score_gig applies either way."""
+    Kept for crib/salary-anchor helpers and tests. Pay is not used as a hard
+    rank filter (low/unstated pay must not hide strong roles).
+    """
     if gig.pay_hourly_est:
         return True
     return bool(gig.salary_min and gig.salary_max)
@@ -452,9 +449,9 @@ def filter_and_rank(
 ) -> list[Gig]:
     """Score every gig, drop the weak ones, return top N sorted.
 
-    Below-floor pay only hard-drops a gig when the parse is confident — a
-    comp mis-parse must not silently kill a good gig (the 2026-06 "$70-$90
-    per hour read as $70K-$90K" bug). Unstated pay always passes.
+    Pay is never a hard filter: low or missing stated pay still passes so
+    great-fit roles are not hidden. High stated pay only helps as a soft
+    sort/score bonus.
 
     ``contract_first`` drops explicit W-2-only postings unless contract
     signals are also present. ``drop_rigid_schedule`` removes postings with
@@ -468,16 +465,8 @@ def filter_and_rank(
     """
     from jobpilot.core.work_style import is_schedule_rigid
 
-    floor_h = _pay_floor_hourly()
     scored = [score_gig(g) for g in gigs]
-    kept = [
-        g for g in scored
-        if g.fit_score >= min_score
-        and (
-            _normalize_pay(g) >= floor_h
-            or not _pay_parse_is_confident(g)
-        )
-    ]
+    kept = [g for g in scored if g.fit_score >= min_score]
     if contract_first:
         kept = [
             g for g in kept
