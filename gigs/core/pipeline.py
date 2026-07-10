@@ -340,16 +340,42 @@ def _gig_from_row(row: Row) -> Gig:
     )
 
 
+# Source names that leak into the Company column when a scraper left
+# company empty (merge does `g.company or g.source`). On rescore we
+# replace these placeholders with a recovered employer name when we can.
+_SOURCE_COMPANY_PLACEHOLDERS = frozenset({
+    "himalayas", "hn", "hackernews", "remoteok", "wwr", "weworkremotely",
+})
+
+
+def _recover_company(row: Row, gig: Gig) -> str:
+    """Prefer a real employer name over a source-name placeholder."""
+    from jobpilot.gigs.core.scrapers.himalayas import company_from_url
+
+    candidates = [
+        (gig.company or "").strip(),
+        company_from_url(gig.url or ""),
+        company_from_url(gig.apply_url or ""),
+        company_from_url(row.apply or ""),
+        (row.company or "").strip(),
+    ]
+    for c in candidates:
+        if c and c.lower() not in _SOURCE_COMPANY_PLACEHOLDERS:
+            return c
+    return (row.company or "").strip()
+
+
 def rescore_new_rows(rows: list[Row], collected: list[Gig]) -> int:
-    """Refresh Score on still-`new` rows with the current scorer, so scores
-    track today's calibration instead of staying frozen at whatever the
-    scorer said the day the row was minted. Status, Notes, and every other
-    user-owned column are untouched.
+    """Refresh Score (and fill empty/placeholder Company) on still-`new`
+    rows with the current scorer, so scores track today's calibration
+    instead of staying frozen at whatever the scorer said the day the
+    row was minted. Status, Notes, and every other user-owned column
+    are untouched.
 
     Full listing data is used when this scan saw the same gig (matched by
     ID or cross-source key); otherwise the gig is reconstructed from the
     row itself (see _gig_from_row). Mutates rows in place and returns the
-    number of rows whose score changed."""
+    number of rows whose score *or* company changed."""
     by_id = {g.id: g for g in collected}
     by_key: dict[str, Gig] = {}
     for g in collected:
@@ -368,9 +394,16 @@ def rescore_new_rows(rows: list[Row], collected: list[Gig]) -> int:
                     break
         if gig is None:
             gig = _gig_from_row(row)
+        row_changed = False
         new_score = score_gig(gig).fit_score
         if new_score != row.score:
             row.score = new_score
+            row_changed = True
+        recovered = _recover_company(row, gig)
+        if recovered and recovered != row.company:
+            row.company = recovered
+            row_changed = True
+        if row_changed:
             changed += 1
     return changed
 
