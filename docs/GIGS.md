@@ -24,6 +24,8 @@ All gigs commands live under `jobpilot gigs`:
 
 ```bash
 ./jobpilot gigs criteria    # active job-search gate + resume map + pipeline metrics
+./jobpilot gigs hygiene     # archive stale/overflow `new` rows (also runs on Get jobs)
+./jobpilot gigs hygiene --dry-run
 ./jobpilot gigs now         # ON-DEMAND pull (no phone push unless --push)
 ./jobpilot gigs now --push  # same pull + ntfy to phone
 ./jobpilot gigs schedule off|on|status   # kill/reinstall 8am+5pm launchd agents
