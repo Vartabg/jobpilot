@@ -100,6 +100,9 @@ DEFAULTS: dict[str, Any] = {
         "contract_first": False,
         "drop_rigid_schedule": True,
         "push_default": False,  # on-demand: no phone unless --push
+        # Backlog hygiene (mobile Get jobs + digest/now)
+        "archive_new_after_days": 7,  # untriaged `new` auto-archive age
+        "max_live_new": 30,           # cap concurrent `new` rows in pipeline
         "target_titles": [
             "Forward Deployed Engineer",
             "Solutions Engineer",
@@ -115,6 +118,7 @@ DEFAULTS: dict[str, Any] = {
             "Aim mid, not Senior/Staff/Lead SWE bars",
             "No company SWE tenure — portfolio + field/customer track",
             "Pay is not a hard filter — great-fit roles pass even if pay is low or unstated",
+            "Untriaged `new` auto-archives after 7 days; live new capped at 30",
         ],
     },
     # Copy-paste sources for ATS essay questions ("Tell us about your

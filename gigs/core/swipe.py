@@ -50,6 +50,19 @@ def build_queue(
     contract_first = bool(cfg.get("contract_first", False))
     drop_rigid = bool(cfg.get("drop_rigid_schedule", True))
 
+    # Mobile backlog hygiene first — stale/overflow `new` rows otherwise
+    # reappear forever in Get jobs (status "new" is not "decided").
+    try:
+        from jobpilot.gigs.core import pipeline as _pipe
+        hyg = _pipe.archive_stale_new()
+        if on_progress and hyg.get("archived"):
+            on_progress(
+                f"[dim]Backlog: archived {hyg['archived']} "
+                f"(age={hyg.get('archived_age', 0)}, cap={hyg.get('archived_cap', 0)})[/]",
+            )
+    except Exception:
+        pass
+
     gigs, _results = collect_all(on_progress=on_progress)
     if fresh_only:
         fresh = set(filter_new([g.id for g in gigs]))

@@ -58,7 +58,12 @@ PIPELINE_PATH = PIPELINE_DIR / "pipeline.md"
 # header as live rows, so an in-file archive section would resurrect its
 # rows on the next parse. A sidecar file is the robust choice.
 ARCHIVE_PATH = PIPELINE_DIR / "pipeline_archive.md"
-ARCHIVE_AFTER_DAYS = 14
+# Default max age for untriaged `new` rows (overridable via preferences.search).
+# Mobile-first: 7 days, not 14 — stale new rows clog swipe Get jobs.
+ARCHIVE_AFTER_DAYS = 7
+# Soft cap on live `new` rows after age-based archive (oldest + lowest score
+# spill first). Overridable via preferences.search.max_live_new.
+MAX_LIVE_NEW = 30
 
 DATA_DIR = data_dir()
 STATUS_SNAPSHOT_PATH = DATA_DIR / "pipeline_prev_status.json"
@@ -521,45 +526,176 @@ def migrate_pipeline_hygiene(
 # ----- auto-archive of stale `new` rows --------------------------------------
 
 
+def archive_after_days() -> int:
+    """Days a `new` row may sit untriaged before auto-archive."""
+    try:
+        from jobpilot.gigs.core import preferences
+        raw = preferences.search_config().get("archive_new_after_days")
+        if raw is not None:
+            return max(1, int(raw))
+    except Exception:
+        pass
+    return ARCHIVE_AFTER_DAYS
+
+
+def max_live_new() -> int:
+    """Cap on concurrent `new` rows in pipeline.md (mobile backlog guard)."""
+    try:
+        from jobpilot.gigs.core import preferences
+        raw = preferences.search_config().get("max_live_new")
+        if raw is not None:
+            return max(5, int(raw))
+    except Exception:
+        pass
+    return MAX_LIVE_NEW
+
+
+def _row_born(row: Row, first_seen: dict[str, str], now: datetime) -> datetime | None:
+    born = parse_last_touched(row.saved, now) if row.saved else None
+    if born is None and row.gig_id:
+        try:
+            born = datetime.fromisoformat(first_seen.get(row.gig_id, ""))
+        except ValueError:
+            born = None
+    return born
+
+
 def split_archivable(
     rows: list[Row],
     first_seen: dict[str, str],
     *,
     now: datetime | None = None,
+    after_days: int | None = None,
 ) -> tuple[list[Row], list[Row]]:
     """Partition rows into (keep, archive). A row is archivable when it is
-    still `new` ARCHIVE_AFTER_DAYS after its first sighting — dated by the
+    still `new` ``after_days`` after its first sighting — dated by the
     Saved column when set, else its first_seen stamp (store.sync_first_seen
     stamps every undated `new` row at the start of the run, so nothing is
-    archived before it has had its full 14 days on the board). Rows with
+    archived before it has had its full window on the board). Rows with
     any other status, or with no way to date them, always stay."""
     now = now or datetime.now()
-    cutoff = now - timedelta(days=ARCHIVE_AFTER_DAYS)
+    days = ARCHIVE_AFTER_DAYS if after_days is None else max(1, int(after_days))
+    cutoff = now - timedelta(days=days)
     keep: list[Row] = []
     stale: list[Row] = []
     for row in rows:
         if row.status != "new":
             keep.append(row)
             continue
-        born = parse_last_touched(row.saved, now) if row.saved else None
-        if born is None and row.gig_id:
-            try:
-                born = datetime.fromisoformat(first_seen.get(row.gig_id, ""))
-            except ValueError:
-                born = None
+        born = _row_born(row, first_seen, now)
         (stale if born is not None and born < cutoff else keep).append(row)
     return keep, stale
+
+
+def split_over_cap(
+    rows: list[Row],
+    first_seen: dict[str, str],
+    *,
+    max_new: int | None = None,
+    now: datetime | None = None,
+) -> tuple[list[Row], list[Row]]:
+    """If too many `new` rows remain, archive the worst first.
+
+    Keep priority: higher score first, then fresher (younger first_seen).
+    Spill is the rest. Decided rows are never spilled.
+    """
+    now = now or datetime.now()
+    if max_new is None:
+        cap = max_live_new()
+    else:
+        cap = max(1, int(max_new))
+    news = [r for r in rows if r.status == "new"]
+    others = [r for r in rows if r.status != "new"]
+    if len(news) <= cap:
+        return rows, []
+
+    def _keep_key(r: Row) -> tuple:
+        born = _row_born(r, first_seen, now) or now
+        age = (now - born).total_seconds()
+        return (-r.score, age)  # high score first, then fresher
+
+    ranked = sorted(news, key=_keep_key)
+    keep_new = ranked[:cap]
+    spill = ranked[cap:]
+    return others + keep_new, spill
+
+
+def archive_stale_new(
+    *,
+    after_days: int | None = None,
+    max_new: int | None = None,
+    now: datetime | None = None,
+) -> dict:
+    """Age-archive + cap live `new` rows. Safe to call from swipe or digest.
+
+    Returns counts: archived_age, archived_cap, kept, refused.
+    """
+    from jobpilot.gigs.core import store
+
+    now = now or datetime.now()
+    days = archive_after_days() if after_days is None else max(1, int(after_days))
+    # Resolve paths at call time so tests can monkeypatch PIPELINE_PATH /
+    # ARCHIVE_PATH (function defaults bind at import and would ignore patches).
+    pipe_path = PIPELINE_PATH
+    arch_path = ARCHIVE_PATH
+    rows = parse(pipe_path)
+    new_ids = [r.gig_id for r in rows if r.status == "new" and r.gig_id]
+    first_seen = store.sync_first_seen(new_ids)
+
+    keep, stale_age = split_archivable(rows, first_seen, now=now, after_days=days)
+    keep, stale_cap = split_over_cap(keep, first_seen, max_new=max_new, now=now)
+    stale = stale_age + stale_cap
+    if not stale:
+        return {
+            "archived_age": 0,
+            "archived_cap": 0,
+            "archived": 0,
+            "kept": len(keep),
+            "refused": False,
+        }
+
+    # Tag cap spills in Notes so a revive is explainable.
+    for r in stale_cap:
+        note = "auto-archive:backlog-cap"
+        r.notes = f"{r.notes} {note}".strip() if r.notes else note
+    for r in stale_age:
+        note = "auto-archive:stale-new"
+        if "auto-archive:" not in (r.notes or ""):
+            r.notes = f"{r.notes} {note}".strip() if r.notes else note
+
+    append_to_archive(stale, arch_path)
+    ids = {r.gig_id for r in stale if r.gig_id}
+    store.mark_archived(sorted(ids))
+    result = write(keep, pipe_path, removed_ids=ids)
+    if result.refused:
+        return {
+            "archived_age": 0,
+            "archived_cap": 0,
+            "archived": 0,
+            "kept": len(rows),
+            "refused": True,
+        }
+    store.sync_first_seen(
+        [r.gig_id for r in keep if r.status == "new" and r.gig_id],
+    )
+    return {
+        "archived_age": len(stale_age),
+        "archived_cap": len(stale_cap),
+        "archived": len(stale),
+        "kept": len(keep),
+        "refused": False,
+    }
 
 
 _ARCHIVE_HEADER_LINES = (
     "# GigPilot Pipeline Archive",
     "",
-    f"Rows gigpilot moved out of pipeline.md: `new` rows untriaged for "
-    f"{ARCHIVE_AFTER_DAYS}+ days, plus duplicates collapsed by the one-time "
-    "hygiene migration. This is a sidecar file (not an `## Archive` section "
-    "inside pipeline.md) because the pipeline parser treats every "
-    "Status/Score/Company table as live rows — an in-file section would "
-    "resurrect its rows on the next run.",
+    "Rows gigpilot moved out of pipeline.md: untriaged `new` rows past the "
+    "age window (see preferences.search.archive_new_after_days), overflow "
+    "beyond max_live_new, plus duplicates collapsed by hygiene migration. "
+    "This is a sidecar file (not an `## Archive` section inside pipeline.md) "
+    "because the pipeline parser treats every Status/Score/Company table as "
+    "live rows — an in-file section would resurrect its rows on the next run.",
     "",
     "Append-only; gigpilot never reads it back, and archived gig IDs are "
     "retired in seen.json so they cannot resurface. To revive a row, move "

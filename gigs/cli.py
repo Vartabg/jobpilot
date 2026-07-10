@@ -25,7 +25,7 @@ from jobpilot.gigs.core.pipeline_migrate import migrate_applied_into_pipeline
 from jobpilot.gigs.core.preferences import write_default_if_missing as _ensure_prefs
 from jobpilot.gigs.core.scorer import filter_and_rank
 from jobpilot.gigs.core.scrapers.weworkremotely import enrich_apply_urls as enrich_wwr
-from jobpilot.gigs.core.store import filter_new, mark_archived, mark_seen, seen_count, sync_first_seen
+from jobpilot.gigs.core.store import filter_new, mark_seen, seen_count
 from jobpilot.gigs.core.away import sync_reminders_from_pipeline
 
 app = typer.Typer(help="Daily tech-gig digest")
@@ -151,6 +151,54 @@ def criteria():
     console.print(f"  {'acted':>10}: {acted}  ·  still-new: {by_status.get('new', 0)}")
     console.print("")
     console.print(run_state.format_summary())
+
+
+@app.command()
+def hygiene(
+    dry_run: bool = typer.Option(
+        False, "--dry-run",
+        help="Show what would be archived without writing",
+    ),
+):
+    """Clear pipeline backlog: archive stale/overflow `new` rows.
+
+    Same rules as mobile Get jobs: age window (default 7d) + max live new
+    (default 30). Archived IDs stay in pipeline_archive.md and seen.json.
+    """
+    if dry_run:
+        from jobpilot.gigs.core import store
+        from datetime import datetime
+
+        rows = pipeline.parse()
+        new_ids = [r.gig_id for r in rows if r.status == "new" and r.gig_id]
+        first_seen = store.sync_first_seen(new_ids)
+        days = pipeline.archive_after_days()
+        cap = pipeline.max_live_new()
+        keep, stale_age = pipeline.split_archivable(
+            rows, first_seen, after_days=days,
+        )
+        keep2, stale_cap = pipeline.split_over_cap(keep, first_seen, max_new=cap)
+        console.print(f"Would archive age: {len(stale_age)} (>{days}d)")
+        console.print(f"Would archive cap: {len(stale_cap)} (over max_live_new={cap})")
+        console.print(f"Would keep total rows: {len(keep2)} (new={sum(1 for r in keep2 if r.status=='new')})")
+        for r in (stale_age + stale_cap)[:15]:
+            console.print(f"  · [{r.score}] {r.company} — {r.role[:50]}")
+        if len(stale_age) + len(stale_cap) > 15:
+            console.print(f"  … +{len(stale_age)+len(stale_cap)-15} more")
+        return
+
+    result = pipeline.archive_stale_new()
+    if result.get("refused"):
+        console.print("[red]Write refused by shrink guard — nothing changed.[/red]")
+        raise typer.Exit(code=1)
+    console.print(
+        f"[green]Archived {result['archived']}[/green] "
+        f"(age={result['archived_age']}, cap={result['archived_cap']}) · "
+        f"kept {result['kept']} rows",
+    )
+    rows = pipeline.parse()
+    n_new = sum(1 for r in rows if r.status == "new")
+    console.print(f"Live pipeline: {len(rows)} rows · {n_new} still new")
 
 
 @app.command(name="now")
@@ -313,36 +361,27 @@ def _run_digest(
             f"[dim]{rescored} still-new rows re-scored with current calibration[/dim]",
         )
 
-    # Auto-archive: `new` rows older than ARCHIVE_AFTER_DAYS move to the
-    # archive sidecar; their IDs are retired in seen.json so they never
-    # resurface. sync_first_seen stamps undated rows so the clock starts now.
-    first_seen = sync_first_seen(
-        [r.gig_id for r in updated if r.status == "new" and r.gig_id],
-    )
-    updated, stale_rows = pipeline.split_archivable(updated, first_seen)
-    archived_ids: set[str] = set()
-    if stale_rows:
-        pipeline.append_to_archive(stale_rows)
-        archived_ids = {r.gig_id for r in stale_rows if r.gig_id}
-        mark_archived(sorted(archived_ids))
-        console.print(
-            f"[dim]{len(stale_rows)} stale `new` rows "
-            f"(>{pipeline.ARCHIVE_AFTER_DAYS}d) auto-archived → "
-            f"{pipeline.ARCHIVE_PATH.name}[/dim]",
-        )
-
-    write_result = pipeline.write(updated, removed_ids=archived_ids)
+    # Persist merge/rescore first so hygiene sees this run's new rows.
+    write_result = pipeline.write(updated, removed_ids=set())
     if write_result.refused:
-        # The shrink guard kept the on-disk file. Nothing from this run was
-        # persisted, so nothing may be marked seen or snapshotted — otherwise
-        # these gigs are seen-but-never-written and can never resurface.
-        # Raising routes through the digest() wrapper: ok=False heartbeat +
-        # phone push.
         raise RuntimeError(
             "pipeline write refused by shrink guard — run not persisted "
             f"({write_result.path})"
         )
-    pipeline_path = write_result.path
+
+    # Age-archive + cap live `new` (same path as swipe Get jobs).
+    hyg = pipeline.archive_stale_new()
+    if hyg.get("refused"):
+        raise RuntimeError("pipeline hygiene write refused by shrink guard")
+    if hyg.get("archived"):
+        console.print(
+            f"[dim]Backlog hygiene: archived {hyg['archived']} "
+            f"(age={hyg.get('archived_age', 0)}, cap={hyg.get('archived_cap', 0)}) "
+            f"→ {pipeline.ARCHIVE_PATH.name}[/dim]",
+        )
+
+    updated = pipeline.parse()
+    pipeline_path = pipeline.PIPELINE_PATH
     console.print(f"  Pipeline: {pipeline_path}")
 
     added_feedback = feedback.sync_from_pipeline(updated)
