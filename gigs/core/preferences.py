@@ -91,6 +91,32 @@ DEFAULTS: dict[str, Any] = {
     "resumes": {
         "default": "",
     },
+    # Active job-search gate used by `gigs now` / `gigs criteria` and as
+    # defaults for digest ranking. Keep in sync with the job-queue thesis
+    # (Austin/remote, mid-level, floor pay) — not seniority theater.
+    "search": {
+        "min_score": 60,
+        "top_n": 12,
+        "contract_first": False,
+        "drop_rigid_schedule": True,
+        "push_default": False,  # on-demand: no phone unless --push
+        "target_titles": [
+            "Forward Deployed Engineer",
+            "Solutions Engineer",
+            "Implementation Engineer",
+            "Customer Success Engineer",
+            "Technical Support Engineer",
+            "Customer Engineer",
+            "Applied AI Engineer",
+            "AI Engineer",
+        ],
+        "notes": [
+            "Austin-area or fully remote only — not relocating",
+            "Aim mid, not Senior/Staff/Lead SWE bars",
+            "No company SWE tenure — portfolio + field/customer track",
+            "Floor ~$115k FTE / equivalent; small-mid builder teams preferred",
+        ],
+    },
     # Copy-paste sources for ATS essay questions ("Tell us about your
     # background", "Why this role"). Placeholders only — put your real bullets
     # in data/preferences.json (gitignored).
@@ -256,6 +282,60 @@ def resume_for(offer: str, prefs: dict[str, Any] | None = None) -> str:
     """Tailored resume filename to attach for an offer type, '' if unset."""
     resumes = (prefs or load()).get("resumes", {})
     return resumes.get(offer) or resumes.get("default", "") or ""
+
+
+def resumes_map(prefs: dict[str, Any] | None = None) -> dict[str, str]:
+    """Full offer → resume filename map (including default)."""
+    return dict((prefs or load()).get("resumes", {}) or {})
+
+
+def search_config(prefs: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Active search gate + ranking defaults from preferences."""
+    raw = (prefs or load()).get("search", {}) or {}
+    out = dict(DEFAULTS["search"])
+    out.update(raw)
+    # Nested list keys: prefer user list when provided non-empty.
+    if raw.get("target_titles"):
+        out["target_titles"] = list(raw["target_titles"])
+    if raw.get("notes"):
+        out["notes"] = list(raw["notes"])
+    return out
+
+
+def format_criteria_report(prefs: dict[str, Any] | None = None) -> str:
+    """Human-readable active criteria + resume map for CLI / crib header."""
+    p = prefs or load()
+    pay = p.get("pay") or DEFAULTS["pay"]
+    loc = location_config(p)
+    search = search_config(p)
+    resumes = resumes_map(p)
+    lines = [
+        "=== Active job-search criteria ===",
+        f"Pay floor:  ${pay.get('floor_annual_usd', 0):,.0f}/yr  ·  "
+        f"${pay.get('floor_hourly_usd', 0):.0f}/hr",
+        f"Pay target: ${pay.get('target_annual_usd', 0):,.0f}/yr  ·  "
+        f"${pay.get('target_hourly_usd', 0):.0f}/hr",
+        f"Location:   home tags={loc.get('home_metro_tags') or '—'}  ·  "
+        f"require_home_or_remote={loc.get('require_home_or_remote')}  ·  "
+        f"allow_remote={loc.get('allow_remote')}",
+        f"Rank gate:  min_score={search.get('min_score')}  top_n={search.get('top_n')}  "
+        f"contract_first={search.get('contract_first')}  "
+        f"drop_rigid_schedule={search.get('drop_rigid_schedule')}",
+        f"Push:       default={search.get('push_default')}  "
+        f"(phone only when you pass --push)",
+        f"Targets:    {', '.join(search.get('target_titles') or []) or '—'}",
+    ]
+    for note in search.get("notes") or []:
+        lines.append(f"  · {note}")
+    lines.append("")
+    lines.append("=== Resumes in use (offer → file) ===")
+    if not resumes or not any(resumes.values()):
+        lines.append("  (none configured — set data/gigs/preferences.json → resumes)")
+    else:
+        for offer, fname in resumes.items():
+            mark = fname or "(empty)"
+            lines.append(f"  {offer}: {mark}")
+    return "\n".join(lines)
 
 
 def signoff_block(prefs: dict[str, Any] | None = None) -> str:

@@ -271,10 +271,15 @@ def dispatch(
     pipeline_rows: list[pipeline.Row] | None = None,
     *,
     source_warning: str = "",
+    push: bool = True,
 ) -> dict:
-    """Write artifacts + push. The pipeline has already been written by the
-    caller (cli.digest) so this just refreshes the supplementary files
-    (digest archive, latest_leads, crib) and triggers the ntfy push.
+    """Write artifacts + optionally push. The pipeline has already been written
+    by the caller (cli.digest / cli.now) so this just refreshes the
+    supplementary files (digest archive, latest_leads, crib) and, when
+    ``push`` is True, triggers the ntfy notification.
+
+    On-demand mode uses ``push=False`` so the user controls when the phone
+    buzzes; scheduled mode (if re-enabled) can still push.
 
     `source_warning` (from source_health.warning_line) lands in both the
     digest markdown header and the push body, so dead sources are visible
@@ -287,7 +292,11 @@ def dispatch(
     md_path = write_markdown(gigs, source_warning=source_warning, followups=followups)
     save_latest_leads(gigs)
     crib_path = write_crib_sheet(gigs)
-    pushed = push_ntfy(gigs, source_warning=source_warning, followup_count=len(followups))
+    pushed = False
+    if push:
+        pushed = push_ntfy(
+            gigs, source_warning=source_warning, followup_count=len(followups),
+        )
     return {
         "gigs": len(gigs),
         "followups": len(followups),

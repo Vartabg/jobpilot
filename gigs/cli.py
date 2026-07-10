@@ -117,25 +117,126 @@ def scan(
     console.print(t)
 
 
-@app.command()
-def digest(
-    min_score: int = typer.Option(55, "--min-score"),
-    top_n: int = typer.Option(12, "--top"),
-    contract_first: bool = typer.Option(False, "--contract-first", help="Prefer contract/1099/hourly postings"),
-    anti_schedule: bool = typer.Option(False, "--anti-schedule", help="Drop rigid 9-5 / core-hours postings"),
-):
-    """Run scan → filter via pipeline + seen → rank → write pipeline + push.
+def _search_defaults() -> dict:
+    """Rank defaults from preferences.search (on-demand job-search gate)."""
+    from jobpilot.gigs.core import preferences as prefs
 
-    Any exception records an ok=False heartbeat and pushes a failure alert
-    to the phone before re-raising — a crashed unattended run must be loud,
-    not a silent gap in the morning digest.
+    return prefs.search_config()
+
+
+@app.command()
+def criteria():
+    """Show active job-search criteria, pay floors, and resume map.
+
+    This is the single source of truth for what the gigs lane optimizes for —
+    not the 8am push schedule.
     """
+    from jobpilot.gigs.core import preferences as prefs
+
+    console.print(prefs.format_criteria_report())
+    rows = pipeline.parse()
+    by_status: dict[str, int] = {}
+    for r in rows:
+        by_status[r.status] = by_status.get(r.status, 0) + 1
+    console.print("")
+    console.print("=== Pipeline performance ===")
+    console.print(f"Total rows: {len(rows)}")
+    for status in (
+        "new", "saved", "drafted", "sent", "replied", "interview", "hired",
+        "passed", "archived",
+    ):
+        if status in by_status:
+            console.print(f"  {status:>10}: {by_status[status]}")
+    acted = sum(by_status.get(s, 0) for s in ("saved", "drafted", "sent", "replied", "interview", "hired", "passed"))
+    console.print(f"  {'acted':>10}: {acted}  ·  still-new: {by_status.get('new', 0)}")
+    console.print("")
+    console.print(run_state.format_summary())
+
+
+@app.command(name="now")
+def now(
+    min_score: int | None = typer.Option(None, "--min-score", help="Override preferences.search.min_score"),
+    top_n: int | None = typer.Option(None, "--top", help="Override preferences.search.top_n"),
+    push: bool = typer.Option(
+        False, "--push",
+        help="Also push a phone notification (off by default — you pull when ready)",
+    ),
+    contract_first: bool | None = typer.Option(
+        None, "--contract-first/--no-contract-first",
+        help="Override preferences.search.contract_first",
+    ),
+    anti_schedule: bool | None = typer.Option(
+        None, "--anti-schedule/--no-anti-schedule",
+        help="Override preferences.search.drop_rigid_schedule",
+    ),
+):
+    """On-demand pull: scan → rank by your criteria → update pipeline + crib.
+
+    Does NOT wait for 8am/5pm. Phone push is off unless you pass --push.
+    Prints the active criteria + resume map first so you see what gate ran.
+    """
+    from jobpilot.gigs.core import preferences as prefs
+
+    cfg = _search_defaults()
+    ms = min_score if min_score is not None else int(cfg.get("min_score", 60))
+    tn = top_n if top_n is not None else int(cfg.get("top_n", 12))
+    cf = contract_first if contract_first is not None else bool(cfg.get("contract_first", False))
+    ar = anti_schedule if anti_schedule is not None else bool(cfg.get("drop_rigid_schedule", True))
+
+    console.print(prefs.format_criteria_report())
+    console.print("")
+    console.print(
+        f"[bold]Pulling now[/bold]  min_score={ms} top={tn}  "
+        f"contract_first={cf} anti_schedule={ar}  push={push}",
+    )
+    console.print("")
     try:
         _run_digest(
-            min_score=min_score,
-            top_n=top_n,
-            contract_first=contract_first,
-            drop_rigid_schedule=anti_schedule,
+            min_score=ms,
+            top_n=tn,
+            contract_first=cf,
+            drop_rigid_schedule=ar,
+            push=push,
+        )
+    except Exception as exc:
+        short = f"{type(exc).__name__}: {exc}"
+        try:
+            run_state.record_digest(ok=False, error=short[:500])
+        except Exception as record_exc:
+            console.print(f"[red]record_digest failed: {record_exc}[/red]")
+        if push:
+            push_failure(f"GigPilot pull FAILED: {short[:200]}")
+        raise
+
+
+@app.command()
+def digest(
+    min_score: int | None = typer.Option(None, "--min-score"),
+    top_n: int | None = typer.Option(None, "--top"),
+    contract_first: bool | None = typer.Option(None, "--contract-first/--no-contract-first", help="Prefer contract/1099/hourly postings"),
+    anti_schedule: bool | None = typer.Option(None, "--anti-schedule/--no-anti-schedule", help="Drop rigid 9-5 / core-hours postings"),
+    push: bool = typer.Option(
+        True, "--push/--no-push",
+        help="Phone push (default on for legacy digest; use `gigs now` for on-demand)",
+    ),
+):
+    """Legacy scheduled path: scan → rank → write pipeline → optional push.
+
+    Prefer `jobpilot gigs now` for manual control. Scheduled launchd is off
+    by default after the on-demand redo; re-enable only if you want it.
+    """
+    cfg = _search_defaults()
+    ms = min_score if min_score is not None else int(cfg.get("min_score", 60))
+    tn = top_n if top_n is not None else int(cfg.get("top_n", 12))
+    cf = contract_first if contract_first is not None else bool(cfg.get("contract_first", False))
+    ar = anti_schedule if anti_schedule is not None else bool(cfg.get("drop_rigid_schedule", True))
+    try:
+        _run_digest(
+            min_score=ms,
+            top_n=tn,
+            contract_first=cf,
+            drop_rigid_schedule=ar,
+            push=push,
         )
     except Exception as exc:
         short = f"{type(exc).__name__}: {exc}"
@@ -143,7 +244,8 @@ def digest(
             run_state.record_digest(ok=False, error=short[:500])
         except Exception as record_exc:  # never let bookkeeping eat the alert
             console.print(f"[red]record_digest failed: {record_exc}[/red]")
-        push_failure(f"GigPilot digest FAILED: {short[:200]}")
+        if push:
+            push_failure(f"GigPilot digest FAILED: {short[:200]}")
         raise
 
 
@@ -153,6 +255,7 @@ def _run_digest(
     top_n: int,
     contract_first: bool = False,
     drop_rigid_schedule: bool = False,
+    push: bool = True,
 ) -> None:
     migrate_applied_into_pipeline()
     hygiene = pipeline.migrate_pipeline_hygiene()
@@ -273,7 +376,12 @@ def _run_digest(
         mark_seen(sorted({m for g in ranked for m in dupe_groups.get(g.id, [g.id])}))
 
     if not added:
-        console.print("[yellow]No new gigs to push. Pipeline refreshed.[/yellow]")
+        # Still refresh crib from empty list so the criteria header is current
+        # when the user opens iCloud after a dry pull.
+        if not push:
+            from jobpilot.gigs.core.crib import write_crib_sheet
+            write_crib_sheet([])
+        console.print("[yellow]No new gigs this pull. Pipeline refreshed.[/yellow]")
         run_state.record_digest(
             ok=True,
             collected=collected,
@@ -284,13 +392,17 @@ def _run_digest(
         )
         return
 
-    result = dispatch(added, updated, source_warning=source_warning)
+    result = dispatch(added, updated, source_warning=source_warning, push=push)
     pushed = result["pushed"]
     if result.get("followups"):
         console.print(f"  Follow-ups due: {result['followups']}")
 
     console.print(f"\n[green]✓[/green] Dispatched {result['gigs']} new gigs to pipeline")
-    console.print(f"  Push: {'sent' if pushed else 'skipped (NTFY_TOPIC unset)'}")
+    if push:
+        console.print(f"  Push: {'sent' if pushed else 'skipped (NTFY_TOPIC unset)'}")
+    else:
+        console.print("  Push: off (on-demand — pass --push when you want the phone)")
+    console.print(f"  Crib: {result.get('crib_path', '—')}")
     console.print(f"  Total unique seen: {seen_count()}")
 
     run_state.record_digest(
@@ -398,6 +510,47 @@ def weekly_summary():
         console.print(f"\n[yellow]Stale (sent > 7 days, no follow-up):[/yellow]")
         for r in stale:
             console.print(f"  • {r.company} — {r.role} (sent {r.last_touched})")
+
+
+@app.command()
+def schedule(
+    action: str = typer.Argument(
+        "status",
+        help="off | on | status — stop/start the 8am+5pm launchd agents",
+    ),
+):
+    """Control automatic digest pushes. Default product mode is off (on-demand).
+
+    off  — uninstall com.vartny.jobpilot.gigs.digest + weekly (no more 8am spam)
+    on   — reinstall twice-daily digest + Sunday weekly
+    status — show whether agents are loaded
+    """
+    import subprocess
+    from pathlib import Path
+
+    script = Path(__file__).resolve().parents[1] / "scripts" / "install_gigs_launchd.sh"
+    if not script.exists():
+        console.print(f"[red]Missing installer: {script}[/red]")
+        raise typer.Exit(code=1)
+    act = action.strip().lower()
+    if act in {"off", "uninstall", "stop"}:
+        cmd = ["bash", str(script), "uninstall"]
+    elif act in {"on", "install", "start"}:
+        cmd = ["bash", str(script), "install"]
+    elif act in {"status", "st"}:
+        cmd = ["bash", str(script), "status"]
+    else:
+        console.print("[red]Use: gigs schedule off | on | status[/red]")
+        raise typer.Exit(code=1)
+    result = subprocess.run(cmd, check=False)
+    if result.returncode != 0:
+        raise typer.Exit(code=result.returncode)
+    if act in {"off", "uninstall", "stop"}:
+        console.print(
+            "[green]Scheduled pushes off.[/green] "
+            "Pull when ready: [bold]jobpilot gigs now[/bold]  "
+            "(add --push only if you want the phone)",
+        )
 
 
 @app.command()
