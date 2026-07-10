@@ -84,6 +84,9 @@ def test_intern_and_product_manager_roles_are_suppressed() -> None:
 
 
 def test_strong_fit_phrase_boosts_applied_ai_role() -> None:
+    """Title-layer engineering patterns already cover 'Applied AI Engineer';
+    the strong-fit +15 only fires when the title layer did not, so we no
+    longer double-count. Score should still land at the top of the scale."""
     gig = Gig(
         id="applied-ai",
         source="hn",
@@ -94,8 +97,62 @@ def test_strong_fit_phrase_boosts_applied_ai_role() -> None:
 
     scored = score_gig(gig)
 
-    assert scored.fit_score == 100
-    assert "+15 strong-fit phrase in title" in scored.fit_reasons
+    assert scored.fit_score >= 90
+    assert any("title:applied ai engineer" in r for r in scored.fit_reasons)
+
+
+def test_strong_fit_does_not_double_count_title_engineering_hit() -> None:
+    """When TITLE_ENGINEERING_PATTERNS already scored the title, STRONG_FIT
+    must not add another +15 (saturation fix)."""
+    eng = Gig(
+        id="ai-eng",
+        source="greenhouse",
+        title="AI Engineer",
+        url="https://example.com/ai",
+        description="Ship agents.",
+    )
+    scored = score_gig(eng)
+    assert not any("strong-fit phrase" in r for r in scored.fit_reasons)
+    assert any("title:ai engineer" in r for r in scored.fit_reasons)
+
+
+def test_seniority_drag_applies_even_with_engineering_rescue() -> None:
+    """P0#1: Senior/Staff AI titles must not pin the same 100 ceiling as
+    mid-level target roles. The drag fires even when 'ai engineer' rescues."""
+    mid = Gig(
+        id="mid",
+        source="greenhouse",
+        title="AI Engineer",
+        company="Acme",
+        url="https://example.com/mid",
+        description="Build agent workflows with Claude and MCP.",
+    )
+    senior = Gig(
+        id="senior",
+        source="greenhouse",
+        title="Senior AI Engineer",
+        company="Acme",
+        url="https://example.com/sr",
+        description="Build agent workflows with Claude and MCP.",
+    )
+    staff = Gig(
+        id="staff",
+        source="greenhouse",
+        title="Staff AI Engineer",
+        company="Acme",
+        url="https://example.com/staff",
+        description="Build agent workflows with Claude and MCP.",
+    )
+
+    mid_s = score_gig(mid).fit_score
+    senior_s = score_gig(senior).fit_score
+    staff_s = score_gig(staff).fit_score
+
+    assert mid_s > senior_s, f"mid {mid_s} should beat senior {senior_s}"
+    assert senior_s > staff_s, f"senior {senior_s} should beat staff {staff_s}"
+    assert staff_s < 100
+    assert any("seniority:senior" in r for r in score_gig(senior).fit_reasons)
+    assert any("seniority:staff" in r for r in score_gig(staff).fit_reasons)
 
 
 # ----- regression: 2026-05-08 mis-ranking bug ----------------------------

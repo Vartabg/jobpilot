@@ -159,7 +159,7 @@ def _phrase_in(text: str, phrase: str) -> bool:
 _REMOTE_TOKENS = ("remote", "anywhere", "distributed", "worldwide", "global")
 # A location requirement naming one of these is compatible with a US/home-metro
 # applicant ("must live in the US"); anything else ("must live in Canada")
-# means out of reach. Word-boundary so "us" matches "the US." but not "Russia".
+# means out of reach. Word-boundary so "us" matches the US but not Russia.
 _HOME_OK_RE = re.compile(
     r"\b(u\.?s\.?a?|united states|north america|remote|anywhere|worldwide|texas|tx)\b",
     re.IGNORECASE,
@@ -173,12 +173,61 @@ _RESTRICTION_RE = re.compile(
 )
 _UNKNOWN_LOC = ("", "see post", "not specified", "n/a", "unspecified")
 
+# Region locks visible in title / URL / location even when the feed hardcodes
+# "Remote". Intentionally NOT full-description: body text often names HQ
+# cities without restricting applicants. Catches shapes like
+# "Founding AI Engineer (India)", "… – Remote (UK)", slug "...-india-2896…".
+_REGION_LOCK_RES = (
+    re.compile(
+        r"\((?:india|uk|u\.k\.|emea|apac|eu|europe|canada|australia|"
+        r"germany|singapore|latam|mexico|brazil|philippines|poland|"
+        r"portugal|spain|france|netherlands)\)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:india|uk|u\.k\.|emea|apac|eu|europe|canada|australia|"
+        r"germany|singapore)[- ](?:only|based)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:only|based)\s+in\s+(?:india|the\s+uk|united\s+kingdom|"
+        r"canada|australia|germany|singapore|europe)\b",
+        re.IGNORECASE,
+    ),
+    # Title/slug trailing market pin: "… Engineer - India", "…/india", "…-india-"
+    re.compile(
+        r"(?:^|[\s/_\-–—])(?:india|uk|emea|apac)(?:$|[\s/_\-–—])",
+        re.IGNORECASE,
+    ),
+)
+
+
+def _region_locked_away(gig: Gig, *, home_tags: list[str]) -> bool:
+    """True when title/URL/location pins the role to a non-home market.
+
+    Used only for high-precision markers (parenthetical markets, *-only /
+    *-based, slug/title market pins). Does not scan the full description.
+    """
+    blob = " ".join([
+        gig.title or "",
+        gig.url or "",
+        gig.location or "",
+        gig.apply_url or "",
+    ]).lower()
+    if any(t in blob for t in home_tags):
+        return False
+    # Explicit US / home-compatible framing in the same fields wins.
+    if re.search(r"\b(u\.?s\.?a?|united states|north america|texas|tx)\b", blob):
+        return False
+    return any(rx.search(blob) for rx in _REGION_LOCK_RES)
+
 
 def _geo_eligible(gig: Gig, *, home_tags: list[str], allow_remote: bool) -> bool:
     """True when a gig is reachable for an applicant who wants home-metro or
     remote roles only. Conservative: keeps remote/home/unknown, and only drops
     a role on clear evidence it's tied elsewhere (an explicit 'must live in
-    <non-home>' requirement, or a specific non-home onsite location)."""
+    <non-home>' requirement, a title/URL region lock, or a specific non-home
+    onsite location)."""
     loc = (gig.location or "").lower().strip()
     text = " ".join([gig.location or "", gig.title or "", gig.description or ""]).lower()
 
@@ -187,6 +236,9 @@ def _geo_eligible(gig: Gig, *, home_tags: list[str], allow_remote: bool) -> bool
 
     if _is_home(text):
         return True
+
+    if _region_locked_away(gig, home_tags=home_tags):
+        return False
 
     # Explicit hard location requirement → judge by the region it names.
     for m in _RESTRICTION_RE.finditer(text):
@@ -201,6 +253,35 @@ def _geo_eligible(gig: Gig, *, home_tags: list[str], allow_remote: bool) -> bool
         return True
     # A specific, non-home, non-remote location → onsite elsewhere.
     return False
+
+
+def _seniority_drag(title: str) -> tuple[int, str | None]:
+    """Strongest seniority penalty for this title, or (0, None).
+
+    Word-boundary checks so 'leadership' / 'seniority' don't false-trigger;
+    'sr' requires a following space/dot so it doesn't match inside words.
+    """
+    best_w = 0
+    best_label: str | None = None
+    # Ordered strongest-first so ties prefer the clearer label.
+    checks: list[tuple[str, int, re.Pattern[str]]] = [
+        ("staff", _rules.TITLE_SENIORITY_DRAG.get("staff", -18),
+         re.compile(r"\bstaff\b")),
+        ("principal", _rules.TITLE_SENIORITY_DRAG.get("principal", -16),
+         re.compile(r"\bprincipal\b")),
+        ("senior", _rules.TITLE_SENIORITY_DRAG.get("senior", -12),
+         re.compile(r"\bsenior\b")),
+        ("sr", _rules.TITLE_SENIORITY_DRAG.get("sr ", -12),
+         re.compile(r"\bsr\.?\b")),
+        ("lead", _rules.TITLE_SENIORITY_DRAG.get("lead", -10),
+         re.compile(r"\b(?:tech\s+)?lead\b")),
+    ]
+    for label, weight, rx in checks:
+        if rx.search(title):
+            if weight < best_w:
+                best_w = weight
+                best_label = label
+    return best_w, best_label
 
 
 def score_gig(gig: Gig) -> Gig:
@@ -289,9 +370,20 @@ def score_gig(gig: Gig) -> Gig:
         score += 8
         reasons.append("+8 revenue-term fit")
 
-    if any(_phrase_in(title, term) for term in _rules.STRONG_FIT_TERMS):
+    # Strong-fit bonus only when the title layer did NOT already score an
+    # engineering pattern — otherwise "AI Engineer" double-counts
+    # (+28 title + +15 strong-fit) and everything piles at 100.
+    if not title_eng_hits and any(
+        _phrase_in(title, term) for term in _rules.STRONG_FIT_TERMS
+    ):
         score += 15
         reasons.append("+15 strong-fit phrase in title")
+
+    # ----- Seniority drag (always; even with engineering rescue) -----
+    drag, drag_label = _seniority_drag(title)
+    if drag:
+        score += drag
+        reasons.append(f"{drag} seniority:{drag_label}")
 
     # ----- Generic-job-board penalty -----
     # WWR/RemoteOK/Himalayas/HN postings without a title-level engineering
