@@ -243,7 +243,7 @@ function render() {
         <div class="meta"><span class="pill">${esc(c.pay)}</span><span class="pill">${esc(c.location)}</span></div></div>
       <div class="role">${esc(c.role)}</div>
       <div class="company">${esc(c.company)}</div>
-      <div class="offer">Angle: <b>${esc(c.offer)}</b></div>
+      <div class="offer">${c.draft_mode === "contract" ? "Contract pitch" : "FTE interest"}: <b>${esc(c.offer)}</b></div>
       <div class="why">${why || tags}</div>
       ${resume}
       ${srcrow}

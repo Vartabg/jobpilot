@@ -235,6 +235,9 @@ _SUBJECT_TAG = {
     "Interactive 3D performance rescue": "front-end + 3D engineer",
     "AI workflow audit + one automation": "AI automation engineer",
     "AI workflow audit": "AI / automation engineer",
+    "Forward Deployed / Solutions": "forward deployed / solutions",
+    "Applied AI / builder": "applied AI builder",
+    "Full-stack / product engineer": "full-stack engineer",
 }
 
 
@@ -259,10 +262,8 @@ def _has_any(text: str, keywords: tuple[str, ...]) -> bool:
     return any(keyword in text for keyword in keywords)
 
 
-def pick_offer(gig: Gig) -> str:
-    """Map an opportunity to the clearest sellable offer."""
-    text = _text(gig)
-
+def _pick_stack_offer(text: str) -> str | None:
+    """Stack-specific offers that apply in both FTE and contract modes."""
     if _has_any(
         text,
         (
@@ -297,7 +298,51 @@ def pick_offer(gig: Gig) -> str:
         ),
     ):
         return "Interactive 3D performance rescue"
+    return None
 
+
+def _pick_fte_track(gig: Gig) -> str:
+    """FTE track label — job-search shaped, not freelance product names.
+
+    Drives resume selection + swipe "Angle" + subject tag. Default aligns to
+    the Forward Deployed / Solutions thesis (mid-level, field + builder).
+    """
+    title = (gig.title or "").lower()
+    text = _text(gig)
+
+    fde_title = (
+        "forward deployed", "solutions engineer", "implementation engineer",
+        "customer engineer", "customer success engineer", "technical support",
+        "support engineer", "field engineer", "field service", "deployed engineer",
+    )
+    if any(p in title for p in fde_title):
+        return "Forward Deployed / Solutions"
+
+    ai_title = (
+        "applied ai", "ai engineer", "llm engineer", "agent engineer",
+        "agent builder", "ml engineer", "ai automation", "ai architect",
+    )
+    if any(p in title for p in ai_title):
+        return "Applied AI / builder"
+
+    fs_title = (
+        "full stack", "fullstack", "full-stack", "founding engineer",
+        "software engineer", "product engineer",
+    )
+    if any(p in title for p in fs_title):
+        return "Full-stack / product engineer"
+
+    # Body-only signals when the title is vague.
+    if _has_any(text, ("forward deployed", "solutions engineer", "implementation")):
+        return "Forward Deployed / Solutions"
+    if _has_any(text, ("llm", "agentic", "mcp", "claude", "rag")):
+        return "Applied AI / builder"
+
+    return "Forward Deployed / Solutions"
+
+
+def _pick_contract_offer(text: str) -> str:
+    """Freelance / Upwork product-shaped offer names."""
     if _has_any(
         text,
         (
@@ -318,8 +363,23 @@ def pick_offer(gig: Gig) -> str:
         ),
     ):
         return "AI workflow audit + one automation"
-
     return "AI workflow audit"
+
+
+def pick_offer(gig: Gig) -> str:
+    """Map an opportunity to the clearest offer / track label.
+
+    Contract/Upwork → service product names (audit, automation).
+    Full-time boards → FTE tracks (FDE/Solutions, Applied AI, full-stack)
+    so the phone never leads with a freelance pitch on a company job.
+    """
+    text = _text(gig)
+    stack = _pick_stack_offer(text)
+    if stack:
+        return stack
+    if _is_contract_lead(gig):
+        return _pick_contract_offer(text)
+    return _pick_fte_track(gig)
 
 
 def followup_message(company: str = "", role: str = "") -> str:
@@ -381,15 +441,29 @@ def _is_contract_lead(gig: Gig) -> bool:
     return bool(_CONTRACT_TITLE_RE.search(f"{gig.title or ''} {gig.description or ''}"))
 
 
-# Full-time framing: what the applicant BUILDS (an engineer who ships end to
-# end), not a contractor pitching an audit. Phrasing draws on the user's stack.
+# Full-time framing: honest builder + field/customer track. No year counts,
+# no "end to end", no company-SWE tenure claim. Not a contractor audit pitch.
 _FTE_CAPABILITY = {
     "RAG / internal knowledge assistant":
-        "I build AI and document-retrieval systems in Python and React, and I "
-        "keep security and human review in mind.",
+        "I build AI and document-retrieval systems in Python and TypeScript, "
+        "with human review and security in mind. Shipped solo products are "
+        "the proof — I don't have company SWE tenure.",
     "Interactive 3D performance rescue":
         "I build web and 3D front-ends in React/Next.js and Three.js, including "
-        "performance work on mobile.",
+        "performance work on mobile (solo production work, not a company ladder).",
+    "Forward Deployed / Solutions":
+        "I'm a customer-facing technical builder — Navy electronics, field "
+        "service deployments, and solo AI/full-stack products. I like sitting "
+        "with real users, shipping the fix, and owning the outcome.",
+    "Applied AI / builder":
+        "I build practical LLM and agent tooling (Python/TypeScript, browser "
+        "automation, human-in-the-loop). Solo shipped work is the proof — "
+        "I don't claim company SWE years.",
+    "Full-stack / product engineer":
+        "I ship full-stack web and AI product work as a solo builder "
+        "(Next.js, React, APIs, deploy). Customer-facing field background "
+        "plus the products I ship.",
+    # Legacy contract offer names can still appear if stack-matched on FTE.
     "AI workflow audit + one automation":
         "I work on practical LLM and automation workflows — tools, "
         "orchestration, and human-in-the-loop. Not model training.",
@@ -398,8 +472,9 @@ _FTE_CAPABILITY = {
         "human review in the loop.",
 }
 _FTE_CAPABILITY_DEFAULT = (
-    "I'm a full-stack and AI engineer. I build web apps, LLM and agent tools, "
-    "and the automation around them."
+    "I'm a customer-facing technical builder with field deployment experience "
+    "and solo AI/full-stack products. No company SWE tenure — the work I ship "
+    "is the proof."
 )
 
 # Contract framing: a bounded, service-shaped offer (appropriate for Upwork /
@@ -430,6 +505,9 @@ _OFFER_PROOF_KEY = {
     "Interactive 3D performance rescue": "full_stack_web",
     "AI workflow audit + one automation": "browser_automation",
     "AI workflow audit": "developer_tooling",
+    "Forward Deployed / Solutions": "field_engineering",
+    "Applied AI / builder": "ai_agent_systems",
+    "Full-stack / product engineer": "full_stack_web",
 }
 
 
@@ -445,11 +523,16 @@ def _proof_bullet(offer: str) -> str:
     return ""
 
 
+def draft_mode(gig: Gig) -> str:
+    """'contract' or 'fte' — exposed on the phone card so the mode is visible."""
+    return "contract" if _is_contract_lead(gig) else "fte"
+
+
 def build_revenue_brief(gig: Gig) -> RevenueBrief:
     """A concise, role-aware outreach draft for manual approval.
 
     Structure: a grounded fit line → one concrete proof → a low-friction CTA.
-    Full-time roles get a builder/engineer framing; genuine contract/Upwork
+    Full-time roles get a builder/field framing; genuine contract/Upwork
     sources keep the service/audit framing.
     """
     offer = pick_offer(gig)
