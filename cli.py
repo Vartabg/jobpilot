@@ -1342,6 +1342,27 @@ def queue(
         console.print(f"[yellow]Dashboard not found at {dashboard_path}[/yellow]")
 
 
+async def _neutralize_staged_tab(port: int, url: Optional[str]) -> None:
+    """Best-effort: navigate a just-filled, un-submitted tab to about:blank.
+
+    Runs after a declined submit-confirm so a live, submit-ready form is
+    never left sitting in the browser (see the 2026-06-03 Tread incident —
+    JobPilot's own prompt was declined, but the application still ended up
+    submitted). Swallows all errors; this is cleanup, not something that
+    should ever fail the CLI command that called it.
+    """
+    try:
+        bridge = await connect_to_chrome(port)
+        if not bridge:
+            return
+        try:
+            await bridge.neutralize_page(url)
+        finally:
+            await bridge.disconnect()
+    except Exception as e:
+        logger.warning("Tab neutralize skipped: %s", e)
+
+
 @app.command()
 def apply(
     job_id: str = typer.Argument(..., help="Job ID from the queue (shown in dashboard or 'jobpilot queue')"),
@@ -1413,6 +1434,7 @@ def apply(
         console.print("[bold green]🎊 Marked as applied! Keep going.[/bold green]")
     else:
         console.print("[dim]Not submitted. Job stays in queue.[/dim]")
+        asyncio.run(_neutralize_staged_tab(port, result.final_url))
 
 
 @app.command()
