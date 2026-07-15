@@ -181,6 +181,38 @@ class CDPBridge:
 
         return None
 
+    async def neutralize_page(self, url: Optional[str] = None) -> bool:
+        """Navigate a staged, submit-ready tab away from the form.
+
+        Call this whenever a fill run is declined or dry-run — a filled ATS
+        form left sitting live in the browser is one stray click (or the
+        page's own autosave) away from being submitted despite the decline
+        (see the 2026-06-03 Tread incident: JobPilot's own confirm prompt
+        was declined, but the tab still ended up submitted afterward).
+
+        Matches by exact URL when given, since `get_active_page()`'s
+        LinkedIn/Easy-Apply-biased heuristics would often pick the wrong tab
+        here. Falls back to whatever page this bridge last touched. Never
+        raises — this is best-effort cleanup, not a load-bearing guarantee.
+        """
+        target = None
+        if url and self._context:
+            for page in self._context.pages:
+                if page.url == url:
+                    target = page
+                    break
+        if target is None:
+            target = self._page
+        if target is None:
+            return False
+        try:
+            await target.goto("about:blank", timeout=5000)
+            log.info("Neutralized staged tab (was: %s)", url or target.url)
+            return True
+        except Exception as e:
+            log.warning("Could not neutralize staged tab: %s", e)
+            return False
+
     async def inject_script(self, script: str) -> any:
         """Inject and execute JavaScript in the page"""
         if not self._page:

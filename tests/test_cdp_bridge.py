@@ -15,11 +15,12 @@ from jobpilot.core.cdp_bridge import CDPBridge
 
 
 def _make_page(url: str, *, has_easy_apply_modal: bool = False):
-    """Fake Playwright Page — url attribute + async query_selector."""
+    """Fake Playwright Page — url attribute + async query_selector/goto."""
     page = SimpleNamespace(url=url)
     page.query_selector = AsyncMock(
         return_value=object() if has_easy_apply_modal else None
     )
+    page.goto = AsyncMock()
     return page
 
 
@@ -78,3 +79,57 @@ async def test_get_active_page_returns_none_when_only_chrome_internal_pages():
     ])
 
     assert await bridge.get_active_page() is None
+
+
+# ---------------------------------------------------------------------------
+# neutralize_page — regression coverage for the 2026-06-03 Tread incident:
+# a fill run was declined at the submit-confirm prompt, but the staged tab
+# was left live in the browser and the application ended up submitted anyway.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_neutralize_page_matches_by_exact_url_among_other_tabs():
+    """Must navigate the specific staged tab, not whatever get_active_page() would pick."""
+    linkedin = _make_page("https://www.linkedin.com/feed/")
+    staged = _make_page("https://jobs.ashbyhq.com/acme/apply/123")
+
+    bridge = _bridge_with_pages([linkedin, staged])
+
+    result = await bridge.neutralize_page("https://jobs.ashbyhq.com/acme/apply/123")
+
+    assert result is True
+    staged.goto.assert_awaited_once_with("about:blank", timeout=5000)
+    linkedin.goto.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_neutralize_page_falls_back_to_last_page_when_url_not_found():
+    """A closed/renamed tab shouldn't leave the staged form live — fall back to self._page."""
+    bridge = _bridge_with_pages([_make_page("https://example.com/")])
+    fallback = _make_page("https://jobs.ashbyhq.com/acme/apply/123")
+    bridge._page = fallback
+
+    result = await bridge.neutralize_page("https://jobs.ashbyhq.com/apply/already-closed")
+
+    assert result is True
+    fallback.goto.assert_awaited_once_with("about:blank", timeout=5000)
+
+
+@pytest.mark.asyncio
+async def test_neutralize_page_returns_false_with_no_page_available():
+    """No context and no last-known page — nothing to neutralize, must not raise."""
+    bridge = CDPBridge()
+
+    assert await bridge.neutralize_page("https://example.com/") is False
+
+
+@pytest.mark.asyncio
+async def test_neutralize_page_swallows_goto_failure():
+    """A tab that's already closed must not blow up the caller — best-effort only."""
+    staged = _make_page("https://jobs.ashbyhq.com/acme/apply/123")
+    staged.goto = AsyncMock(side_effect=Exception("Target page, context or browser has been closed"))
+    bridge = _bridge_with_pages([staged])
+
+    result = await bridge.neutralize_page("https://jobs.ashbyhq.com/acme/apply/123")
+
+    assert result is False
