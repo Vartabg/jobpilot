@@ -260,14 +260,43 @@ def _find_claim_target(job, lock_path: Path) -> Optional[dict]:
         if _norm_claim_text(target.get("company")) == job_company:
             company_matches.append(target)
 
-    if len(company_matches) == 1:
-        return company_matches[0]
-
     for target in company_matches:
         target_title = _norm_claim_text(target.get("title"))
-        if target_title and (target_title == job_title or target_title in job_title or job_title in target_title):
+        if target_title and target_title == job_title:
             return target
+    titleless_matches = [target for target in company_matches if not _norm_claim_text(target.get("title"))]
+    if len(titleless_matches) == 1:
+        return titleless_matches[0]
     return None
+
+
+def _claim_state_for_job(job) -> str:
+    """Expose claim-lock readiness without copying it into queue.json."""
+    lock_path = _resolve_claim_lock_path()
+    if lock_path is None:
+        return "unconfigured"
+    try:
+        target = _find_claim_target(job, lock_path)
+    except RuntimeError:
+        return "blocked"
+    if target is None:
+        return "unvetted"
+    decision = _norm_claim_text(target.get("decision"))
+    materials_status = _norm_claim_text(target.get("materials_status"))
+    if decision in {"kill", "closed"}:
+        return "closed"
+    if decision != "keep":
+        return "blocked"
+    return "ready" if materials_status == "ready" else "not_ready"
+
+
+def _job_output_payload(job) -> dict:
+    """Build an everyday jobs payload with live claim-lock state."""
+    from dataclasses import asdict, is_dataclass
+
+    payload = asdict(job) if is_dataclass(job) else dict(vars(job))
+    payload["claim_state"] = _claim_state_for_job(job)
+    return payload
 
 
 def _enforce_claim_lock(job, *, claim_approved: bool) -> None:

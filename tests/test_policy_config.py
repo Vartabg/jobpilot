@@ -23,8 +23,12 @@ def test_defaults_are_neutral():
     assert policy.scoring.refused_title_keywords == {}
     assert policy.scoring.deprioritized_companies == {}
     assert policy.queue.title_kill_keywords == ()
+    assert policy.queue.title_allow_keywords == ()
     assert policy.queue.moat_company_tags == {}
     assert not policy.queue.location_gate.enabled
+    assert not policy.queue.transport_gate.enabled
+    assert policy.application_evidence.employment_dir == ""
+    assert policy.application_evidence.gmail_cache_max_age_hours == 0
 
 
 def test_load_policy_missing_file_returns_defaults(tmp_path: Path):
@@ -56,6 +60,33 @@ def test_load_policy_deep_merges_partial_file(tmp_path: Path):
     assert gate.enabled
     assert gate.country_terms == ("us",)
     assert gate.remote_terms == ("remote",)  # default survives the merge
+
+
+def test_transport_and_evidence_policy_load():
+    policy = policy_from_dict({
+        "application_evidence": {
+            "employment_dir": "/tmp/Employment",
+            "gmail_cache_path": "data/gmail_applications.json",
+            "gmail_cache_max_age_hours": 24,
+            "fail_closed": True,
+        },
+        "queue": {
+            "title_allow_keywords": ["solutions engineer"],
+            "transport_gate": {
+                "enabled": True,
+                "mode": "transit",
+                "mobile_title_keywords": ["field service"],
+                "fixed_site_title_keywords": ["data center"],
+            },
+        },
+    })
+
+    assert policy.application_evidence.employment_dir == "/tmp/Employment"
+    assert policy.application_evidence.fail_closed
+    assert policy.application_evidence.gmail_cache_max_age_hours == 24
+    assert policy.queue.transport_gate.mode == "transit"
+    assert policy.queue.transport_gate.mobile_title_keywords == ("field service",)
+    assert policy.queue.title_allow_keywords == ("solutions engineer",)
 
 
 def test_refused_lists_accept_list_or_dict_and_ignore_doc_keys():
