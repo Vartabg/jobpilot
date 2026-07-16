@@ -15,12 +15,16 @@
           --green:#3fb950; --red:#f85149; --blue:#58a6ff; --yellow:#d29922; }
   * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
   [hidden] { display:none !important; }
+  .skip-link { position:fixed; left:0; top:0; z-index:100; padding:12px 16px; background:#fff; color:#000;
+    font-weight:700; transform:translateY(-120%); transition:transform .12s ease; }
+  .skip-link:focus { transform:translateY(0); }
   html,body { margin:0; height:100%; background:var(--bg); color:var(--txt);
     font:18px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; overscroll-behavior:none; }
   #app { max-width:520px; margin:0 auto; min-height:100%; display:flex; flex-direction:column;
     padding:env(safe-area-inset-top) 14px calc(env(safe-area-inset-bottom) + 14px); }
   header { display:flex; align-items:center; justify-content:space-between; padding:14px 2px 8px; gap:10px; }
   header h1 { font-size:18px; font-weight:600; margin:0; }
+  main { flex:1; min-height:0; display:flex; flex-direction:column; }
   #count { color:var(--dim); font-size:14px; white-space:nowrap; }
   #criteria { display:flex; flex-wrap:wrap; gap:6px; padding:0 2px 10px; }
   #criteria:empty { display:none; }
@@ -40,7 +44,7 @@
   .scorerow { display:flex; align-items:center; gap:10px; }
   .score { background:var(--green); color:#04140a; font-weight:700; border-radius:10px; padding:4px 10px; font-size:15px; }
   .score.mid { background:var(--yellow); color:#241a02; }
-  .role { font-size:23px; font-weight:600; line-height:1.25; }
+  .role { font-size:23px; font-weight:600; line-height:1.25; margin:0; }
   .company { color:var(--blue); font-size:17px; }
   .meta { display:flex; flex-wrap:wrap; gap:8px; color:var(--dim); font-size:15px; }
   .pill { background:#1f2630; border:1px solid var(--line); border-radius:999px; padding:5px 12px; font-size:13px; }
@@ -81,38 +85,50 @@
   .stamp.pass { left:24px; color:var(--red); border-color:var(--red); transform:rotate(-12deg); }
   .start-notes { color:var(--dim); font-size:13px; text-align:left; max-width:100%; }
   .start-notes li { margin:4px 0; }
+  :focus-visible { outline:3px solid var(--blue); outline-offset:3px; }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration:1ms !important; animation-iteration-count:1 !important;
+      scroll-behavior:auto !important; transition-duration:1ms !important; }
+    .spinner { border-top-color:var(--txt); }
+  }
+  @media (forced-colors: active) {
+    button, .card, .resume, pre { border:1px solid ButtonText; }
+  }
 </style>
 </head>
 <body>
+<a class="skip-link" href="#main">Skip to job cards</a>
 <div id="app">
-  <header><h1>GigPilot</h1><span id="count"></span></header>
+  <header><h1>GigPilot</h1><span id="count" role="status" aria-live="polite" aria-atomic="true"></span></header>
   <div id="criteria"></div>
+  <main id="main" tabindex="-1">
   <div id="start" class="screen">
-    <div style="font-size:42px">🧭</div>
+    <div style="font-size:42px" aria-hidden="true">🧭</div>
     <div style="color:var(--dim)">Phone-first. Tap Get jobs when ready — no 8am wait.</div>
     <div id="start-criteria" class="meta" style="justify-content:center"></div>
     <ul id="start-notes" class="start-notes"></ul>
     <div id="start-resume" class="resume" hidden></div>
-    <button class="primary" onclick="load(0)">Get jobs</button>
+    <button type="button" class="primary" onclick="load(0)">Get jobs</button>
   </div>
-  <div id="loading" class="screen" hidden><div class="spinner"></div><div style="color:var(--dim)">Scanning sources…</div></div>
+  <div id="loading" class="screen" role="status" aria-live="polite" aria-atomic="true" hidden><div class="spinner" aria-hidden="true"></div><div style="color:var(--dim)">Scanning sources…</div></div>
   <div id="deck" hidden></div>
   <div id="actions" class="actions" hidden>
-    <button class="pass" onclick="decide('pass')">✕ Pass</button>
-    <button class="apply" onclick="decide('apply')">★ Apply</button>
+    <button type="button" class="pass" onclick="decide('pass')">✕ Pass</button>
+    <button type="button" class="apply" onclick="decide('apply')">★ Apply</button>
   </div>
   <div id="acthint" class="hint" hidden>Apply opens email or ATS. Expand Crib to paste answers.</div>
-  <div id="error" class="screen" hidden>
-    <div style="font-size:42px">⚠️</div>
+  <div id="error" class="screen" role="alert" aria-live="assertive" hidden>
+    <div style="font-size:42px" aria-hidden="true">⚠️</div>
     <div id="errmsg" style="color:var(--dim)">Couldn't reach the server.</div>
-    <button class="primary" onclick="load(1)">Try again</button>
+    <button type="button" class="primary" onclick="load(1)">Try again</button>
   </div>
-  <div id="done" class="screen" hidden>
-    <div style="font-size:42px">✓</div>
+  <div id="done" class="screen" role="status" aria-live="polite" aria-atomic="true" hidden>
+    <div style="font-size:42px" aria-hidden="true">✓</div>
     <div id="donemsg" style="color:var(--dim)">All caught up.</div>
-    <button class="ghost" onclick="load(1)">Rescan</button>
+    <button type="button" class="ghost" onclick="load(1)">Rescan</button>
   </div>
-  <div id="snack" hidden></div>
+  </main>
+  <div id="snack" role="status" aria-live="polite" aria-atomic="true" hidden></div>
 </div>
 <script>
 let cards = [], i = 0, busy = false, last = null, snackTimer = null, meta = null;
@@ -236,12 +252,12 @@ function render() {
     ${crib.in_office ? copyRow("In-office", crib.in_office) : ""}`;
 
   $("deck").innerHTML = `
-    <div class="card" id="card">
+    <article class="card" id="card" tabindex="-1" aria-labelledby="job-card-title">
       <div class="stamp apply" id="st-apply">APPLY</div>
       <div class="stamp pass" id="st-pass">PASS</div>
       <div class="scorerow"><span class="score ${c.score < 90 ? "mid" : ""}">${esc(c.score)}</span>
         <div class="meta"><span class="pill">${esc(c.pay)}</span><span class="pill">${esc(c.location)}</span></div></div>
-      <div class="role">${esc(c.role)}</div>
+      <h2 class="role" id="job-card-title">${esc(c.role)}</h2>
       <div class="company">${esc(c.company)}</div>
       <div class="offer">${c.draft_mode === "contract" ? "Contract pitch" : "FTE interest"}: <b>${esc(c.offer)}</b></div>
       <div class="why">${why || tags}</div>
@@ -253,7 +269,7 @@ function render() {
       <details><summary>Preview the email</summary>
         <button type="button" class="copybtn" id="copy-email">Copy full email</button>
         <pre>${esc(c.subject)}\n\n${esc(c.draft)}</pre></details>
-    </div>`;
+    </article>`;
   show("deck", true); show("actions", true); show("acthint", true);
   const cardEl = $("card");
   wireCopyButtons(cardEl);
@@ -265,6 +281,7 @@ function render() {
     };
   }
   wireSwipe(cardEl);
+  requestAnimationFrame(() => cardEl.focus());
   $("acthint").textContent = c.is_mailto
     ? "Apply opens a prepped email — attach " + (c.resume || "resume") + " and send."
     : "Apply opens the form — use Crib Copy buttons for paste fields.";
@@ -293,10 +310,11 @@ async function decide(action, viaFling) {
   }
   last = c;
   if (!viaFling) flingNow(action);
+  const motionDelay = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 220;
   setTimeout(() => {
     i++; busy = false; render();
     toast(action === "apply" ? "Applied" : "Passed", undo);
-  }, 220);
+  }, motionDelay);
 }
 
 async function undo() {
@@ -336,7 +354,12 @@ function wireSwipe(el) {
     x0 = null; dx = 0;
   });
 }
-function flingEl(el, dir) { el.style.transform = `translateX(${dir * 600}px) rotate(${dir * 30}deg)`; el.style.opacity = 0; }
+function flingEl(el, dir) {
+  if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    el.style.transform = `translateX(${dir * 600}px) rotate(${dir * 30}deg)`;
+  }
+  el.style.opacity = 0;
+}
 
 // Prefetch criteria for the start screen without a full scan.
 (async () => {
