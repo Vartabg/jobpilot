@@ -25,6 +25,29 @@
   }
 
   * { box-sizing: border-box; }
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+  .skip-link {
+    position: fixed;
+    left: 0;
+    top: 0;
+    z-index: 100;
+    padding: 12px 16px;
+    background: var(--ink);
+    color: #fff;
+    transform: translateY(-120%);
+    transition: transform 0.12s;
+  }
+  .skip-link:focus { transform: translateY(0); }
   html, body { min-height: 100%; }
   body {
     margin: 0;
@@ -56,6 +79,7 @@
   }
 
   button:hover, a.button:hover { border-color: var(--ink); }
+  :focus-visible { outline: 3px solid var(--accent-2); outline-offset: 3px; }
   button.primary, a.primary { background: var(--ink); border-color: var(--ink); color: #fff; }
   button.good { background: #e9f7ef; border-color: #9ad5b3; color: var(--good); }
   button.subtle, a.subtle { color: var(--muted); }
@@ -285,6 +309,8 @@
 
   .organizer-title {
     font-weight: 760;
+    font-size: 1rem;
+    margin: 0;
   }
 
   .organizer-summary {
@@ -523,6 +549,23 @@
   .toast.success { background: var(--good); }
   .toast.error { background: var(--bad); }
 
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 1ms !important;
+      animation-iteration-count: 1 !important;
+      scroll-behavior: auto !important;
+      transition-duration: 1ms !important;
+    }
+  }
+
+  @media (pointer: coarse) {
+    button, a.button, .chip { min-height: 44px; }
+  }
+
+  @media (forced-colors: active) {
+    button, a.button, .chip, .table-shell, tr { border: 1px solid ButtonText; }
+  }
+
   @media (max-width: 900px) {
     body { overflow-x: hidden; }
     .shell { display: block; width: 100vw; overflow-x: hidden; }
@@ -596,20 +639,21 @@
 </style>
 </head>
 <body>
+<a class="skip-link" href="#main">Skip to job targets</a>
 <div class="shell">
-  <aside class="side">
+  <aside class="side" aria-label="JobPilot navigation and quick actions">
     <div class="brand">
       <strong>JobPilot</strong>
       <span id="profile-line">Loading profile</span>
     </div>
 
-    <nav class="nav">
-      <button class="active" data-filter="queued" onclick="setFilter('queued')"><span>Targets</span><span class="nav-count" id="n-queued">0</span></button>
-      <button data-filter="viewing" onclick="setFilter('viewing')"><span>Open</span><span class="nav-count" id="n-viewing">0</span></button>
-      <button data-filter="applied" onclick="setFilter('applied')"><span>Applied</span><span class="nav-count" id="n-applied">0</span></button>
-      <button data-filter="interview" onclick="setFilter('interview')"><span>Interview</span><span class="nav-count" id="n-interview">0</span></button>
-      <button data-filter="rejected" onclick="setFilter('rejected')"><span>Rejected</span><span class="nav-count" id="n-rejected">0</span></button>
-      <button data-filter="skipped" onclick="setFilter('skipped')"><span>Skipped</span><span class="nav-count" id="n-skipped">0</span></button>
+    <nav class="nav" aria-label="Application status filters">
+      <button type="button" class="active" aria-pressed="true" data-filter="queued" onclick="setFilter('queued')"><span>Targets</span><span class="nav-count" id="n-queued">0</span></button>
+      <button type="button" aria-pressed="false" data-filter="viewing" onclick="setFilter('viewing')"><span>Open</span><span class="nav-count" id="n-viewing">0</span></button>
+      <button type="button" aria-pressed="false" data-filter="applied" onclick="setFilter('applied')"><span>Applied</span><span class="nav-count" id="n-applied">0</span></button>
+      <button type="button" aria-pressed="false" data-filter="interview" onclick="setFilter('interview')"><span>Interview</span><span class="nav-count" id="n-interview">0</span></button>
+      <button type="button" aria-pressed="false" data-filter="rejected" onclick="setFilter('rejected')"><span>Rejected</span><span class="nav-count" id="n-rejected">0</span></button>
+      <button type="button" aria-pressed="false" data-filter="skipped" onclick="setFilter('skipped')"><span>Skipped</span><span class="nav-count" id="n-skipped">0</span></button>
     </nav>
 
     <section class="side-section">
@@ -623,7 +667,7 @@
     </section>
   </aside>
 
-  <main>
+  <main id="main" tabindex="-1">
     <div class="topbar">
       <div>
         <h1>Company-first targets</h1>
@@ -637,26 +681,30 @@
       </div>
     </div>
 
-    <section class="metrics">
+    <section class="metrics" aria-label="Queue summary">
       <div class="metric"><div class="num" id="m-targets">0</div><div class="label">target companies</div></div>
       <div class="metric"><div class="num" id="m-hidden">0</div><div class="label">duplicates hidden</div></div>
       <div class="metric"><div class="num" id="m-tracked">0</div><div class="label">tracked apps</div></div>
       <div class="metric"><div class="num" id="m-total">0</div><div class="label">roles scanned</div></div>
     </section>
 
-    <section class="toolbar">
+    <section class="toolbar" aria-label="Job filters">
+      <label class="sr-only" for="search">Search job targets</label>
       <input id="search" class="search" type="search" placeholder="Search company, role, or signal" oninput="render()">
-      <label class="switch"><input id="all-roles" type="checkbox" onchange="render()"> Show every role</label>
+      <label class="switch"><input id="all-roles" type="checkbox" aria-label="Show every role" onchange="render()"> Show every role</label>
     </section>
 
     <section class="organizer">
       <div class="organizer-head">
-        <div class="organizer-title">Application Organizer</div>
-        <div class="organizer-summary" id="organizer-summary">Loading tracked applications</div>
+        <h2 class="organizer-title">Application Organizer</h2>
+        <div class="organizer-summary" id="organizer-summary" role="status" aria-live="polite">Loading tracked applications</div>
       </div>
       <form class="log-form" onsubmit="logExternal(event)">
+        <label class="sr-only" for="log-company">Company</label>
         <input id="log-company" name="company" required placeholder="Company">
+        <label class="sr-only" for="log-title">Role title</label>
         <input id="log-title" name="title" placeholder="Role title">
+        <label class="sr-only" for="log-status">Application status</label>
         <select id="log-status" name="status">
           <option value="applied">Applied</option>
           <option value="interview">Interview</option>
@@ -664,6 +712,7 @@
           <option value="submitted">Submitted</option>
           <option value="abandoned">Abandoned</option>
         </select>
+        <label class="sr-only" for="log-url">Job URL</label>
         <input id="log-url" name="url" placeholder="URL optional">
         <button class="primary" type="submit">Log</button>
       </form>
@@ -674,6 +723,7 @@
 
     <section class="table-shell">
       <table>
+        <caption class="sr-only">Job targets ranked by fit with application actions</caption>
         <thead>
           <tr>
             <th class="score-cell">Fit</th>
@@ -691,7 +741,7 @@
   </main>
 </div>
 
-<div class="toast" id="toast">Ready</div>
+<div class="toast" id="toast" role="status" aria-live="polite" aria-atomic="true">Ready</div>
 
 <script>
 let jobs = [];
@@ -792,7 +842,9 @@ function updateStats() {
 function setFilter(next) {
   filter = next;
   document.querySelectorAll('.nav button').forEach(button => {
-    button.classList.toggle('active', button.dataset.filter === next);
+    const isActive = button.dataset.filter === next;
+    button.classList.toggle('active', isActive);
+    button.setAttribute('aria-pressed', String(isActive));
   });
   render();
 }
@@ -809,23 +861,24 @@ function signalText(job) {
 }
 
 function actionHtml(job) {
+  const context = `${escape(job.company)} ${escape(job.title)}`;
   if (job.status === 'applied') {
-    return `<button class="subtle" onclick="resetJob('${job.id}')">Undo</button>`;
+    return `<button class="subtle" aria-label="Undo applied status for ${context}" onclick="resetJob('${job.id}')">Undo</button>`;
   }
   if (job.status === 'viewing') {
     return `
-      <button class="good" onclick="markApplied('${job.id}')">Applied</button>
-      <a class="button subtle" href="${escape(job.url)}" target="_blank" rel="noopener" onclick="openJob('${job.id}', false)">Reopen</a>
-      <button class="danger" onclick="resetJob('${job.id}')">Queue</button>
+      <button class="good" aria-label="Mark ${context} applied" onclick="markApplied('${job.id}')">Applied</button>
+      <a class="button subtle" aria-label="Reopen ${context}" href="${escape(job.url)}" target="_blank" rel="noopener" onclick="openJob('${job.id}', false)">Reopen</a>
+      <button class="danger" aria-label="Return ${context} to queue" onclick="resetJob('${job.id}')">Queue</button>
     `;
   }
   if (job.status === 'skipped' || job.status === 'rejected') {
-    return `<button class="subtle" onclick="resetJob('${job.id}')">Queue</button>`;
+    return `<button class="subtle" aria-label="Return ${context} to queue" onclick="resetJob('${job.id}')">Queue</button>`;
   }
   return `
-    <a class="button primary" href="${escape(job.url)}" target="_blank" rel="noopener" onclick="openJob('${job.id}', true)">Open</a>
-    <button class="good" onclick="markApplied('${job.id}')">Applied</button>
-    <button class="danger" onclick="skipJob('${job.id}')">Skip</button>
+    <a class="button primary" aria-label="Open ${context}" href="${escape(job.url)}" target="_blank" rel="noopener" onclick="openJob('${job.id}', true)">Open</a>
+    <button class="good" aria-label="Mark ${context} applied" onclick="markApplied('${job.id}')">Applied</button>
+    <button class="danger" aria-label="Skip ${context}" onclick="skipJob('${job.id}')">Skip</button>
   `;
 }
 
@@ -839,7 +892,7 @@ function rowHtml(job) {
     <tr class="${escape(job.status || '')}">
       <td class="score-cell">
         <div class="score-stack">
-          <div class="score-line"><span class="score">${fit}</span><span class="meter"><span style="width:${fit}%"></span></span></div>
+          <div class="score-line"><span class="score">${fit}</span><span class="meter" role="progressbar" aria-label="Fit score" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${fit}"><span style="width:${fit}%"></span></span></div>
           <div class="psyche">personality ${psyche}/15</div>
         </div>
       </td>
@@ -1028,10 +1081,10 @@ function renderChips() {
     ['Experience', profile.years_experience ? `${profile.years_experience} years` : '']
   ].filter(([, value]) => value);
   document.getElementById('chip-wrap').innerHTML = chips.map(([label, value], i) => `
-    <div class="chip" onclick="copyChip(this, ${i})" data-value="${escape(value)}">
+    <button type="button" class="chip" aria-label="Copy ${escape(label)}" onclick="copyChip(this, ${i})" data-value="${escape(value)}">
       <div class="chip-label">${escape(label)}</div>
       <div class="chip-value">${escape(value)}</div>
-    </div>
+    </button>
   `).join('');
 }
 
