@@ -51,6 +51,7 @@ DEFAULTS: dict[str, Any] = {
             "country_terms": [],
             "blocked_locations": [],
             "blocked_without_country": [],
+            "bypass_title_keywords": [],
         },
         "transport_gate": {
             "enabled": False,
@@ -87,6 +88,7 @@ class LocationGate:
     country_terms: tuple[str, ...] = ()
     blocked_locations: tuple[str, ...] = ()
     blocked_without_country: tuple[str, ...] = ()
+    bypass_title_keywords: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -204,6 +206,7 @@ def policy_from_dict(data: Optional[dict[str, Any]]) -> Policy:
         country_terms=_term_tuple(gate_raw.get("country_terms")),
         blocked_locations=_term_tuple(gate_raw.get("blocked_locations")),
         blocked_without_country=_term_tuple(gate_raw.get("blocked_without_country")),
+        bypass_title_keywords=_term_tuple(gate_raw.get("bypass_title_keywords")),
     )
     transport = TransportGate(
         enabled=bool(transport_raw.get("enabled", False)),

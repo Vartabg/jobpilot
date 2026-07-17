@@ -231,6 +231,22 @@ def _is_allowed_location(title: str, company: str, location: str | None) -> bool
         return False
 
     loc_haystack = _normalize_location_text(_effective_location(company, location))
+
+    # Field-service titles: surface anywhere in the US regardless of city
+    # (Garo judges travel-vs-relocation per role, 2026-07-17 pivot). Home-metro
+    # narrowing is bypassed for these; a clearly-international pin with no US
+    # country signal is still rejected so foreign roles don't leak in.
+    title_lower = (title or "").lower()
+    if gate.bypass_title_keywords and any(
+        kw in title_lower for kw in gate.bypass_title_keywords
+    ):
+        if not loc_haystack:
+            return True
+        has_country = _has_location_hit(loc_haystack, gate.country_terms)
+        if not has_country and _has_location_hit(loc_haystack, gate.blocked_locations):
+            return False
+        return True
+
     if not loc_haystack:
         return False
 
