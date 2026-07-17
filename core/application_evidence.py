@@ -42,6 +42,21 @@ def _norm_url(value: str) -> str:
     ))
 
 
+_COMPANY_SUFFIXES = {
+    "inc", "incorporated", "corp", "corporation", "llc", "llp", "ltd", "limited",
+    "co", "company", "group", "holding", "holdings", "americas", "america",
+    "usa", "us", "international", "intl", "gmbh", "sa",
+}
+
+
+def _norm_company(value: str) -> str:
+    """Normalize a company name, dropping trailing corporate suffixes so that
+    'Crown Equipment' matches 'Crown Equipment Corporation'."""
+    base = _norm_text(value)
+    tokens = [t for t in base.split() if t not in _COMPANY_SUFFIXES]
+    return " ".join(tokens) or base
+
+
 def _same_role(left: str, right: str) -> bool:
     left_n = _norm_text(left)
     right_n = _norm_text(right)
@@ -190,11 +205,11 @@ class ApplicationEvidenceIndex:
                 if record.url and _norm_url(record.url) == url_n:
                     return record
 
-        company_n = _norm_text(company)
+        company_n = _norm_company(company)
         if not company_n:
             return None
         for record in self.records:
-            same_company = _norm_text(record.company) == company_n
+            same_company = _norm_company(record.company) == company_n
             if same_company and _same_role(record.title, title):
                 return record
         return None
