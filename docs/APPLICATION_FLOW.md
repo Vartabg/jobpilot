@@ -48,6 +48,10 @@ The human submits from a real browser session — this is the human-in-the-loop 
 Reading a form once, read-only, to enumerate its questions is lower-risk — but prefer pasting the
 questions to the agent over repeated automated loads of a form you intend to submit to.
 
+## Qualification gate
+
+Before drafting an application, separate the posting's required qualifications from its preferred or nice-to-have items. For each core requirement, record `meets`, `credible equivalent`, `gap`, or `unknown`. A material product-domain gap blocks the normal apply queue; it is a stretch only when the user explicitly asks for stretch roles. Do not treat a broad “equivalent experience” clause or keyword overlap as proof of product-specific experience. The user's current correction overrides the scorer, stored memory, or generic job language. Every role brief must state the biggest gap and separate interview and offer probabilities.
+
 ## Artifacts
 
 | File | Purpose |
