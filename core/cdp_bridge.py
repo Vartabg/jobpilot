@@ -72,7 +72,8 @@ class CDPBridge:
                 "headless": False,
                 "args": [
                     f"--remote-debugging-port={self.debug_port}",
-                    "--remote-allow-origins=*",
+                    # No --remote-allow-origins: Playwright sends no Origin header,
+                    # and the wildcard would let any website attach to the CDP socket.
                     "--no-first-run",
                     "--no-default-browser-check",
                 ],
