@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "JobPilot Autofill",
-  "version": "0.6.0",
-  "description": "One-click form fill for Greenhouse/Lever/Ashby from your JobPilot profile. Strict matching, native <select> + react-select support, required-field reporting. Never submits, never touches CAPTCHA.",
+  "version": "0.7.0",
+  "description": "One-click form fill for Greenhouse/Lever/Ashby/Dayforce from your JobPilot profile. Strict matching, native <select> + react-select support, required-field reporting. Never submits, never touches CAPTCHA.",
   "action": {
     "default_title": "JobPilot: fill visible fields on this form"
   },
@@ -14,7 +14,9 @@
     "https://job-boards.eu.greenhouse.io/*",
     "https://jobs.lever.co/*",
     "https://jobs.eu.lever.co/*",
-    "https://jobs.ashbyhq.com/*"
+    "https://jobs.ashbyhq.com/*",
+    "https://*.dayforcehcm.com/*",
+    "https://*.dayforce.com/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -29,7 +31,9 @@
         "https://job-boards.eu.greenhouse.io/*",
         "https://jobs.lever.co/*",
         "https://jobs.eu.lever.co/*",
-        "https://jobs.ashbyhq.com/*"
+        "https://jobs.ashbyhq.com/*",
+        "https://*.dayforcehcm.com/*",
+        "https://*.dayforce.com/*"
       ],
       "use_dynamic_url": true
     }

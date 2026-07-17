@@ -967,6 +967,7 @@ async def fill_application(
                     if any(k in url for k in [
                         "greenhouse.io", "lever.co", "ashbyhq.com",
                         "boards.greenhouse", "job-boards.greenhouse",
+                        "dayforcehcm.com", "dayforce.com",
                         "/embed/",
                     ]):
                         frames_to_fill.append(frame)
