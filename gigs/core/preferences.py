@@ -17,10 +17,11 @@ Pay, links, tailoring, and background bullets stay preferences-only.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
+from typing import Any
 
 from jobpilot.gigs.core.paths import data_dir
-from typing import Any
 
 DATA_DIR = data_dir()
 PREFS_PATH = DATA_DIR / "preferences.json"
@@ -34,7 +35,9 @@ DEFAULTS: dict[str, Any] = {
         "last_name": "Name",
         "email": "you@example.com",
         "phone": "000-000-0000",
-        "phone_note": "(text preferred)",
+        # Optional suffix after the number in signoffs/crib. Leave blank —
+        # never put "text preferred" etc. into paste fields by default.
+        "phone_note": "",
         "linkedin": "https://www.linkedin.com/in/your-handle",
         "github": "https://github.com/your-handle",
         "portfolio": "https://your-portfolio.example.com",
@@ -342,15 +345,34 @@ def format_criteria_report(prefs: dict[str, Any] | None = None) -> str:
 
 
 def signoff_block(prefs: dict[str, Any] | None = None) -> str:
-    """Render the standard email signoff using current identity preferences."""
+    """Render the standard email signoff using current identity preferences.
+
+    Phone is the bare number only (no 'text preferred' suffix) so paste/signoff
+    is clean for Mail and ATS fields.
+    """
     ident = identity(prefs)
-    phone_part = ident["phone"]
-    if ident.get("phone_note"):
-        phone_part = f"{phone_part} {ident['phone_note']}"
+    phone = (ident.get("phone") or "").strip()
+    # Strip legacy notes if a stale preferences.json still embeds them in phone.
+    if re.search(r"text\s+preferred", phone, flags=re.IGNORECASE):
+        phone = re.sub(
+            r"\s*[\(\[]?\s*text\s+preferred\s*[\)\]]?\s*",
+            " ",
+            phone,
+            flags=re.IGNORECASE,
+        ).strip()
+        phone = re.sub(r"\s+", " ", phone)
     lines = [
         "Best,",
         f"{ident['first_name']} {ident['last_name']}",
-        phone_part,
-        f"{ident['linkedin']} | {ident['portfolio']}",
     ]
+    if phone:
+        lines.append(phone)
+    email = (ident.get("email") or "").strip()
+    if email and "example.com" not in email:
+        lines.append(email)
+    links = " | ".join(
+        p for p in (ident.get("linkedin"), ident.get("portfolio")) if p
+    )
+    if links:
+        lines.append(links)
     return "\n".join(lines)

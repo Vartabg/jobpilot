@@ -3,24 +3,24 @@ Provider-agnostic LLM client for JobPilot.
 ==========================================
 Single entry point for AI completions. Picks the first available backend:
 
-1. **Bro** — an optional local AI server (see bro_client.py). Used
-   automatically when it responds to a health check.
-2. **Gemini** — Google's Gemini REST API, used when the GEMINI_API_KEY
-   environment variable is set. Free-tier keys work:
-   https://aistudio.google.com/app/apikey
-3. **None** — complete() raises LLMUnavailable so callers can fall back to
-   their template-based behavior. Errors are never returned as if they were
-   AI-generated text.
+1. **Bro** — optional local AI server (see bro_client.py). Used when it
+   responds to a health check.
+2. **Gemini** — Google's Gemini REST API when ``GEMINI_API_KEY`` is set
+   (free-tier keys work: https://aistudio.google.com/app/apikey).
+3. **None** — complete() raises LLMUnavailable so callers fall back to
+   template-based behavior. Errors are never returned as AI-generated text.
+
+Ollama / on-device models were abandoned (too slow for agent work). Code paths
+remain for emergency re-enable via ``JOBPILOT_USE_OLLAMA=1`` only.
 """
 
 from __future__ import annotations
 
-import os
-
 import requests
 
+from jobpilot.core import ollama_client
 from jobpilot.core.bro_client import BroUnavailable, chat_or_raise, is_bro_running
-from jobpilot.core.config import TIMEOUT_CHAT
+from jobpilot.core.config import TIMEOUT_CHAT, get_gemini_api_key
 from jobpilot.core.logger import get_logger
 
 log = get_logger(__name__)
@@ -47,13 +47,20 @@ class LLMUnavailable(Exception):
 
 
 def _gemini_api_key() -> str:
-    return os.environ.get(GEMINI_API_KEY_ENV, "").strip()
+    return get_gemini_api_key()
+
+
+def is_ollama_available() -> bool:
+    """Return whether the explicitly enabled emergency backend is ready."""
+    return ollama_client.is_available()
 
 
 def get_provider() -> str | None:
-    """Return the active backend name: "bro", "gemini", or None."""
+    """Return the active backend name: "bro", "ollama", "gemini", or None."""
     if is_bro_running():
         return "bro"
+    if is_ollama_available():
+        return "ollama"
     if _gemini_api_key():
         return "gemini"
     return None
@@ -71,7 +78,7 @@ def complete(prompt: str, *, context: str | None = None, smart: bool = False) ->
         prompt: The instruction/question for the model.
         context: Optional extra context prepended to the prompt.
         smart: Hint that the request is complex (Bro routes it to its
-            smarter/slower model; Gemini ignores it).
+            smarter/slower model; Ollama/Gemini ignore it).
 
     Raises:
         LLMUnavailable: when no backend is available or the request fails.
@@ -86,6 +93,12 @@ def complete(prompt: str, *, context: str | None = None, smart: bool = False) ->
         if reply.strip():
             return reply
         raise LLMUnavailable("Local AI backend returned an empty reply.")
+
+    if provider == "ollama":
+        try:
+            return ollama_client.complete(prompt, context=context)
+        except ollama_client.OllamaUnavailable as exc:
+            raise LLMUnavailable(str(exc)) from exc
 
     if provider == "gemini":
         return _complete_gemini(prompt, context=context)
@@ -118,7 +131,9 @@ def _complete_gemini(prompt: str, *, context: str | None = None) -> str:
     try:
         payload = response.json()
     except ValueError as exc:
-        raise LLMUnavailable("Gemini returned a response that was not valid JSON.") from exc
+        raise LLMUnavailable(
+            "Gemini returned a response that was not valid JSON."
+        ) from exc
 
     return _parse_gemini_payload(payload)
 

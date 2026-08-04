@@ -25,6 +25,17 @@ jobpilot doctor --no-bro       # verify health
 ./scripts/stop.sh                # stop dashboard only
 ```
 
+## Cloud pilot (terminal)
+
+```bash
+jobpilot                  # boot pack + cloud Codex
+jobpilot --check          # health only
+jobpilot doctor           # all other subcommands still work
+```
+
+Local Ollama / on-device models are **gone**. Bare `jobpilot` uses cloud Codex.
+See [LOCAL_PILOT.md](LOCAL_PILOT.md).
+
 ## iTerm (recommended terminal)
 
 ```bash

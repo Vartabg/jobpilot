@@ -80,7 +80,7 @@ def test_identity_falls_through_to_profile_when_prefs_lack_identity(
     assert ident["github"] == "https://github.com/ada"
     assert ident["portfolio"] == "https://ada.example.org"
     # Keys the profile doesn't carry keep their neutral defaults.
-    assert ident["phone_note"] == preferences.DEFAULTS["identity"]["phone_note"]
+    assert ident.get("phone_note", "") == ""
     assert ident["tagline"] == preferences.DEFAULTS["identity"]["tagline"]
 
 
@@ -223,4 +223,5 @@ def test_signoff_block_uses_resolved_identity(
     block = preferences.signoff_block(preferences.load(_missing(tmp_path)))
     assert "Ada Lovelace" in block
     assert "555-0100" in block
+    assert "text preferred" not in block.lower()
     assert "https://www.linkedin.com/in/ada | https://ada.example.org" in block

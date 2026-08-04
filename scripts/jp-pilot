@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# JobPilot pilot — cloud Codex only (local models abandoned).
+#
+# Usage:
+#   jp-pilot                 # boot + cloud Codex
+#   jp-pilot --check         # health only
+#   jp-pilot --no-boot       # skip pack
+set -euo pipefail
+
+jobpilot_source="${BASH_SOURCE[0]}"
+while [[ -L "$jobpilot_source" ]]; do
+  jobpilot_source_dir="$(cd "$(dirname "$jobpilot_source")" && pwd)"
+  jobpilot_source="$(readlink "$jobpilot_source")"
+  [[ "$jobpilot_source" != /* ]] && jobpilot_source="$jobpilot_source_dir/$jobpilot_source"
+done
+JOBPILOT_ROOT="$(cd "$(dirname "$jobpilot_source")/.." && pwd)"
+JOBPILOT_WORKSPACE="${AI_WORKSPACE:-$HOME/AI_Workspace}"
+JOBPILOT_CODEX_CONFIG_DIR="${CODEX_HOME:-$HOME/.codex}"
+JOBPILOT_CODEX_BIN="${CODEX_BIN:-$HOME/.npm-global/bin/codex}"
+JOBPILOT_MODE="cloud"
+JOBPILOT_DO_BOOT=1
+JOBPILOT_AGENT_ARGS=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --check) JOBPILOT_MODE="check"; shift ;;
+    --local|--ollama|--opencode)
+      printf '\n  Local / on-device models were removed.\n'
+      printf '  Use: jobpilot   (cloud Codex — fast)\n'
+      printf '  Or:  Claude / ChatGPT desktop apps.\n\n'
+      exit 1
+      ;;
+    --cloud) JOBPILOT_MODE="cloud"; shift ;;
+    --no-boot) JOBPILOT_DO_BOOT=0; shift ;;
+    --help|-h)
+      sed -n '2,10p' "$0"
+      exit 0
+      ;;
+    --) shift; JOBPILOT_AGENT_ARGS+=("$@"); break ;;
+    *) JOBPILOT_AGENT_ARGS+=("$1"); shift ;;
+  esac
+done
+
+printf '\n  jp-pilot — cloud helper (local models abandoned)\n'
+
+if [[ "$JOBPILOT_DO_BOOT" -eq 1 && -x "$JOBPILOT_ROOT/scripts/pilot_boot.sh" ]]; then
+  if [[ "$JOBPILOT_MODE" == "check" ]]; then
+    "$JOBPILOT_ROOT/scripts/pilot_boot.sh"
+  else
+    "$JOBPILOT_ROOT/scripts/pilot_boot.sh" --launching
+  fi
+fi
+
+if [[ "$JOBPILOT_MODE" == "check" ]]; then
+  exit 0
+fi
+
+cd "$JOBPILOT_WORKSPACE"
+if [[ ! -x "$JOBPILOT_CODEX_BIN" ]]; then
+  printf 'codex CLI not found at %s\n' "$JOBPILOT_CODEX_BIN" >&2
+  printf 'Install: npm i -g @openai/codex   or use Claude desktop.\n' >&2
+  exit 1
+fi
+
+printf '\n  → cloud Codex (fast)\n\n'
+if [[ -f "$JOBPILOT_CODEX_CONFIG_DIR/cloud.config.toml" ]]; then
+  exec "$JOBPILOT_CODEX_BIN" -p cloud \
+    "${JOBPILOT_AGENT_ARGS[@]+"${JOBPILOT_AGENT_ARGS[@]}"}"
+fi
+exec "$JOBPILOT_CODEX_BIN" \
+  "${JOBPILOT_AGENT_ARGS[@]+"${JOBPILOT_AGENT_ARGS[@]}"}"

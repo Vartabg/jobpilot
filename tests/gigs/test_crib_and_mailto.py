@@ -41,7 +41,7 @@ def test_apply_target_prefills_mailto_with_subject_and_body() -> None:
     assert "Acme AI" in qs["subject"][0] or "Senior Engineer" in qs["subject"][0]
     # Body should be the email-ready draft (no review note)
     assert "Review before sending" not in qs["body"][0]
-    assert "Hi -" in qs["body"][0]
+    assert "Hi —" in qs["body"][0] or "Hi -" in qs["body"][0]
 
 
 def test_apply_target_passes_through_non_mailto_unchanged() -> None:

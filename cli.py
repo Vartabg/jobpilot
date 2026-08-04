@@ -2,6 +2,8 @@
 JobPilot CLI — thin entry point.
 
 Usage:
+    jobpilot             - Start the local pilot (terminal, app-safe)
+    jobpilot --check     - Pilot health pack only (no agent)
     jobpilot start       - Launch and connect to Chrome
     jobpilot profile     - View/edit your profile
     jobpilot templates   - Manage answer templates
@@ -49,11 +51,72 @@ from jobpilot.learning.action_recorder import get_action_recorder
 # any logger call would crash with AttributeError.
 logger = get_logger(__name__)
 
+_REPO_ROOT = Path(__file__).resolve().parent
+
 app = typer.Typer(
     name="jobpilot",
-    help="Semi-automated LinkedIn job application copilot",
+    help=(
+        "Your job-search helper.\n\n"
+        "  jobpilot            start AI helper (cloud Codex)\n"
+        "  jobpilot jobs       show jobs you haven't applied to\n"
+        "  jobpilot jobs --pretty   same list, easy to read\n"
+        "  jobpilot diary      what the helper has been doing\n"
+        "  jobpilot watch      follow the diary live (second window)\n"
+        "  jobpilot note ...   write a short update to the diary\n"
+        "  jobpilot gigs now   freelance / contract leads"
+    ),
+    invoke_without_command=True,
+    no_args_is_help=False,
 )
 console = Console()
+
+
+def _launch_pilot(*, check: bool = False) -> None:
+    """Hand off to the pilot launcher (never returns on success)."""
+    script = _REPO_ROOT / "scripts" / "jp-pilot"
+    if not script.is_file():
+        console.print(
+            f"[red]Pilot launcher missing:[/red] {script}\n"
+            "[dim]Expected scripts/jp-pilot next to the JobPilot install.[/dim]"
+        )
+        raise typer.Exit(1)
+
+    if not check:
+        try:
+            from jobpilot.core import pilot_diary
+
+            path = pilot_diary.start_session(label="cloud pilot")
+            console.print(f"[dim]Diary:[/dim] {path}")
+            console.print("[dim]Watch live:[/dim] jobpilot watch")
+        except Exception as exc:
+            logger.warning("Could not start pilot diary: %s", exc)
+
+    args = [str(script)]
+    if check:
+        args.append("--check")
+    else:
+        args.append("--cloud")
+
+    try:
+        os.execv(str(script), args)
+    except OSError as exc:
+        console.print(f"[red]Could not start pilot:[/red] {exc}")
+        raise typer.Exit(1) from exc
+
+
+@app.callback()
+def _root(
+    ctx: typer.Context,
+    check: bool = typer.Option(
+        False,
+        "--check",
+        help="Health check only (no agent).",
+    ),
+) -> None:
+    """Bare `jobpilot` starts the cloud AI helper."""
+    if ctx.invoked_subcommand is not None:
+        return
+    _launch_pilot(check=check)
 
 CLAUDE_VETTED_TARGETS_DIR = Path(__file__).parent / "data" / "reports"
 CLAUDE_VETTED_TARGETS_GLOB = "claude-vetted-targets-*.json"
@@ -326,11 +389,21 @@ def _enforce_claim_lock(job, *, claim_approved: bool) -> None:
             "[red]Claim-lock blocked staging:[/red] "
             f"{job.company} is marked decision={target.get('decision')!r}."
         )
+        console.print(
+            f"[dim]Source of truth: {lock_path} (not queue.json). "
+            "If the posting is live again, update that report's decision/materials_status "
+            "after a live URL check — do not hack queue.json.[/dim]"
+        )
+        if target.get("reason"):
+            console.print(f"[dim]Reason: {target.get('reason')}[/dim]")
         raise typer.Exit(1)
     if materials_status != "ready":
         console.print(
             "[red]Claim-lock blocked staging:[/red] "
             f"{job.company} materials_status={target.get('materials_status')!r}; expected 'ready'."
+        )
+        console.print(
+            f"[dim]Fix materials_status in {lock_path}, not in queue.json.[/dim]"
         )
         raise typer.Exit(1)
     if not claim_approved:
@@ -622,7 +695,6 @@ async def _doctor_async(port: int, *, bro: bool = True) -> int:
     """Check whether JobPilot can reach its core runtime dependencies."""
     from rich.table import Table
 
-    bro_ok = True
     whisper_ready = False
     models: list[str] = []
     preferred_fast = ""
@@ -630,7 +702,6 @@ async def _doctor_async(port: int, *, bro: bool = True) -> int:
 
     if bro:
         health = get_health()
-        bro_ok = health.get("status") == "ok"
         whisper_ready = health.get("whisper") == "ready"
         models = [str(model) for model in health.get("ollama_models", [])]
         preferred_fast = str(health.get("fast_model", "") or "").strip()
@@ -641,19 +712,23 @@ async def _doctor_async(port: int, *, bro: bool = True) -> int:
     table.add_column("Status", style="white")
     table.add_column("Details", style="dim")
 
-    gemini_key_set = bool(os.environ.get(llm_client.GEMINI_API_KEY_ENV, "").strip())
-    ai_ok = bro_ok or gemini_key_set
+    provider = llm_client.get_provider()
+    ai_ok = provider is not None
 
     if bro:
-        if bro_ok:
+        if provider == "bro":
             ai_detail = "Local Bro server reachable"
-        elif gemini_key_set:
+        elif provider == "ollama":
+            from jobpilot.core.config import get_ollama_model
+
+            ai_detail = f"Ollama emergency path ({get_ollama_model()}) — not recommended"
+        elif provider == "gemini":
             ai_detail = "Gemini API key configured"
         else:
             ai_detail = (
                 "No AI backend — set GEMINI_API_KEY "
-                "(free tier: https://aistudio.google.com/app/apikey) "
-                "or start the local Bro stack"
+                "(free tier: https://aistudio.google.com/app/apikey). "
+                "Local Ollama was removed."
             )
         table.add_row(
             "AI backend",
@@ -720,8 +795,9 @@ async def _doctor_async(port: int, *, bro: bool = True) -> int:
     if bro and not ai_ok:
         console.print(
             "\n[yellow]No AI backend configured — chat, tailoring, and advice fall back to "
-            "templates. Set GEMINI_API_KEY (free tier: https://aistudio.google.com/app/apikey) "
-            "or start the local Bro stack.[/yellow]"
+            "templates. Set GEMINI_API_KEY "
+            "(free tier: https://aistudio.google.com/app/apikey). "
+            "Local Ollama was removed.[/yellow]"
         )
 
     console.print("\n[green]✓ JobPilot runtime looks ready.[/green]")
@@ -999,6 +1075,16 @@ def score(
 
     text, label = _load_score_source(source)
     result = JobScorer().score_text(text)
+    try:
+        from jobpilot.core.pilot_diary import auto as diary_auto
+
+        diary_auto(
+            "score",
+            f"Scored {label}: {getattr(result, 'score', getattr(result, 'total', '?'))}"
+            f" — {getattr(result, 'recommendation', '')}".strip(" —"),
+        )
+    except Exception:
+        pass
     _render_score_result(result, label)
 
 
@@ -1320,10 +1406,89 @@ def queue(
     no_board: bool = typer.Option(False, "--no-board", help="Skip the terminal board after queue build/load"),
 ):
     """Scan ATS boards, score jobs, and open the apply dashboard."""
-    from jobpilot.core.queue_builder import build_queue, load_queue, save_queue
+    _run_queue(
+        refresh=refresh,
+        limit=limit,
+        open_dashboard=open_dashboard,
+        fresh=fresh,
+        as_json=as_json,
+        no_board=no_board,
+    )
+
+
+@app.command("jobs")
+@app.command("list")
+@app.command("top")  # kept as a short alias
+@app.command("q")  # kept as a short alias
+def jobs(
+    limit: int = typer.Option(
+        10,
+        "--limit",
+        "-n",
+        help="How many jobs to show (default 10)",
+    ),
+    refresh: bool = typer.Option(
+        False,
+        "--refresh",
+        "-r",
+        help="Look for new postings first (slower)",
+    ),
+    pretty: bool = typer.Option(
+        False,
+        "--pretty",
+        "--table",
+        help="Show a simple table you can read (default is machine list for the AI)",
+    ),
+):
+    """Show jobs you haven't applied to yet.
+
+    This is the everyday command. Examples:
+
+      jobpilot jobs           # 10 open jobs (for the AI helper)
+      jobpilot jobs --pretty  # same list, easy to read yourself
+      jobpilot jobs -n 5      # only 5 jobs
+      jobpilot list           # same as jobs
+    """
+    if pretty:
+        _run_queue(
+            refresh=refresh,
+            limit=limit,
+            open_dashboard=False,
+            fresh=True,
+            as_json=False,
+            no_board=False,
+        )
+    else:
+        _run_queue(
+            refresh=refresh,
+            limit=limit,
+            open_dashboard=False,
+            fresh=True,
+            as_json=True,
+            no_board=True,
+        )
+
+
+def _run_queue(
+    *,
+    refresh: bool,
+    limit: int,
+    open_dashboard: bool,
+    fresh: bool,
+    as_json: bool,
+    no_board: bool,
+) -> None:
+    """Shared implementation for queue / jobs / list."""
+    from jobpilot.core.application_evidence import EvidenceSourceError
+    from jobpilot.core.queue_builder import (
+        build_queue,
+        load_queue,
+        reconcile_queue_with_tracker,
+        save_queue,
+    )
     from jobpilot.ui.terminal_board import BoardFilters, render_board
+    from jobpilot.core.pilot_diary import auto as diary_auto
     import subprocess
-    from dataclasses import asdict
 
     dashboard_path = Path(__file__).parent / "ui" / "dashboard.html"
 
@@ -1333,11 +1498,30 @@ def queue(
         if refresh or not (Path(__file__).parent / "data" / "queue.json").exists():
             jobs = build_queue(limit=limit)
             save_queue(jobs)
+            diary_auto("jobs", f"Rebuilt job list, showing up to {limit}")
         else:
             jobs = load_queue()
+            diary_auto("jobs", f"Loaded saved job list, showing up to {limit}")
+        try:
+            reconcile_queue_with_tracker()
+        except EvidenceSourceError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+        jobs = load_queue()
         view = [j for j in jobs if j.status == "queued"] if fresh else jobs
         view = view[:limit]
-        console.print_json(data=[asdict(j) for j in view])
+        if view:
+            sample = ", ".join(
+                f"{getattr(j, 'company', '?')}/{getattr(j, 'title', '?')}" for j in view[:3]
+            )
+            diary_auto(
+                "jobs",
+                f"Listed {len(view)} open jobs"
+                + (f" (e.g. {sample})" if sample else ""),
+            )
+        else:
+            diary_auto("jobs", "Listed 0 open jobs")
+        console.print_json(data=[_job_output_payload(j) for j in view])
         return
 
     if not refresh and (Path(__file__).parent / "data" / "queue.json").exists():
@@ -1354,6 +1538,13 @@ def queue(
             raise typer.Exit(1)
         save_queue(jobs)
         console.print(f"[green]✓ Built queue: {len(jobs)} jobs across tech + field ops[/green]")
+
+    try:
+        reconcile_queue_with_tracker()
+    except EvidenceSourceError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    jobs = load_queue()
 
     if not no_board:
         render_board(
@@ -1956,7 +2147,73 @@ def log(
         f"[{app_row.status}][/green]"
     )
     console.print(f"[dim]tracker now: {stats['total']} rows[/dim]")
+    try:
+        from jobpilot.core.pilot_diary import auto as diary_auto
+
+        diary_auto(
+            "apply",
+            f"Marked {app_row.company} — {app_row.job_title or '(role)'} as {app_row.status}",
+        )
+    except Exception:
+        pass
     tracker.close()
+
+
+@app.command()
+def note(
+    message: list[str] = typer.Argument(
+        ...,
+        help="What happened, in plain English (quote if multi-word)",
+    ),
+):
+    """Write a short update to the live helper diary.
+
+    Examples:
+      jobpilot note looking at P-1 AI role
+      jobpilot note "Drafted outreach, waiting on Garo to send"
+    """
+    from jobpilot.core import pilot_diary
+
+    text = " ".join(message).strip()
+    if not text:
+        console.print("[yellow]Say what happened, e.g. jobpilot note checked top jobs[/yellow]")
+        raise typer.Exit(1)
+    if not pilot_diary.is_active():
+        # Start a light session so notes are never lost
+        pilot_diary.start_session(label="manual notes")
+    path = pilot_diary.append("note", text)
+    console.print(f"[green]✓ Noted[/green]  [dim]{path}[/dim]")
+
+
+@app.command()
+def diary(
+    lines: int = typer.Option(50, "--lines", "-n", help="How many recent lines to show"),
+    stop: bool = typer.Option(False, "--stop", help="Close the live diary session"),
+):
+    """Show what the job-search helper has been doing (live diary)."""
+    from jobpilot.core import pilot_diary
+
+    if stop:
+        path = pilot_diary.end_session(summary="Closed by user")
+        if path:
+            console.print(f"[green]✓ Diary closed[/green]  {path}")
+        else:
+            console.print("[dim]No open diary.[/dim]")
+        return
+
+    console.print(pilot_diary.read_tail(lines=lines))
+    path = pilot_diary.active_path()
+    if path:
+        console.print(f"\n[dim]Live file: {path}[/dim]")
+        console.print("[dim]Follow live: jobpilot watch[/dim]")
+
+
+@app.command()
+def watch():
+    """Follow the helper diary live (run this in a second terminal window)."""
+    from jobpilot.core import pilot_diary
+
+    pilot_diary.watch_loop()
 
 
 @app.command()

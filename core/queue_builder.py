@@ -18,7 +18,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -28,8 +28,8 @@ from jobpilot.core.application_tracker import get_application_tracker
 from jobpilot.core.config import DATA_DIR
 from jobpilot.core.logger import get_logger
 from jobpilot.core.policy_config import get_policy, reset_policy_cache
-from jobpilot.core.work_style import score_work_style, title_seniority_penalty
 from jobpilot.core.portal_scanner import PortalJob, PortalScanner, ScanTarget
+from jobpilot.core.work_style import score_work_style, title_seniority_penalty
 
 PSYCHE_PROFILE_PATH = DATA_DIR / "psyche_profile.json"
 PORTALS_PATH = DATA_DIR / "portals.json"
@@ -256,11 +256,43 @@ def _is_allowed_location(title: str, company: str, location: str | None) -> bool
     if not has_country and _has_location_hit(loc_haystack, gate.blocked_without_country):
         return False
 
-    return (
-        has_country
-        or _has_location_hit(loc_haystack, gate.remote_terms)
-        or _has_location_hit(loc_haystack, gate.allowed_locations)
-    )
+    has_allowed = _has_location_hit(loc_haystack, gate.allowed_locations)
+    has_remote = _has_location_hit(loc_haystack, gate.remote_terms)
+
+    # When home metros are configured (e.g. Austin), prefer:
+    #   home metro  OR  remote  OR  bare country-only ("United States")
+    # Bare country must NOT rescue onsite-elsewhere pins like
+    # "US, New Jersey…" or "New York City; Remote" (those hit blocked_locations
+    # or leave city residue after stripping country terms).
+    if gate.allowed_locations:
+        if has_allowed or has_remote:
+            return True
+        return has_country and _is_country_only_location(
+            loc_haystack,
+            gate.country_terms,
+        )
+
+    return has_country or has_remote or has_allowed
+
+
+def _is_country_only_location(loc_haystack: str, country_terms: tuple[str, ...]) -> bool:
+    """True when the location is only country-level (e.g. 'United States', 'US')."""
+    residue = loc_haystack
+    for term in country_terms:
+        normalized = _normalize_location_text(term)
+        if not normalized:
+            continue
+        pieces = [re.escape(p) for p in normalized.split()]
+        pattern = r"\b" + r"\s+".join(pieces) + r"\b"
+        residue = re.sub(pattern, " ", residue)
+    residue = re.sub(r"\s+", " ", residue).strip()
+    if not residue:
+        return True
+    filler = {
+        "county", "city", "area", "metro", "greater", "region", "nationwide",
+        "national", "anywhere", "based",
+    }
+    return all(w in filler for w in residue.split())
 
 
 def _evidence_path(value: str) -> Optional[Path]:

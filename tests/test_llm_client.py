@@ -1,5 +1,5 @@
 """
-Tests for core/llm_client.py — provider selection and Gemini REST handling,
+Tests for core/llm_client.py — provider selection and backend handling,
 with all network access mocked.
 """
 
@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-from jobpilot.core import llm_client
+from jobpilot.core import llm_client, ollama_client
 from jobpilot.core.bro_client import BroUnavailable
 
 
@@ -30,45 +30,123 @@ def _gemini_text_payload(text: str) -> dict:
     }
 
 
+def _ollama_tags_response(names: list[str], status_code: int = 200):
+    response = MagicMock()
+    response.status_code = status_code
+    response.json = lambda: {
+        "models": [{"name": n} for n in names],
+    }
+    return response
+
+
+def _ollama_chat_response(text: str, status_code: int = 200):
+    response = MagicMock()
+    response.status_code = status_code
+    response.json = lambda: {"message": {"role": "assistant", "content": text}}
+    response.text = ""
+    return response
+
+
 # ---------------------------------------------------------------------------
-# Provider selection order
+# Provider selection order: bro → ollama → gemini → none
 # ---------------------------------------------------------------------------
+
 
 class TestProviderSelection:
     @patch("jobpilot.core.llm_client.is_bro_running", return_value=True)
-    def test_bro_wins_when_reachable(self, _mock_bro, monkeypatch):
+    @patch("jobpilot.core.llm_client.is_ollama_available", return_value=True)
+    def test_bro_wins_when_reachable(self, _mock_ollama, _mock_bro, monkeypatch):
         monkeypatch.setenv("GEMINI_API_KEY", "key-123")
         assert llm_client.get_provider() == "bro"
 
     @patch("jobpilot.core.llm_client.is_bro_running", return_value=False)
-    def test_gemini_when_bro_down_and_key_set(self, _mock_bro, monkeypatch):
+    @patch("jobpilot.core.llm_client.is_ollama_available", return_value=True)
+    def test_ollama_before_gemini(self, _mock_ollama, _mock_bro, monkeypatch):
+        monkeypatch.setenv("GEMINI_API_KEY", "key-123")
+        assert llm_client.get_provider() == "ollama"
+
+    @patch("jobpilot.core.llm_client.is_bro_running", return_value=False)
+    @patch("jobpilot.core.llm_client.is_ollama_available", return_value=False)
+    def test_gemini_when_local_down_and_key_set(
+        self, _mock_ollama, _mock_bro, monkeypatch
+    ):
         monkeypatch.setenv("GEMINI_API_KEY", "key-123")
         assert llm_client.get_provider() == "gemini"
 
     @patch("jobpilot.core.llm_client.is_bro_running", return_value=False)
-    def test_none_when_no_backend(self, _mock_bro, monkeypatch):
+    @patch("jobpilot.core.llm_client.is_ollama_available", return_value=False)
+    def test_none_when_no_backend(self, _mock_ollama, _mock_bro, monkeypatch):
         monkeypatch.delenv("GEMINI_API_KEY", raising=False)
         assert llm_client.get_provider() is None
         assert llm_client.is_available() is False
 
     @patch("jobpilot.core.llm_client.is_bro_running", return_value=False)
-    def test_blank_key_does_not_count(self, _mock_bro, monkeypatch):
+    @patch("jobpilot.core.llm_client.is_ollama_available", return_value=False)
+    def test_blank_key_does_not_count(self, _mock_ollama, _mock_bro, monkeypatch):
         monkeypatch.setenv("GEMINI_API_KEY", "   ")
         assert llm_client.get_provider() is None
+
+
+class TestOllamaHealth:
+    def setup_method(self):
+        # Bust cache between tests
+        ollama_client._health_cache["timestamp"] = 0.0
+        ollama_client._health_cache["ok"] = False
+
+    def test_off_by_default_even_if_server_up(self, monkeypatch):
+        monkeypatch.delenv("JOBPILOT_USE_OLLAMA", raising=False)
+        with patch("jobpilot.core.ollama_client.requests.get") as mock_get:
+            mock_get.return_value = _ollama_tags_response(["codex-prime:latest"])
+            assert llm_client.is_ollama_available() is False
+            mock_get.assert_not_called()
+
+    @patch("jobpilot.core.ollama_client.requests.get")
+    def test_available_when_model_installed(self, mock_get, monkeypatch):
+        monkeypatch.setenv("JOBPILOT_USE_OLLAMA", "1")
+        monkeypatch.setenv("JOBPILOT_OLLAMA_MODEL", "codex-prime:latest")
+        mock_get.return_value = _ollama_tags_response(["codex-prime:latest", "other"])
+        assert llm_client.is_ollama_available() is True
+
+    @patch("jobpilot.core.ollama_client.requests.get")
+    def test_matches_without_tag(self, mock_get, monkeypatch):
+        monkeypatch.setenv("JOBPILOT_USE_OLLAMA", "1")
+        monkeypatch.setenv("JOBPILOT_OLLAMA_MODEL", "codex-prime")
+        mock_get.return_value = _ollama_tags_response(["codex-prime:latest"])
+        ollama_client._health_cache["timestamp"] = 0.0
+        assert llm_client.is_ollama_available() is True
+
+    @patch("jobpilot.core.ollama_client.requests.get")
+    def test_unavailable_when_model_missing(self, mock_get, monkeypatch):
+        monkeypatch.setenv("JOBPILOT_USE_OLLAMA", "1")
+        monkeypatch.setenv("JOBPILOT_OLLAMA_MODEL", "codex-prime:latest")
+        mock_get.return_value = _ollama_tags_response(["gemma4:26b-mlx"])
+        assert llm_client.is_ollama_available() is False
+
+    @patch("jobpilot.core.ollama_client.requests.get")
+    def test_unavailable_on_connection_error(self, mock_get, monkeypatch):
+        monkeypatch.setenv("JOBPILOT_USE_OLLAMA", "1")
+        mock_get.side_effect = requests.exceptions.ConnectionError("down")
+        assert llm_client.is_ollama_available() is False
 
 
 # ---------------------------------------------------------------------------
 # Bro path
 # ---------------------------------------------------------------------------
 
+
 class TestCompleteViaBro:
     @patch("jobpilot.core.llm_client.chat_or_raise", return_value="Three bullets.")
     @patch("jobpilot.core.llm_client.is_bro_running", return_value=True)
     def test_returns_bro_reply(self, _mock_bro, mock_chat):
-        assert llm_client.complete("prompt", context="ctx", smart=True) == "Three bullets."
+        assert (
+            llm_client.complete("prompt", context="ctx", smart=True) == "Three bullets."
+        )
         mock_chat.assert_called_once_with("prompt", context="ctx", force_smart=True)
 
-    @patch("jobpilot.core.llm_client.chat_or_raise", side_effect=BroUnavailable("Bro is busy."))
+    @patch(
+        "jobpilot.core.llm_client.chat_or_raise",
+        side_effect=BroUnavailable("Bro is busy."),
+    )
     @patch("jobpilot.core.llm_client.is_bro_running", return_value=True)
     def test_bro_failure_raises_typed_error(self, _mock_bro, _mock_chat):
         with pytest.raises(llm_client.LLMUnavailable):
@@ -82,21 +160,80 @@ class TestCompleteViaBro:
 
 
 # ---------------------------------------------------------------------------
+# Ollama path
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def ollama_env(monkeypatch):
+    """Force the Ollama provider: Bro down, Ollama up."""
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    with (
+        patch("jobpilot.core.llm_client.is_bro_running", return_value=False),
+        patch("jobpilot.core.llm_client.is_ollama_available", return_value=True),
+    ):
+        yield
+
+
+class TestCompleteViaOllama:
+    @patch("jobpilot.core.ollama_client.requests.post")
+    def test_happy_path(self, mock_post, ollama_env, monkeypatch):
+        monkeypatch.setenv("JOBPILOT_OLLAMA_MODEL", "codex-prime:latest")
+        mock_post.return_value = _ollama_chat_response("Local draft.")
+
+        assert llm_client.complete("prompt") == "Local draft."
+
+        url = mock_post.call_args[0][0]
+        body = mock_post.call_args[1]["json"]
+        assert url.endswith("/api/chat")
+        assert body["model"] == "codex-prime:latest"
+        assert body["stream"] is False
+        assert body["messages"][0]["content"] == "prompt"
+
+    @patch("jobpilot.core.ollama_client.requests.post")
+    def test_context_is_prepended(self, mock_post, ollama_env):
+        mock_post.return_value = _ollama_chat_response("ok")
+        llm_client.complete("prompt", context="resume facts")
+        sent = mock_post.call_args[1]["json"]["messages"][0]["content"]
+        assert "resume facts" in sent
+        assert "prompt" in sent
+
+    @patch("jobpilot.core.ollama_client.requests.post")
+    def test_empty_reply_raises(self, mock_post, ollama_env):
+        mock_post.return_value = _ollama_chat_response("   ")
+        with pytest.raises(llm_client.LLMUnavailable):
+            llm_client.complete("prompt")
+
+    @patch("jobpilot.core.ollama_client.requests.post")
+    def test_network_error_raises(self, mock_post, ollama_env):
+        mock_post.side_effect = requests.exceptions.ConnectionError("no route")
+        with pytest.raises(llm_client.LLMUnavailable) as excinfo:
+            llm_client.complete("prompt")
+        assert "Ollama" in str(excinfo.value)
+
+
+# ---------------------------------------------------------------------------
 # Gemini path
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def gemini_env(monkeypatch):
-    """Force the Gemini provider: Bro down, key set."""
+    """Force the Gemini provider: Bro and Ollama down, key set."""
     monkeypatch.setenv("GEMINI_API_KEY", "key-123")
-    with patch("jobpilot.core.llm_client.is_bro_running", return_value=False):
+    with (
+        patch("jobpilot.core.llm_client.is_bro_running", return_value=False),
+        patch("jobpilot.core.llm_client.is_ollama_available", return_value=False),
+    ):
         yield
 
 
 class TestCompleteViaGemini:
     @patch("jobpilot.core.llm_client.requests.post")
     def test_happy_path_parses_text(self, mock_post, gemini_env):
-        mock_post.return_value = _gemini_response(200, _gemini_text_payload("Tailored summary."))
+        mock_post.return_value = _gemini_response(
+            200, _gemini_text_payload("Tailored summary.")
+        )
 
         assert llm_client.complete("prompt") == "Tailored summary."
 
@@ -179,12 +316,15 @@ class TestCompleteViaGemini:
 # No backend
 # ---------------------------------------------------------------------------
 
+
 class TestNoBackend:
     @patch("jobpilot.core.llm_client.is_bro_running", return_value=False)
-    def test_complete_raises_with_setup_hint(self, _mock_bro, monkeypatch):
+    @patch("jobpilot.core.llm_client.is_ollama_available", return_value=False)
+    def test_complete_raises_with_setup_hint(
+        self, _mock_ollama, _mock_bro, monkeypatch
+    ):
         monkeypatch.delenv("GEMINI_API_KEY", raising=False)
         with pytest.raises(llm_client.LLMUnavailable) as excinfo:
             llm_client.complete("prompt")
         message = str(excinfo.value)
-        assert "GEMINI_API_KEY" in message
-        assert "aistudio.google.com" in message
+        assert "Ollama" in message or "GEMINI_API_KEY" in message

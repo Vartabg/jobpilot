@@ -51,6 +51,12 @@ class UserProfile(BaseModel):
     years_of_experience: int = 0
     current_title: str = ""
     current_company: str = ""
+
+    # Skills the candidate actually has, used for JD skill matching.
+    skills: list[str] = Field(default_factory=list)
+    # Titles the candidate is targeting (may differ from current_title during
+    # a career pivot) — used for title-alignment scoring instead of current_title.
+    target_titles: list[str] = Field(default_factory=list)
     
     # Salary (optional)
     desired_salary: str = ""

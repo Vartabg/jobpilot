@@ -417,13 +417,15 @@ def _display_title(gig: Gig) -> str:
 
 def _opening_line(gig: Gig) -> str:
     """First sentence of the draft — reads naturally for both header-format
-    and prose-format gigs."""
+    and prose-format gigs. Em-dash style kept short for phone Mail preview."""
     title = _display_title(gig)
+    if title and gig.company:
+        return f"Hi — I saw the {title} role at {gig.company}."
     if title:
-        return f"Hi - I saw the {title} post."
+        return f"Hi — I saw the {title} posting."
     if gig.company:
-        return f"Hi - I saw {gig.company}'s hiring post."
-    return "Hi - I saw your hiring post."
+        return f"Hi — I saw {gig.company}'s hiring post."
+    return "Hi — I saw your hiring post."
 
 
 _CONTRACT_TITLE_RE = re.compile(

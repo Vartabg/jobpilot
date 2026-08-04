@@ -212,7 +212,7 @@ def write_crib_sheet(gigs: list[Gig], crib_dir: Path = CRIB_DIR) -> Path:
         f"- **First name:** {ident['first_name']}",
         f"- **Last name:** {ident['last_name']}",
         f"- **Email:** {ident['email']}",
-        f"- **Phone:** {ident['phone']} {ident.get('phone_note','')}".rstrip(),
+        f"- **Phone:** {(ident.get('phone') or '').strip()}",
         f"- **LinkedIn:** {ident['linkedin']}",
         f"- **GitHub:** {ident['github']}",
         f"- **Portfolio:** {ident['portfolio']}",

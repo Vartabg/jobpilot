@@ -25,6 +25,30 @@ _STOPWORDS = {
     "principal", "lead", "manager", "role", "job",
 }
 
+# Field/physical-deployment vocabulary — the skill matcher above is entirely
+# software-stack keywords (Python, React, Docker...), so a JD about on-site
+# hardware installs, edge devices, or customer-site troubleshooting scores as
+# a near-total skill mismatch even when it's the candidate's strongest real
+# background. This is a second, parallel matching axis for that.
+_FIELD_SKILL_TERMS = {
+    "field service", "field engineer", "on-site", "onsite", "on site",
+    "install", "installation", "troubleshoot", "troubleshooting",
+    "repair", "maintenance", "preventative maintenance", "deploy", "deployment",
+    "edge device", "edge hardware", "edge computing", "iot", "embedded",
+    "hardware", "electro-mechanical", "electromechanical", "calibration",
+    "customer site", "customer facility", "break/fix", "break fix",
+    "wiring", "electronics", "bms", "scada", "building automation",
+    "network diagnostics", "root cause", "root-cause", "24/7", "shift",
+    "commissioning", "site visit", "travel",
+}
+
+# Alternative-qualification phrases that waive a strict years-of-experience
+# bar (e.g. "3+ years... or proven technical acumen through projects").
+_EXPERIENCE_ALTERNATIVE_RE = re.compile(
+    r"or\s+(?:otherwise\s+)?(?:proven|equivalent|demonstrated)",
+    re.IGNORECASE,
+)
+
 
 @dataclass
 class JobFitResult:
@@ -95,6 +119,8 @@ class JobScorer:
         raw_text = parsed_jd.raw_text or parsed_jd.summary()
         jd_skills = parsed_jd.skills or JDParser._extract_skills(raw_text)
         candidate_skills = self._candidate_skills(profile)
+        candidate_field_skills = self._candidate_field_skills(profile)
+        field_skill_matches = sum(1 for term in candidate_field_skills if term in raw_text.lower())
 
         matched_skills = [skill for skill in jd_skills if skill.lower() in candidate_skills]
         missing_skills = [skill for skill in jd_skills if skill.lower() not in candidate_skills]
@@ -118,11 +144,11 @@ class JobScorer:
         else:
             alignment_points = 0
 
-        title_points = self._score_title_alignment(profile.current_title, parsed_jd.title)
-        skill_points = self._score_skills(jd_skills, matched_skills)
+        title_points = self._score_title_alignment(profile, parsed_jd.title)
+        skill_points = self._score_skills(jd_skills, matched_skills, field_skill_matches=field_skill_matches)
         exp_points, exp_risk = self._score_experience(profile.years_of_experience, raw_text)
         auth_points, auth_risk = self._score_work_auth(profile.authorized_to_work, profile.requires_sponsorship, raw_text)
-        location_points = self._score_location(parsed_jd.location_type or self._extract_location_type(raw_text))
+        location_points = self._score_location(parsed_jd.location_type or self._extract_location_type(raw_text), raw_text)
         work_style_points, work_style_reasons = self._score_work_style(raw_text, parsed_jd.title)
 
         components = {
@@ -211,24 +237,67 @@ class JobScorer:
 
         skills = {skill.lower() for skill in JDParser._extract_skills(profile_text)}
         skills.update(self._normalize_tokens(profile.current_title))
+        # The profile's own declared skills list is the primary source of
+        # truth — union it in rather than relying entirely on keyword
+        # extraction from title/company/urls/custom_answers text.
+        skills.update(skill.lower() for skill in profile.skills)
         return skills
 
-    def _score_title_alignment(self, current_title: str, jd_title: str) -> int:
-        current_tokens = self._normalize_tokens(current_title)
+    def _candidate_field_skills(self, profile: UserProfile) -> set[str]:
+        """Field/physical-deployment skill terms present in the profile."""
+        profile_text = " ".join(
+            filter(
+                None,
+                [
+                    " ".join(profile.skills),
+                    " ".join(profile.custom_answers.values()),
+                    profile.current_title,
+                ],
+            )
+        ).lower()
+        return {term for term in _FIELD_SKILL_TERMS if term in profile_text}
+
+    def _score_title_alignment(self, profile: UserProfile, jd_title: str) -> int:
+        # Score against target_titles (what the candidate is pivoting toward)
+        # when set, since current_title otherwise unfairly tanks the score
+        # for anyone making an intentional career change.
+        reference_titles = profile.target_titles or [profile.current_title]
         jd_tokens = self._normalize_tokens(jd_title)
-        if not current_tokens or not jd_tokens:
+        if not jd_tokens:
             return 10
 
-        overlap = current_tokens & jd_tokens
-        ratio = len(overlap) / max(len(jd_tokens), 1)
-        return min(25, max(0, int(round(25 * ratio))))
+        best_ratio = 0.0
+        any_reference = False
+        for reference_title in reference_titles:
+            reference_tokens = self._normalize_tokens(reference_title)
+            if not reference_tokens:
+                continue
+            any_reference = True
+            overlap = reference_tokens & jd_tokens
+            best_ratio = max(best_ratio, len(overlap) / max(len(jd_tokens), 1))
+
+        if not any_reference:
+            return 10
+        return min(25, max(0, int(round(25 * best_ratio))))
 
     @staticmethod
-    def _score_skills(jd_skills: list[str], matched_skills: list[str]) -> int:
+    def _score_skills(
+        jd_skills: list[str],
+        matched_skills: list[str],
+        *,
+        field_skill_matches: int = 0,
+    ) -> int:
         if not jd_skills:
             return 18
-        ratio = len(matched_skills) / max(len(jd_skills), 1)
-        return min(35, max(0, int(round(35 * ratio))))
+        software_ratio = len(matched_skills) / max(len(jd_skills), 1)
+        software_points = 35 * software_ratio
+        # Field/physical deployment matches are scored on their own axis
+        # (capped contribution) and blended in, so a strong physical-skill
+        # JD (e.g. edge-hardware install work) isn't scored as a near-total
+        # mismatch just because it has few software-stack keywords.
+        field_points = min(20, field_skill_matches * 4)
+        points = max(software_points, min(35, software_points + field_points * 0.5))
+        return min(35, max(0, int(round(points))))
 
     # "N years" only counts as a requirement in an experience context
     # (e.g. "5+ years of experience", "minimum 3 years") — not "founded 20 years ago".
@@ -251,7 +320,19 @@ class JobScorer:
         if required_years <= 0:
             return (12 if years_of_experience else 8), ""
 
-        ratio = min(1.0, (years_of_experience or 0) / required_years)
+        # A JD that explicitly offers an alternative to its years bar (e.g.
+        # "3+ years... or proven technical acumen through projects") waives
+        # the bar entirely rather than scoring an unquantified profile as 0.
+        if _EXPERIENCE_ALTERNATIVE_RE.search(raw_text):
+            return 16, ""
+
+        if not years_of_experience:
+            # years_of_experience is intentionally left blank by design (no
+            # fabricated years-count) rather than genuinely zero — treat as
+            # unquantified/neutral instead of penalizing the honesty.
+            return 12, f"Role asks for about {required_years}+ years; profile leaves years unquantified — verify fit manually."
+
+        ratio = min(1.0, years_of_experience / required_years)
         points = min(20, max(0, int(round(20 * ratio))))
         risk = ""
         if years_of_experience < required_years:
@@ -280,8 +361,22 @@ class JobScorer:
             return 10, ""
         return (8 if authorized_to_work else 5), ""
 
-    @staticmethod
-    def _score_location(location_type: str) -> int:
+    def _score_location(self, location_type: str, raw_text: str = "") -> int:
+        gate = self.policy.queue.location_gate
+        if gate.enabled and raw_text:
+            lowered = raw_text.lower()
+            blocked = any(term in lowered for term in gate.blocked_locations)
+            allowed = any(term in lowered for term in gate.allowed_locations) or any(
+                term in lowered for term in gate.remote_terms
+            )
+            if blocked and not allowed:
+                return 0
+            if allowed:
+                return 10
+            # Neither explicitly allowed nor blocked — fall through to the
+            # generic remote/hybrid/onsite heuristic below rather than
+            # guessing at a hard pass/fail.
+
         if location_type == "remote":
             return 10
         if location_type == "hybrid":

@@ -47,6 +47,38 @@ RETRY_DELAY: float = 1.0
 HEALTH_CACHE_TTL: int = 5  # seconds
 
 # ---------------------------------------------------------------------------
+# Optional AI providers
+# ---------------------------------------------------------------------------
+OLLAMA_BASE_URL: str = "http://127.0.0.1:11434"
+OLLAMA_MODEL: str = "codex-prime:latest"
+OLLAMA_HEALTH_CACHE_TTL: int = 5
+
+
+def get_gemini_api_key() -> str:
+    """Return the configured Gemini key without exposing environment access elsewhere."""
+    return os.environ.get("GEMINI_API_KEY", "").strip()
+
+
+def get_ollama_base_url() -> str:
+    """Return the opt-in Ollama endpoint."""
+    return os.environ.get("OLLAMA_URL", OLLAMA_BASE_URL).rstrip("/")
+
+
+def get_ollama_model() -> str:
+    """Return the selected emergency Ollama model."""
+    return os.environ.get("JOBPILOT_OLLAMA_MODEL", OLLAMA_MODEL).strip() or OLLAMA_MODEL
+
+
+def is_ollama_enabled() -> bool:
+    """Return whether the abandoned local-model fallback was explicitly enabled."""
+    return os.environ.get("JOBPILOT_USE_OLLAMA", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+
+
+# ---------------------------------------------------------------------------
 # Human-like Typing Simulation
 # ---------------------------------------------------------------------------
 TYPO_CHARS: str = "abcdefghijklmnopqrstuvwxyz"

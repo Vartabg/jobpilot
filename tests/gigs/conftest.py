@@ -43,7 +43,7 @@ _DATA_DIR.mkdir(parents=True, exist_ok=True)
         "last_name": "Applicant",
         "email": "test.applicant@resolved.test",
         "phone": "555-000-1234",
-        "phone_note": "(text preferred)",
+        "phone_note": "",
         "linkedin": "https://www.linkedin.com/in/test-applicant",
         "github": "https://github.com/test-applicant",
         "portfolio": "https://resolved.test",

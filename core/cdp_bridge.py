@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+from playwright.async_api import Browser, BrowserContext, Page, async_playwright
+
 from jobpilot.core.chrome_runtime import (
     CDP_READY_TIMEOUT_S,
     LINKEDIN_JOBS,
@@ -16,7 +18,6 @@ from jobpilot.core.config import CHROME_PROFILE
 from jobpilot.core.logger import get_logger
 from jobpilot.core.page_info import PageInfo, build_page_info
 from jobpilot.core.tab_selection import select_active_page
-from playwright.async_api import Browser, BrowserContext, Page, async_playwright
 
 log = get_logger(__name__)
 
@@ -64,7 +65,7 @@ class CDPBridge:
         return False
 
     async def _try_cdp_connect(self) -> bool:
-        if not cdp_ready(self.debug_url, timeout=0.8):
+        if not await asyncio.to_thread(cdp_ready, self.debug_url, 0.8):
             return False
         try:
             self._browser = await self._playwright.chromium.connect_over_cdp(
