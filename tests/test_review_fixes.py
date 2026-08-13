@@ -62,9 +62,9 @@ class TestQueueCompanyDedup:
         tracker = _FakeTracker(company_statuses={"Acme": "applied"})
         assert tracker_status_for_job(tracker, "https://acme/new-role", "Acme") is None
 
-    def test_rejected_company_marks_dead_ground(self):
+    def test_rejected_company_does_not_reject_a_different_role(self):
         tracker = _FakeTracker(company_statuses={"Acme": "rejected"})
-        assert tracker_status_for_job(tracker, "https://acme/new-role", "Acme") == "rejected"
+        assert tracker_status_for_job(tracker, "https://acme/new-role", "Acme") is None
 
     def test_directly_applied_url_still_flagged(self):
         tracker = _FakeTracker(applied={"https://acme/role-a"})

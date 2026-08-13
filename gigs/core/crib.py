@@ -21,6 +21,7 @@ from jobpilot.gigs.core import preferences
 from jobpilot.gigs.core.models import Gig
 from jobpilot.gigs.core.paths import away_dir
 from jobpilot.gigs.core.proposals import build_revenue_brief
+from jobpilot.gigs.core.safe_urls import safe_external_url
 
 CRIB_DIR = away_dir()
 
@@ -47,23 +48,37 @@ def _standard_answers() -> list[tuple[str, str]]:
     ident = preferences.identity()
     ws = preferences.work_style()
     city = (ident.get("city") or "").strip()
-    location = f"{city}, USA" if city and "usa" not in city.lower() else (city or "Your City, ST, USA")
-    return [
-        ("Phone country", "+1"),
-        ("Location (city)", location),
-        ("Country based in", "USA"),
-        ("Authorized to work in the US?", "Yes"),
-        ("Require visa sponsorship?", "No"),
-        ("Willing to relocate?", ws.get("relocate_default", "Open to relocation for the right role")),
-        ("In-office acknowledgment", ws.get("in_office_default", "Open to remote, hybrid, or onsite")),
-        ("Privacy consent", "Consent"),
+    try:
+        from jobpilot.core.profile_store import get_profile_store
+        profile = get_profile_store().load()
+    except Exception:
+        profile = None
+    answers = [
+        ("Location (city)", city),
+        ("Country based in", getattr(profile, "country", "") if profile else ""),
+        (
+            "Authorized to work in the US?",
+            "Yes" if getattr(profile, "authorized_to_work", None) is True
+            else "No" if getattr(profile, "authorized_to_work", None) is False
+            else "",
+        ),
+        (
+            "Require visa sponsorship?",
+            "Yes" if getattr(profile, "requires_sponsorship", None) is True
+            else "No" if getattr(profile, "requires_sponsorship", None) is False
+            else "",
+        ),
+        ("Willing to relocate?", ws.get("relocate_default", "")),
+        ("In-office acknowledgment", ws.get("in_office_default", "")),
+        ("Privacy consent", ws.get("privacy_consent", "")),
         ("Gender", "Decline To Self Identify"),
         ("Hispanic/Latino?", "Decline To Self Identify"),
         ("Race/Ethnicity", "Decline To Self Identify"),
         ("Veteran status", _veteran_answer()),
         ("Disability status", "I do not want to answer"),
-        ("How did you hear about us?", "LinkedIn"),
+        ("How did you hear about us?", ws.get("referral_source", "")),
     ]
+    return [(label, value) for label, value in answers if value]
 
 
 def _is_home_metro_role(gig: Gig) -> bool:
@@ -72,16 +87,18 @@ def _is_home_metro_role(gig: Gig) -> bool:
     tags = preferences.home_metro_tags()
     if not tags:
         return False
-    haystack = " ".join([gig.location or "", gig.title or "", gig.description or ""]).lower()
+    # Only the structured role location can establish that the role is local.
+    # Company prose often mentions a headquarters unrelated to the job site.
+    haystack = (gig.location or "").lower()
     return any(tag in haystack for tag in tags)
 
 
 def _relocate_answer(gig: Gig) -> str:
     """Per-lead relocate line. Pulls the user's data-defined answer; appends a
     'local' note for home-metro roles. No location is hardcoded here."""
-    base = preferences.work_style().get(
-        "relocate_default", "Open to relocation for the right role"
-    )
+    base = preferences.work_style().get("relocate_default", "")
+    if not base:
+        return ""
     if _is_home_metro_role(gig):
         return f"{base} — local to this role"
     return base
@@ -93,18 +110,9 @@ def _cur(gig: Gig) -> str:
 
 
 def _salary_candidate(gig: Gig) -> str:
-    """Candidate-facing 'Desired salary' value — safe to paste into an ATS
-    field. Carries no anchoring strategy (don't tip the negotiation)."""
-    if gig.salary_max and gig.salary_min:
-        return (
-            f"Open to the role; comfortable within your "
-            f"${gig.salary_min/1000:.0f}–${gig.salary_max/1000:.0f}K{_cur(gig)} band"
-        )
-    if gig.salary_max:
-        return f"Open / competitive — your posted ${gig.salary_max/1000:.0f}K{_cur(gig)} ceiling works"
-    if gig.pay_hourly_est:
-        return f"${gig.pay_hourly_est:.0f}{_cur(gig)}/hr"
-    return "Open / competitive — happy to discuss range for the role"
+    """Return only an explicit candidate-authored compensation response."""
+    del gig
+    return str(preferences.pay().get("candidate_response", "") or "").strip()
 
 
 def _salary_note(gig: Gig) -> str:
@@ -125,19 +133,27 @@ def _salary_note(gig: Gig) -> str:
 
 def _gig_section(index: int, gig: Gig) -> list[str]:
     brief = build_revenue_brief(gig)
-    apply_target = gig.apply_url or gig.url
+    apply_target = (
+        safe_external_url(gig.apply_url, allow_mailto=True)
+        or safe_external_url(gig.url)
+        or "Review source manually"
+    )
     company = gig.company or "the company"
     role = (gig.title or "the role").split("|")[0].strip()
     lines = [
         f"### {index}. [{gig.fit_score}/100] {company} — {role}",
         "",
         f"- **Apply:** {apply_target}",
-        f"- **Source post:** {gig.url}",
-        f"- **Desired salary (paste):** {_salary_candidate(gig)}",
+        f"- **Source post:** {safe_external_url(gig.url) or 'Unavailable'}",
         f"- **Your anchor (don't paste):** {_salary_note(gig)}",
         f"- **Relocate answer:** {_relocate_answer(gig)} (this role is in {gig.location or 'unspecified'})",
         f"- **Offer angle:** {brief.offer}",
     ]
+    salary_response = _salary_candidate(gig)
+    if salary_response:
+        lines.insert(3, f"- **Desired salary (paste):** {salary_response}")
+    else:
+        lines.insert(3, "- **Desired salary:** Review and answer manually (no candidate preference configured)")
     resume = preferences.resume_for(brief.offer)
     if resume:
         lines.append(f"- **Resume to attach:** {resume}")

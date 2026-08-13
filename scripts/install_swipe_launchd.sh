@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
 # Usage: ./scripts/install_swipe_launchd.sh [install|uninstall|status]
 #
-# Installs a LaunchAgent that keeps the phone job-swiper always running:
+# Installs a LaunchAgent that keeps the job swiper always running:
 #   com.vartny.jobpilot.swipe — RunAtLoad + KeepAlive (starts at login,
 #   restarts if it crashes), runs under caffeinate so the Mac won't idle-sleep
-#   while it serves. Reach it from the phone anywhere via Tailscale.
+#   while it serves). Login-start is loopback-only by default.
 #
 # This is the "keep the Mac on" always-available setup: leave the Mac powered
 # (plugged in, lid open or clamshell-with-power) and the swiper is up 24/7,
-# with your data staying entirely on your own machine.
+# with your data staying entirely on your own machine. For deliberate phone
+# access after installation, run:
+#   export JOBPILOT_REMOTE_TOKEN="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+#   JOBPILOT_REMOTE_ACCESS=tailscale ./scripts/boot.sh
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -57,7 +60,8 @@ PLIST
   launchctl bootout "gui/${UID}" "$PLIST" >/dev/null 2>&1 || true
   launchctl bootstrap "gui/${UID}" "$PLIST"
   launchctl enable "gui/${UID}/${LABEL}" >/dev/null 2>&1 || true
-  printf "Installed %s (always-on; starts at login, restarts on crash)\n" "$LABEL"
+  printf "Installed %s (always-on, loopback-only; starts at login)\n" "$LABEL"
+  printf "Phone opt-in requires JOBPILOT_REMOTE_ACCESS=tailscale and a 32+ character JOBPILOT_REMOTE_TOKEN.\n"
   printf "Logs: %s/swipe.{out,err}.log\n" "$LOG_DIR"
 }
 

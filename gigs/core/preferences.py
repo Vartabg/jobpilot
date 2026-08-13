@@ -18,9 +18,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 from jobpilot.gigs.core.paths import data_dir
-from typing import Any
 
 DATA_DIR = data_dir()
 PREFS_PATH = DATA_DIR / "preferences.json"
@@ -42,6 +42,9 @@ DEFAULTS: dict[str, Any] = {
         "tagline": "Your professional tagline",
     },
     "pay": {
+        # Candidate-authored ATS response. Empty means review and answer by hand;
+        # employer compensation never implies candidate assent.
+        "candidate_response": "",
         "target_annual_usd": 175000,
         "target_hourly_usd": 90,
         "floor_annual_usd": 130000,
@@ -68,8 +71,10 @@ DEFAULTS: dict[str, Any] = {
     # Drives the crib sheet's relocate / in-office answers. Neutral by default;
     # set real answers in data/gigs/preferences.json.
     "work_style": {
-        "relocate_default": "Open to relocation for the right role",
-        "in_office_default": "Open to remote, hybrid, or onsite",
+        "relocate_default": "",
+        "in_office_default": "",
+        "privacy_consent": "",
+        "referral_source": "",
     },
     "tailoring": {
         # Skills the user wants the email opener to call out when a gig
@@ -92,8 +97,7 @@ DEFAULTS: dict[str, Any] = {
         "default": "",
     },
     # Active job-search gate used by `gigs now` / `gigs criteria` and as
-    # defaults for digest ranking. Keep in sync with the job-queue thesis
-    # (Austin/remote, mid-level) — pay is informational, not a hard gate.
+    # defaults for digest ranking. Pay is informational, not a hard gate.
     "search": {
         "min_score": 60,
         "top_n": 12,
@@ -113,13 +117,7 @@ DEFAULTS: dict[str, Any] = {
             "Applied AI Engineer",
             "AI Engineer",
         ],
-        "notes": [
-            "Austin-area or fully remote only — not relocating",
-            "Aim mid, not Senior/Staff/Lead SWE bars",
-            "No company SWE tenure — portfolio + field/customer track",
-            "Pay is not a hard filter — great-fit roles pass even if pay is low or unstated",
-            "Untriaged `new` auto-archives after 7 days; live new capped at 30",
-        ],
+        "notes": [],
     },
     # Copy-paste sources for ATS essay questions ("Tell us about your
     # background", "Why this role"). Placeholders only — put your real bullets
@@ -342,15 +340,21 @@ def format_criteria_report(prefs: dict[str, Any] | None = None) -> str:
 
 
 def signoff_block(prefs: dict[str, Any] | None = None) -> str:
-    """Render the standard email signoff using current identity preferences."""
+    """Render only explicitly resolved identity, never shipped placeholders."""
     ident = identity(prefs)
-    phone_part = ident["phone"]
-    if ident.get("phone_note"):
-        phone_part = f"{phone_part} {ident['phone_note']}"
-    lines = [
-        "Best,",
-        f"{ident['first_name']} {ident['last_name']}",
-        phone_part,
-        f"{ident['linkedin']} | {ident['portfolio']}",
-    ]
-    return "\n".join(lines)
+    defaults = DEFAULTS["identity"]
+
+    def explicit(key: str) -> str:
+        value = str(ident.get(key, "") or "").strip()
+        return "" if not value or value == defaults.get(key, "") else value
+
+    name = " ".join(filter(None, (explicit("first_name"), explicit("last_name"))))
+    phone = explicit("phone")
+    phone_note = explicit("phone_note")
+    if phone and phone_note:
+        phone = f"{phone} {phone_note}"
+    links = " | ".join(filter(None, (explicit("linkedin"), explicit("portfolio"))))
+    details = [line for line in (name, phone, links) if line]
+    if not details:
+        return ""
+    return "\n".join(["Best,", *details])

@@ -1,6 +1,5 @@
 #!/bin/bash
-# JobPilot Chrome Launcher
-# Launches Chrome with Remote Debugging enabled so we can connect via CDP
+# JobPilot optional read-only Chrome launcher.
 
 set -e
 
@@ -30,7 +29,8 @@ fi
 
 # Launch Chrome with debugging enabled
 open -na "$CHROME_PATH" --args \
-    --remote-debugging-port=$DEBUG_PORT \
+    --remote-debugging-address=127.0.0.1 \
+    --remote-debugging-port="$DEBUG_PORT" \
     --enable-automation \
     --user-data-dir="$DEBUG_PROFILE" \
     --no-first-run \
@@ -44,7 +44,7 @@ sleep 2
 if curl -s "http://localhost:$DEBUG_PORT/json/version" > /dev/null 2>&1; then
     echo "✓ Chrome is ready! DevTools listening on port $DEBUG_PORT"
     echo ""
-    echo "You can now run: python -m jobpilot start"
+    echo "Chrome is available for read-only --active scoring and resume context."
 else
     echo "✗ Failed to connect. Chrome may need a moment to start."
     echo "  Try again in a few seconds, or check if port $DEBUG_PORT is in use."

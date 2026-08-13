@@ -15,8 +15,12 @@ from rich.live import Live
 from rich.panel import Panel
 
 from jobpilot.core.config import DATA_DIR, DEFAULT_SERVE_PORT
-
-from jobpilot.ui.income_data import IncomeViewOptions, load_gigs, load_jobs, load_pipeline_rows
+from jobpilot.ui.income_data import (
+    IncomeViewOptions,
+    load_gigs,
+    load_jobs,
+    load_pipeline_rows,
+)
 from jobpilot.ui.view_helpers import check_chrome, check_dashboard, materials_ready
 
 OUTREACH_DIR = DATA_DIR / "outreach" / "ready-to-send"
@@ -129,7 +133,7 @@ def build_status_panel(port: int = DEFAULT_SERVE_PORT) -> Panel:
     )
     lines.append(
         f"  {'[green]✓[/green]' if chrome_ok else '[red]✗[/red]'} "
-        "Browser helper (fills applications for you)"
+        "Browser connection (read-only job context)"
     )
 
     lines.append("")

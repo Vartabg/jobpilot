@@ -6,21 +6,39 @@ to produce CSV exports and Rich terminal reports.
 """
 
 import csv
-import io
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
+
 from rich.console import Console
-from rich.table import Table
 from rich.panel import Panel
+from rich.table import Table
+
 from jobpilot.core.application_tracker import get_application_tracker
-from jobpilot.learning.action_recorder import get_action_recorder
 from jobpilot.core.logger import get_logger
+from jobpilot.core.opportunity_ledger import OpportunityLedger
+from jobpilot.core.outcome_metrics import summarize_outcomes
+from jobpilot.learning.action_recorder import get_action_recorder
 
 log = get_logger(__name__)
 console = Console()
 
 DATA_DIR = Path(__file__).parent.parent / "data" / "reports"
+
+
+def _calibration_note(*, decided: int, review_eligible: bool) -> str:
+    """Explain the outcome threshold without implying automatic retraining."""
+    if review_eligible:
+        return (
+            f"Sample threshold reached ({decided} decided roles): calibration is "
+            "eligible for explicit manual review only. JobPilot never changes "
+            "weights automatically."
+        )
+    return (
+        "Weights stay fixed: fewer than 20 explicit decided outcomes in this "
+        "time window. JobPilot never changes weights automatically. Silence is "
+        "censored, not counted as rejection."
+    )
 
 
 def export_csv(days: int = 30, output_path: Optional[Path] = None) -> Path:
@@ -98,10 +116,50 @@ def daily_digest(days: int = 7):
         summary.add_row("Completion Rate", f"[bold]{success_rate:.0f}%[/bold]")
 
     if rec_stats:
-        summary.add_row("Fields Auto-Filled", str(rec_stats.get("fields_approved", 0)))
-        summary.add_row("Fields Edited", str(rec_stats.get("fields_edited", 0)))
+        summary.add_row("Legacy Fields Approved", str(rec_stats.get("fields_approved", 0)))
+        summary.add_row("Legacy Fields Edited", str(rec_stats.get("fields_edited", 0)))
 
     console.print(summary)
+
+    ledger = OpportunityLedger()
+    try:
+        events = [
+            {
+                "opportunity_id": event.opportunity_id,
+                "event_type": event.event_type,
+                "occurred_at": event.occurred_at,
+                "source": event.source,
+                "provenance": event.provenance,
+            }
+            for event in ledger.iter_events()
+        ]
+    finally:
+        ledger.close()
+    outcomes = summarize_outcomes(events, days=days)
+    funnel = Table(title=f"Evidence funnel (last {days} days)")
+    funnel.add_column("Stage")
+    funnel.add_column("Events", justify="right")
+    for stage in (
+        "human_reply", "screen", "interview", "offer", "rejected",
+        "withdrawn", "no_response",
+    ):
+        funnel.add_row(stage.replace("_", " ").title(), str(outcomes["stages"][stage]))
+    funnel.add_row("Decided roles", str(outcomes["decided"]))
+    console.print(funnel)
+    cohort_bits = [
+        *(f"channel {name}: {count}" for name, count in sorted(outcomes["channels"].items())),
+        *(f"lane {name}: {count}" for name, count in sorted(outcomes["lanes"].items())),
+    ]
+    if cohort_bits:
+        console.print("[dim]Cohort sample sizes: " + " · ".join(cohort_bits) + "[/dim]")
+    console.print(
+        "[dim]"
+        + _calibration_note(
+            decided=outcomes["decided"],
+            review_eligible=outcomes["may_recalibrate"],
+        )
+        + "[/dim]"
+    )
 
     # --- Recent Applications ---
     if recent:

@@ -16,6 +16,7 @@ import requests  # pyright: ignore[reportMissingModuleSource]
 
 from jobpilot.gigs.core.logger import get_logger
 from jobpilot.gigs.core.models import Gig
+from jobpilot.gigs.core.safe_urls import safe_external_url
 from jobpilot.gigs.core.scrapers.comp import detect_currency, parse_comp
 
 log = get_logger(__name__)
@@ -69,6 +70,9 @@ _APPLY_INBOX_HINTS = ("jobs@", "hiring@", "careers@", "apply@", "hr@", "recruiti
 
 
 def _score_apply_target(href: str, label: str) -> int:
+    href = safe_external_url(href, allow_mailto=True)
+    if not href:
+        return 0
     href_l = href.lower()
     label_l = label.lower()
     if href_l.startswith("mailto:"):
@@ -96,7 +100,9 @@ def _extract_apply_url(html: str, plain_text: str) -> str:
     best_href = ""
     best_score = 0
     for m in _HREF_RE.finditer(html or ""):
-        href = unescape(m.group(1)).strip()
+        href = safe_external_url(unescape(m.group(1)).strip(), allow_mailto=True)
+        if not href:
+            continue
         label = unescape(m.group(2)).strip()
         score = _score_apply_target(href, label)
         if score > best_score:
@@ -109,20 +115,20 @@ def _extract_apply_url(html: str, plain_text: str) -> str:
     for email in _EMAIL_RE.findall(plain_text or ""):
         local = email.split("@", 1)[0].lower() + "@"
         if any(local == hint or local.startswith(hint[:-1]) for hint in _APPLY_INBOX_HINTS):
-            return f"mailto:{email}"
+            return safe_external_url(f"mailto:{email}", allow_mailto=True)
 
     for url in _PLAIN_URL_RE.findall(plain_text or ""):
         u = url.rstrip(".,);:")
         u_l = u.lower()
         if any(h in u_l for h in _APPLY_HOST_HINTS) or any(p in u_l for p in _APPLY_PATH_HINTS):
-            return u
+            return safe_external_url(u)
 
     if best_score > 0:
         return best_href
 
     emails = _EMAIL_RE.findall(plain_text or "")
     if emails:
-        return f"mailto:{emails[0]}"
+        return safe_external_url(f"mailto:{emails[0]}", allow_mailto=True)
 
     return ""
 

@@ -10,6 +10,7 @@ import requests  # pyright: ignore[reportMissingModuleSource]
 
 from jobpilot.gigs.core.logger import get_logger
 from jobpilot.gigs.core.models import Gig
+from jobpilot.gigs.core.safe_urls import safe_external_url
 from jobpilot.gigs.core.scrapers.comp import detect_currency as _detect_currency
 from jobpilot.gigs.core.scrapers.comp import parse_comp as _parse_comp
 from jobpilot.gigs.core.scrapers.ids import stable_url_suffix
@@ -59,6 +60,9 @@ _APPLY_INBOX_HINTS = ("jobs@", "hiring@", "careers@", "apply@", "hr@", "recruiti
 
 
 def _score_apply_target(href: str, label: str) -> int:
+    href = safe_external_url(href, allow_mailto=True)
+    if not href:
+        return 0
     href_l = href.lower()
     label_l = label.lower()
     if href_l.startswith("mailto:"):
@@ -101,7 +105,9 @@ def extract_apply_url_from_listing(html: str) -> str:
     best_href = ""
     best_score = 0
     for m in _HREF_RE.finditer(html):
-        href = m.group(1).strip()
+        href = safe_external_url(m.group(1).strip(), allow_mailto=True)
+        if not href:
+            continue
         label = m.group(2).strip()
         if _is_internal(href):
             continue
@@ -117,14 +123,14 @@ def extract_apply_url_from_listing(html: str) -> str:
     for email in _EMAIL_RE.findall(html):
         local = email.split("@", 1)[0].lower() + "@"
         if any(local == hint or local.startswith(hint[:-1]) for hint in _APPLY_INBOX_HINTS):
-            return f"mailto:{email}"
+            return safe_external_url(f"mailto:{email}", allow_mailto=True)
 
     if best_score > 0:
         return best_href
 
     emails = _EMAIL_RE.findall(html)
     if emails:
-        return f"mailto:{emails[0]}"
+        return safe_external_url(f"mailto:{emails[0]}", allow_mailto=True)
 
     return ""
 
@@ -143,7 +149,7 @@ def _extract_from_description(desc: str) -> str:
     for email in _EMAIL_RE.findall(desc):
         local = email.split("@", 1)[0].lower() + "@"
         if any(local == hint or local.startswith(hint[:-1]) for hint in _APPLY_INBOX_HINTS):
-            return f"mailto:{email}"
+            return safe_external_url(f"mailto:{email}", allow_mailto=True)
 
     # Find the structured `URL:` line first
     m = _DESC_URL_RE.search(desc)
@@ -160,10 +166,10 @@ def _extract_from_description(desc: str) -> str:
             best_score = score
 
     if best_score >= 60:
-        return best_href
+        return safe_external_url(best_href)
     if structured_url:
-        return structured_url
-    return best_href  # may be empty
+        return safe_external_url(structured_url)
+    return safe_external_url(best_href)  # may be empty
 
 
 def _google_careers_search(company: str) -> str:

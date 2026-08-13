@@ -7,6 +7,8 @@ from pathlib import Path
 import pytest
 
 from jobpilot.core import resume_tailor as resume_tailor_module
+from jobpilot.core.jd_parser import ParsedJD
+from jobpilot.core.job_scorer import JobFitResult
 from jobpilot.core.profile_store import ProfileStore
 from jobpilot.core.resume_tailor import ResumeTailor
 
@@ -243,6 +245,111 @@ def test_tailor_falls_back_without_resume_file(tmp_path: Path):
     assert result.output_path.read_text()
 
 
+def test_missing_resume_never_invents_target_lane_experience(tmp_path: Path):
+    store = ProfileStore(data_dir=tmp_path)
+    profile = store.load()
+    profile.current_title = "Independent Contractor"
+    profile.years_of_experience = 5
+    profile.resume_path = str(tmp_path / "missing.pdf")
+    store.save(profile)
+
+    result = ResumeTailor(
+        profile_store=store,
+        output_dir=tmp_path / "output",
+        use_bro=True,
+    ).generate_from_text(
+        "Field Service Engineer\nRequirements\n- Electronics troubleshooting",
+        title="Field Service Engineer",
+        company="Example Co",
+    )
+    content = result.output_path.read_text().lower()
+
+    assert "field service experience" not in content
+    assert "customer-site troubleshooting experience" not in content
+    assert "shipping production software" not in content
+
+
+def test_target_title_is_not_used_as_candidate_headline(tmp_path: Path):
+    store = ProfileStore(data_dir=tmp_path)
+    profile = store.load()
+    profile.first_name = "Alex"
+    profile.last_name = "Sample"
+    assert profile.current_title == ""
+    store.save(profile)
+
+    result = ResumeTailor(
+        profile_store=store, output_dir=tmp_path / "output", use_bro=False
+    ).generate_from_text(
+        "Principal Astrophysicist\nRequirements\n- Telescope operations",
+        title="Principal Astrophysicist",
+        company="Example Observatory",
+    )
+    markdown = result.output_path.read_text()
+    html = result.html_path.read_text() if result.html_path else ""
+
+    assert markdown.splitlines()[1] == "Professional Resume Draft"
+    assert "Target: Principal Astrophysicist at Example Observatory" in markdown
+    assert "<div class='subtitle'>Professional Resume Draft</div>" in html
+    assert "<div class='subtitle'>Principal Astrophysicist</div>" not in html
+
+
+def test_github_link_does_not_imply_code_samples_or_shipped_work(tmp_path: Path):
+    store = ProfileStore(data_dir=tmp_path)
+    profile = store.load()
+    profile.github_url = "https://github.com/alexsample"
+    store.save(profile)
+
+    result = ResumeTailor(
+        profile_store=store, output_dir=tmp_path / "output", use_bro=False
+    ).generate_from_text(
+        "Implementation Engineer\nRequirements\n- Customer support",
+        title="Implementation Engineer",
+        company="Example Co",
+    )
+    content = result.output_path.read_text()
+
+    assert "GitHub: https://github.com/alexsample." in content
+    assert "Code samples" not in content
+    assert "shipped work" not in content
+
+
+def test_unknown_work_authorization_is_omitted_from_resume(tmp_path: Path):
+    store = ProfileStore(data_dir=tmp_path)
+    profile = store.load()
+    profile.current_title = "Independent Contractor"
+    store.save(profile)
+
+    result = ResumeTailor(
+        profile_store=store, output_dir=tmp_path / "output", use_bro=False
+    ).generate_from_text(
+        "Implementation Engineer\nRequirements\n- Customer support",
+        title="Implementation Engineer",
+        company="Example Co",
+    )
+    content = result.output_path.read_text().lower()
+
+    assert "authorized to work" not in content
+    assert "without sponsorship" not in content
+
+
+def test_partial_work_authorization_is_omitted_from_resume(tmp_path: Path):
+    store = ProfileStore(data_dir=tmp_path)
+    profile = store.load()
+    profile.authorized_to_work = True
+    profile.requires_sponsorship = None
+    store.save(profile)
+
+    result = ResumeTailor(
+        profile_store=store, output_dir=tmp_path / "output", use_bro=False
+    ).generate_from_text(
+        "Implementation Engineer\nRequirements\n- Customer support",
+        title="Implementation Engineer",
+        company="Example Co",
+    )
+
+    assert "without sponsorship" not in result.output_path.read_text().lower()
+
+
 def test_module_contains_no_author_identity():
     """Resume selection must stay generic — no personal filenames/identity in the module.
 
@@ -253,3 +360,119 @@ def test_module_contains_no_author_identity():
     source = Path(resume_tailor_module.__file__).read_text()
     for fragment in ("garo", "vartabed"):
         assert fragment not in source.lower(), f"author literal {fragment!r} still in module"
+
+
+def test_external_resume_excludes_missing_skills_and_internal_fit_notes(tmp_path: Path):
+    store = ProfileStore(data_dir=tmp_path)
+    profile = store.load()
+    profile.first_name = "Alex"
+    profile.last_name = "Sample"
+    profile.skills = ["Python"]
+    store.save(profile)
+    tailor = ResumeTailor(profile_store=store, output_dir=tmp_path / "output", use_bro=False)
+
+    result = tailor.generate_from_text(
+        """
+Implementation Engineer
+Requirements
+- Python
+- Kubernetes
+Responsibilities
+- Support customer deployments
+""",
+        title="Implementation Engineer",
+        company="Example Co",
+    )
+    markdown = result.output_path.read_text()
+    html = result.html_path.read_text() if result.html_path else ""
+
+    for internal in (
+        "Kubernetes",
+        "Fit Snapshot",
+        "Gaps to Address",
+        "Low fit",
+        "likely skip",
+        "Strong alignment",
+        "after review",
+        "Review and personalize",
+    ):
+        assert internal not in markdown
+        assert internal not in html
+
+
+def test_external_resume_rejects_inferred_matched_skill_without_candidate_evidence(
+    tmp_path: Path,
+):
+    store = ProfileStore(data_dir=tmp_path)
+    store.save(store.load())
+    result = ResumeTailor(
+        profile_store=store,
+        output_dir=tmp_path / "output",
+        use_bro=False,
+    ).generate_from_fit_result(
+        JobFitResult(
+            score=99,
+            recommendation="Strong alignment",
+            parsed_jd=ParsedJD(
+                title="Implementation Engineer",
+                company="Example Co",
+                raw_text="Required: Kubernetes",
+            ),
+            matched_skills=["Kubernetes"],
+        )
+    )
+
+    rendered = result.output_path.read_text()
+    assert "Kubernetes" not in rendered
+    assert result.matched_skills == []
+
+
+@pytest.mark.parametrize(
+    ("skill", "unrelated_resume_text"),
+    [("Go", "Managed ongoing operations"), ("Git", "Built digital products")],
+)
+def test_verified_matched_skills_requires_word_boundaries(
+    tmp_path: Path,
+    skill: str,
+    unrelated_resume_text: str,
+):
+    store = ProfileStore(data_dir=tmp_path)
+    profile = store.load()
+    fit_result = JobFitResult(
+        score=0,
+        recommendation="",
+        parsed_jd=ParsedJD(raw_text=f"Required: {skill}"),
+        matched_skills=[skill],
+    )
+
+    assert ResumeTailor._verified_matched_skills(
+        profile,
+        fit_result,
+        unrelated_resume_text,
+    ) == []
+
+
+def test_external_resume_never_renders_zero_years(tmp_path: Path):
+    store = ProfileStore(data_dir=tmp_path)
+    profile = store.load()
+    profile.years_of_experience = 0
+    store.save(profile)
+    tailor = ResumeTailor(profile_store=store, output_dir=tmp_path / "output", use_bro=False)
+
+    result = tailor.generate_from_text(
+        "Field Service Engineer\nRequirements\n- Electronics troubleshooting",
+        title="Field Service Engineer",
+        company="Example Co",
+    )
+
+    assert "0 years" not in result.output_path.read_text()
+    assert result.html_path is not None
+    assert "0 years" not in result.html_path.read_text()
+
+
+def test_pdf_export_uses_system_chrome_not_bundled_test_browser():
+    source = Path(resume_tailor_module.__file__).read_text()
+
+    assert "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" in source
+    assert "executable_path=str(chrome_path)" in source
+    assert "chromium.launch(headless=True)" not in source

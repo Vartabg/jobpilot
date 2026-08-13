@@ -7,7 +7,9 @@ Just: curated queue + tap to open + mark applied.
 Endpoints:
   GET  /                         → dashboard.html (mobile responsive)
   GET  /api/queue                → current queue as JSON
-  GET  /api/profile              → profile summary (non-sensitive)
+  GET  /api/profile              → protected local candidate profile (contains PII)
+  GET  /install                  → retired live-fill endpoint (410)
+  GET  /api/bookmarklet          → retired live-fill endpoint (410)
   POST /api/queue/refresh        → rescan all portals (background)
   POST /api/job/<id>/opened      → mark that you tapped Apply (for analytics)
   POST /api/job/<id>/mark-applied → you submitted it, mark done
@@ -17,27 +19,33 @@ Endpoints:
 from __future__ import annotations
 
 import asyncio
+import hmac
+import ipaddress
 import json
+import os
+import re
 import socket
 import subprocess
 from dataclasses import asdict
 from pathlib import Path
+from urllib.parse import urlsplit
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
-from jobpilot.core.logger import get_logger
-from jobpilot.core.profile_store import get_profile_store
 from jobpilot.core.application_tracker import get_application_tracker
+from jobpilot.core.logger import get_logger
+from jobpilot.core.opportunity_ledger import EVENT_TYPES, OpportunityLedger
+from jobpilot.core.profile_store import get_profile_store
 from jobpilot.core.queue_builder import (
-    QUEUE_PATH,
-    build_queue,
     focus_queue_company_first,
     get_job,
+    has_current_action_provenance,
+    is_apply_ready,
     load_queue,
     reconcile_queue_with_tracker,
-    save_queue,
+    refresh_queue,
     update_job_status,
 )
 
@@ -47,6 +55,120 @@ PROJECT_ROOT = Path(__file__).parent.parent
 DASHBOARD_PATH = PROJECT_ROOT / "ui" / "dashboard.html"
 
 app = FastAPI(title="JobPilot Remote", version="0.3.0")
+# Importing ``app`` directly (for example, ``uvicorn ...:app``) must not expose
+# the dashboard. ``configure_server_access`` is the only path that can opt into
+# loopback access or install a valid token for a Tailscale bind.
+app.state.remote_auth_required = True
+app.state.remote_token = None
+app.state.allowed_hosts = None
+
+REMOTE_TOKEN_ENV = "JOBPILOT_REMOTE_TOKEN"
+REMOTE_TOKEN_HEADER = "X-JobPilot-Token"
+_TAILSCALE_V4 = ipaddress.ip_network("100.64.0.0/10")
+_SAFE_TOKEN = re.compile(r"[A-Za-z0-9._~-]{32,}")
+
+
+def configure_server_access(host: str, token: str | None = None) -> bool:
+    """Configure request auth and reject unsafe non-loopback binds.
+
+    Returns ``True`` when the server is in authenticated Tailscale mode.
+    """
+    # Keep a failed or interrupted configuration attempt closed. A successful
+    # loopback configuration below is the sole token-free serving mode.
+    app.state.remote_auth_required = True
+    app.state.remote_token = None
+    app.state.allowed_hosts = None
+    normalized = host.strip().lower()
+    if normalized == "localhost":
+        remote = False
+    else:
+        try:
+            address = ipaddress.ip_address(normalized)
+        except ValueError as exc:
+            raise ValueError(
+                "Bind host must be loopback or a specific Tailscale IPv4 address."
+            ) from exc
+        if address.is_unspecified:
+            raise ValueError("Wildcard bind addresses are not allowed.")
+        remote = not address.is_loopback
+        if remote and not (address.version == 4 and address in _TAILSCALE_V4):
+            raise ValueError(
+                "LAN/public binds are not allowed; use a specific Tailscale IPv4 address."
+            )
+
+    configured_token = token if token is not None else os.environ.get(REMOTE_TOKEN_ENV, "")
+    if remote and not _SAFE_TOKEN.fullmatch(configured_token):
+        raise ValueError(
+            f"Authenticated remote serving requires {REMOTE_TOKEN_ENV} with at least "
+            "32 URL-safe random characters."
+        )
+    app.state.remote_auth_required = remote
+    app.state.remote_token = configured_token if remote else None
+    app.state.allowed_hosts = (
+        {normalized}
+        if remote
+        else {"127.0.0.1", "localhost", "::1"}
+    )
+    return remote
+
+
+def _same_origin_request(request: Request) -> bool:
+    """Reject DNS rebinding and cross-site browser mutations on local APIs."""
+    allowed = app.state.allowed_hosts
+    if allowed is None:
+        return True
+    hostname = (request.url.hostname or "").lower()
+    client_host = request.client.host if request.client else ""
+    is_test_client = hostname == "testserver" and client_host == "testclient"
+    if not is_test_client and hostname not in allowed:
+        return False
+    if request.headers.get("Sec-Fetch-Site", "").lower() == "cross-site":
+        return False
+    origin = request.headers.get("Origin", "")
+    if not origin:
+        return True
+    parsed = urlsplit(origin)
+    request_port = request.url.port or (443 if request.url.scheme == "https" else 80)
+    origin_port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    return (
+        parsed.scheme == request.url.scheme
+        and (parsed.hostname or "").lower() == hostname
+        and origin_port == request_port
+    )
+
+
+@app.middleware("http")
+async def require_remote_auth(request: Request, call_next):
+    """Require a constant-time token check for every remotely served request."""
+    if not _same_origin_request(request):
+        return JSONResponse(
+            {"detail": "Untrusted request origin or host."},
+            status_code=403,
+            headers={"Cache-Control": "no-store"},
+        )
+    if not app.state.remote_auth_required:
+        response = await call_next(request)
+        response.headers["Cache-Control"] = "no-store"
+        return response
+    expected = app.state.remote_token or ""
+    supplied = request.headers.get(REMOTE_TOKEN_HEADER, "")
+    authorization = request.headers.get("Authorization", "")
+    if not supplied and authorization.startswith("Bearer "):
+        supplied = authorization.removeprefix("Bearer ")
+    if not supplied:
+        supplied = request.query_params.get("token", "")
+    if not supplied or not hmac.compare_digest(supplied, expected):
+        return JSONResponse(
+            {"detail": "Remote authentication required."},
+            status_code=401,
+            headers={
+                "Cache-Control": "no-store",
+                "WWW-Authenticate": "Bearer",
+            },
+        )
+    response = await call_next(request)
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 class ApplicationLogPayload(BaseModel):
@@ -56,6 +178,65 @@ class ApplicationLogPayload(BaseModel):
     status: str = "applied"
     applied_at: str | None = None
     source: str = "dashboard"
+    acquisition_channel: str = "unknown"
+
+
+def _require_apply_ready(job_id: str):
+    job = get_job(job_id)
+    if not job:
+        raise HTTPException(404, f"Job {job_id} not found")
+    if not is_apply_ready(job) or not has_current_action_provenance(job):
+        raise HTTPException(
+            409,
+            detail={
+                "message": (
+                    "This role cannot be treated as apply-ready because its "
+                    "evidence or current source verification is incomplete."
+                ),
+                "decision": job.decision,
+                "legitimacy_state": job.legitimacy_state,
+                "next_action": "Refresh the source and review the evidence card.",
+            },
+        )
+    return job
+
+
+def _record_funnel_event(
+    *,
+    company: str,
+    title: str,
+    url: str,
+    status: str,
+    source: str,
+    occurred_at: str = "",
+    acquisition_channel: str = "unknown",
+) -> None:
+    event_type = {
+        "started": "discovered",
+        "submitted": "applied",
+        "abandoned": "withdrawn",
+    }.get(status, status)
+    if event_type not in EVENT_TYPES:
+        return
+    ledger = OpportunityLedger()
+    try:
+        opportunity_id = ledger.upsert_opportunity(
+            company,
+            title,
+            canonical_url=url,
+        )
+        ledger.append_event(
+            opportunity_id,
+            event_type,
+            occurred_at,
+            source,
+            {
+                "original_status": status,
+                "acquisition_channel": acquisition_channel,
+            },
+        )
+    finally:
+        ledger.close()
 
 
 # ---------------------------------------------------------------------------
@@ -73,125 +254,25 @@ async def dashboard() -> FileResponse:
     )
 
 
-def _bookmarklet_profile() -> dict:
-    """Profile payload baked into the fill bookmarklet.
-
-    Single builder shared by /install and /api/bookmarklet so the two
-    endpoints can't drift apart.
-    """
-    p = get_profile_store().load()
-    return {
-        "first_name": p.first_name,
-        "last_name": p.last_name,
-        "full_name": f"{p.first_name} {p.last_name}".strip(),
-        "email": p.email,
-        "phone": p.phone,
-        "city": p.city,
-        "state": p.state,
-        "country": p.country or "United States",
-        "zip": p.zip_code,
-        "linkedin": p.linkedin_url,
-        "portfolio": p.portfolio_url,
-        "github": p.github_url,
-        "current_title": p.current_title,
-        "years_experience": str(p.years_of_experience),
-        "custom_answers": p.custom_answers or {},
-    }
-
-
-def _bookmarklet_js() -> tuple[str, str]:
-    """Return (raw, minified) bookmarklet JS with the profile baked in."""
-    js = BOOKMARKLET_TEMPLATE.replace("__PROFILE__", json.dumps(_bookmarklet_profile()))
-    return js, " ".join(js.split())
-
-
 @app.get("/install", include_in_schema=False)
-async def install_page() -> HTMLResponse:
-    """Install-the-bookmarklet page — user loads this in Safari, gets
-    step-by-step instructions to save the bookmark on their phone."""
-    # Generate the bookmarklet URL
-    import urllib.parse as _up
-    _, js_min = _bookmarklet_js()
-    href = "javascript:" + _up.quote(js_min)
-
-    html = f"""<!DOCTYPE html>
-<html><head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="theme-color" content="#0d1117">
-<title>Install JobPilot Fill</title>
-<style>
-  body {{ font:16px -apple-system,sans-serif; background:#0d1117; color:#e6edf3; padding:20px; max-width:560px; margin:0 auto; }}
-  h1 {{ color:#58a6ff; font-size:22px; margin-bottom:16px; }}
-  h2 {{ font-size:15px; color:#8b949e; text-transform:uppercase; letter-spacing:0.5px; margin:24px 0 8px; }}
-  .bookmark {{
-    display:inline-block;
-    padding:16px 28px;
-    background:#238636;
-    color:#fff !important;
-    border-radius:12px;
-    font-size:18px;
-    font-weight:600;
-    text-decoration:none;
-    margin:16px 0;
-  }}
-  ol li {{ margin:12px 0 12px 20px; line-height:1.5; }}
-  code {{ background:#21262d; padding:2px 6px; border-radius:4px; font-family:ui-monospace,monospace; font-size:14px; }}
-  .tip {{ background:#161b22; border-left:3px solid #d29922; padding:12px 14px; border-radius:6px; margin:16px 0; font-size:14px; color:#e6edf3; }}
-  a.back {{ color:#58a6ff; font-size:14px; }}
-</style>
-</head><body>
-<a href="/" class="back">← Back to JobPilot</a>
-<h1>⚡ Install the Fill Button</h1>
-
-<p>The button below fills any job application form with your profile. Works on Greenhouse, Lever, Ashby, Workday, and most ATS forms.</p>
-
-<h2>Step 1 — Save it to bookmarks</h2>
-<p>Drag or tap the button below to test:</p>
-<a href="{href}" class="bookmark">⚡ Fill Application</a>
-
-<h2>Step 2 — Save as a Safari Favorite (iPhone)</h2>
-<ol>
-  <li>Tap the <b>Share icon</b> (box with arrow up) at bottom of Safari</li>
-  <li>Scroll down → tap <b>Add Bookmark</b></li>
-  <li>Change the Location to <b>Favorites</b> → tap Save</li>
-  <li>The bookmark is now in your Favorites bar</li>
-</ol>
-
-<h2>Step 3 — Use it on any job form</h2>
-<ol>
-  <li>Tap Apply on a job in JobPilot</li>
-  <li>Job page opens in Safari</li>
-  <li>Tap the address bar → your Favorites appear → tap <b>⚡ Fill Application</b></li>
-  <li>Green confirmation appears: "Filled N fields"</li>
-  <li>Upload resume manually (from Files app → iCloud Drive)</li>
-  <li>Solve CAPTCHA, tap Submit</li>
-</ol>
-
-<div class="tip">
-  <b>Heads up:</b> The button embeds your current profile data. If you update your profile in the JobPilot server, revisit this page and re-add the bookmark.
-</div>
-
-<h2>What it fills automatically</h2>
-<p>Name, email, phone, LinkedIn, portfolio, location, current title, years of experience, work authorization questions ("Yes"), sponsorship questions ("No"), EEOC and veteran/disability questions ("Prefer not to say" unless you've saved a custom answer), relocation questions ("Yes"), common "how did you hear" ("LinkedIn"), and required acknowledgment checkboxes.</p>
-
-<p style="margin-top:24px; color:#8b949e; font-size:13px">
-  <b>What it can't do:</b> Upload your resume file (iOS blocks programmatic file selection), solve CAPTCHAs (designed to require humans), answer essay questions (that's your voice — do those manually).
-</p>
-</body></html>"""
-    return HTMLResponse(
-        html,
-        headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
+async def install_page() -> None:
+    """Explain that live-form automation was retired for the paste flow."""
+    raise HTTPException(
+        410,
+        detail={
+            "message": "The live-form fill button has been retired.",
+            "next_action": (
+                "Use JobPilot to draft a paste sheet, then paste, review, and "
+                "submit in your normal browser."
+            ),
+        },
     )
-
-
 # ---------------------------------------------------------------------------
 # Queue
 # ---------------------------------------------------------------------------
 
 @app.get("/api/queue")
 async def api_queue() -> JSONResponse:
-    reconcile_queue_with_tracker()
     jobs = load_queue()
     return JSONResponse([asdict(j) for j in jobs])
 
@@ -199,9 +280,8 @@ async def api_queue() -> JSONResponse:
 @app.post("/api/queue/refresh")
 async def api_queue_refresh() -> JSONResponse:
     def _run() -> int:
-        jobs = build_queue(limit=100)
-        save_queue(jobs)
-        return len(jobs)
+        return len(refresh_queue(limit=100))
+
     count = await asyncio.to_thread(_run)
     return JSONResponse({"ok": True, "count": count})
 
@@ -253,6 +333,15 @@ async def api_log_application(payload: ApplicationLogPayload) -> JSONResponse:
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+    _record_funnel_event(
+        company=app_row.company,
+        title=app_row.job_title,
+        url=app_row.job_url,
+        status=app_row.status,
+        source=app_row.source,
+        occurred_at=app_row.applied_at,
+        acquisition_channel=payload.acquisition_channel,
+    )
     changed, total = reconcile_queue_with_tracker()
     return JSONResponse({
         "ok": True,
@@ -270,6 +359,7 @@ async def api_log_application(payload: ApplicationLogPayload) -> JSONResponse:
 async def api_opened(job_id: str) -> JSONResponse:
     """Track that the user tapped Apply (opened the link). Sets status to
     'viewing' so the UI can show a 'Did you submit?' prompt."""
+    _require_apply_ready(job_id)
     if not update_job_status(job_id, "viewing"):
         raise HTTPException(404, f"Job {job_id} not found")
     return JSONResponse({"ok": True})
@@ -277,12 +367,17 @@ async def api_opened(job_id: str) -> JSONResponse:
 
 @app.post("/api/job/{job_id}/mark-applied")
 async def api_mark_applied(job_id: str) -> JSONResponse:
-    job = get_job(job_id)
-    if not job:
-        raise HTTPException(404, f"Job {job_id} not found")
+    job = _require_apply_ready(job_id)
     if not update_job_status(job_id, "applied"):
         raise HTTPException(404, f"Job {job_id} not found")
     get_application_tracker().mark_applied(job.url, job.title, job.company)
+    _record_funnel_event(
+        company=job.company,
+        title=job.title,
+        url=job.url,
+        status="applied",
+        source="dashboard",
+    )
     return JSONResponse({"ok": True})
 
 
@@ -329,195 +424,30 @@ async def api_latest_draft() -> JSONResponse:
     if not path.exists():
         return JSONResponse({})
     try:
-        return JSONResponse(json.loads(path.read_text()))
+        raw = json.loads(path.read_text())
+        return JSONResponse({
+            "title": str(raw.get("title", "")),
+            "company": str(raw.get("company", "")),
+            "recommendation": str(raw.get("recommendation", "")),
+            "matched_skills": list(raw.get("matched_skills", []))[:6]
+            if isinstance(raw.get("matched_skills"), list)
+            else [],
+        })
     except Exception as exc:
         log.warning("Could not read latest draft manifest: %s", exc)
         return JSONResponse({})
 
 
 @app.get("/api/bookmarklet")
-async def api_bookmarklet() -> JSONResponse:
-    """Return a self-contained JS bookmarklet with profile data baked in.
-    User saves this as a Safari bookmark, taps it on any job form to auto-fill."""
-    # URL-encode for bookmark use (minify whitespace)
-    import urllib.parse as _up
-    js, js_min = _bookmarklet_js()
-    return JSONResponse({
-        "bookmarklet": "javascript:" + _up.quote(js_min),
-        "raw": js,
-        "preview": js_min[:200] + "…",
-    })
-
-
-# Self-contained form-fill bookmarklet. Demographic/EEO answer defaults below
-# (yesNoFor) must stay aligned with the SELECT_RULES defaults in
-# extension/content.js until both surfaces are generated from a single source.
-# NOTE: this template is minified by collapsing all whitespace to single
-# spaces, so comments inside it MUST use /* */ form — a // comment would
-# swallow the rest of the script.
-BOOKMARKLET_TEMPLATE = r"""
-(function(){
-  var P = __PROFILE__;
-  var filled = 0, skipped = 0;
-
-  function labelOf(el){
-    try {
-      if (el.getAttribute('aria-label')) return el.getAttribute('aria-label');
-      if (el.id) {
-        var l = document.querySelector('label[for="' + CSS.escape(el.id) + '"]');
-        if (l) return l.innerText.trim();
-      }
-      var p = el.parentElement;
-      for (var i=0; i<5 && p; i++){
-        if (p.tagName === 'LABEL') return p.innerText.trim();
-        var lbl = p.querySelector('label, legend');
-        if (lbl && !lbl.contains(el)) return lbl.innerText.trim();
-        p = p.parentElement;
-      }
-      return el.getAttribute('placeholder') || el.name || el.id || '';
-    } catch(e){ return ''; }
-  }
-
-  function valueFor(label){
-    var l = (label || '').toLowerCase();
-    if (/first\s*name|firstname|given name/.test(l)) return P.first_name;
-    if (/last\s*name|lastname|family name|surname/.test(l)) return P.last_name;
-    if (/preferred name|nickname/.test(l)) return P.first_name;
-    if (/full\s*name|your name/.test(l) || l.trim() === 'name') return P.full_name;
-    if (/email/.test(l)) return P.email;
-    if (/phone|mobile|cell|telephone/.test(l)) return P.phone;
-    if (/location.*city|^city$/.test(l)) return P.city;
-    if (/^state$|region/.test(l)) return P.state;
-    if (/zip|postal/.test(l)) return P.zip;
-    if (/country/.test(l)) return P.country;
-    if (/linkedin/.test(l)) return P.linkedin;
-    if (/github/.test(l)) return P.github;
-    if (/portfolio|website|personal site/.test(l)) return P.portfolio;
-    if (/current title|current role|job title|headline/.test(l)) return P.current_title;
-    if (/years of experience|years experience/.test(l)) return P.years_experience;
-    if (/how did you hear|hear about/.test(l)) return 'LinkedIn';
-    /* Custom answers fuzzy match */
-    for (var q in P.custom_answers) {
-      if (q.toLowerCase().indexOf(l) >= 0 || l.indexOf(q.toLowerCase()) >= 0) return P.custom_answers[q];
-    }
-    return null;
-  }
-
-  function yesNoFor(label){
-    var l = (label || '').toLowerCase();
-    if (/authorized to work|legally authorized|us citizen|u\.s\. citizen|citizenship|eligible to work/.test(l)) return 'Yes';
-    if (/sponsorship|visa sponsor|require sponsorship/.test(l)) return 'No';
-    if (/willing to relocate|open to relocation|able to relocate/.test(l)) return 'Yes';
-    if (/willing to work|open to work|open to hybrid|on-site|in-office|hub location|days per week|days a week/.test(l)) return 'Yes';
-    if (/family member|close personal relationship|outside business|worked for.*past|live within|conflict of interest/.test(l)) return 'No';
-    /* Demographic/EEO defaults: decline-to-answer family. Per-user answers come
-       from profile custom_answers (checked first via valueFor). Keep these in
-       sync with the SELECT_RULES defaults in extension/content.js. */
-    if (/gender identity/.test(l)) return 'Decline to self identify||Decline to self-identify||Prefer not to say||I don\'t wish to answer||Decline to answer';
-    if (/^gender/.test(l) || /\sgender\s/.test(l)) return 'Decline to self identify||Decline to self-identify||Prefer not to say||I don\'t wish to answer||Decline to answer';
-    if (/race|ethnicity/.test(l)) return 'Decline to self identify||Decline to self-identify||Decline to answer||I don\'t wish to answer||Prefer not to say';
-    if (/hispanic|latino/.test(l)) return 'Decline to self identify||Decline to self-identify||Decline to answer||I don\'t wish to answer||Prefer not to say';
-    if (/veteran/.test(l)) return 'I don\'t wish to answer||Prefer not to say||Decline to answer';
-    if (/disability/.test(l)) return 'I do not want to answer||I don\'t wish to answer||Prefer not to say||Decline to answer';
-    return null;
-  }
-
-  /* Fill text-like inputs */
-  var textSel = 'input[type="text"]:not([disabled]):not([readonly]), input[type="email"]:not([disabled]):not([readonly]), input[type="tel"]:not([disabled]):not([readonly]), input[type="url"]:not([disabled]):not([readonly]), input[type="number"]:not([disabled]):not([readonly]), input:not([type]):not([disabled]):not([readonly]), textarea:not([disabled]):not([readonly])';
-  document.querySelectorAll(textSel).forEach(function(el){
-    try {
-      if (el.value && el.value.trim()) return;
-      if (el.offsetParent === null) return;
-      var label = labelOf(el);
-      var v = valueFor(label);
-      if (v) {
-        var proto = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value') || Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value');
-        if (proto && proto.set) proto.set.call(el, v); else el.value = v;
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-        el.dispatchEvent(new Event('change', { bubbles: true }));
-        filled++;
-      } else { skipped++; }
-    } catch(e){}
-  });
-
-  /* Fill native <select>s (including hidden ones wrapped by Select2/React) */
-  document.querySelectorAll('select:not([disabled])').forEach(function(sel){
-    try {
-      if (sel.value && sel.value.trim() && sel.value.toLowerCase() !== 'select') return;
-      var label = labelOf(sel);
-      var target = valueFor(label) || yesNoFor(label);
-      if (!target) { skipped++; return; }
-      var targets = target.split('||').map(function(s){return s.trim().toLowerCase();});
-      var opts = Array.from(sel.options);
-      var match = null;
-      for (var i=0; i<targets.length && !match; i++){
-        var n = targets[i];
-        match = opts.find(function(o){return o.text.trim().toLowerCase() === n;});
-        if (!match) match = opts.find(function(o){return o.text.toLowerCase().indexOf(n) >= 0;});
-      }
-      if (match) {
-        sel.value = match.value;
-        sel.dispatchEvent(new Event('input', { bubbles: true }));
-        sel.dispatchEvent(new Event('change', { bubbles: true }));
-        if (window.jQuery && jQuery(sel).data('select2')) jQuery(sel).val(match.value).trigger('change');
-        filled++;
-      } else { skipped++; }
-    } catch(e){}
-  });
-
-  /* Radio groups (yes/no + EEO questions) */
-  document.querySelectorAll('fieldset, div[role="radiogroup"], ul.application-question').forEach(function(group){
-    try {
-      var q = (group.querySelector('legend, label, .application-label') || group).innerText.slice(0,200);
-      var target = valueFor(q) || yesNoFor(q);
-      if (!target) return;
-      var targets = target.split('||').map(function(s){return s.trim().toLowerCase();});
-      var radios = group.querySelectorAll('input[type="radio"]');
-      for (var t=0; t<targets.length; t++){
-        var n = targets[t], done = false;
-        for (var i=0; i<radios.length; i++){
-          var r = radios[i];
-          var rl = (labelOf(r) + ' ' + (r.value || '')).toLowerCase();
-          if (rl.indexOf(n) >= 0) {
-            r.checked = true;
-            r.dispatchEvent(new Event('change', { bubbles: true }));
-            filled++;
-            done = true;
-            break;
-          }
-        }
-        if (done) break;
-      }
-    } catch(e){}
-  });
-
-  /* Auto-check required acknowledgment checkboxes */
-  document.querySelectorAll('input[type="checkbox"]:not([disabled])').forEach(function(cb){
-    try {
-      if (cb.checked) return;
-      if (cb.offsetParent === null) return;
-      var label = labelOf(cb).toLowerCase();
-      var required = cb.required || cb.getAttribute('aria-required') === 'true';
-      var isAck = /acknowledge|i agree|agree to|accept|confirm|privacy policy|terms|consent to/.test(label);
-      var isMarketing = /marketing|newsletter|promotional|updates about|notifications/.test(label);
-      if ((required || isAck) && !isMarketing) {
-        cb.checked = true;
-        cb.dispatchEvent(new Event('change', { bubbles: true }));
-        filled++;
-      }
-    } catch(e){}
-  });
-
-  var msg = '✓ Filled ' + filled + ' fields. Upload resume + solve CAPTCHA manually.';
-  var t = document.createElement('div');
-  t.style.cssText = 'position:fixed;top:20px;right:20px;background:#238636;color:#fff;padding:12px 18px;border-radius:10px;z-index:999999;font:14px -apple-system;box-shadow:0 4px 12px rgba(0,0,0,0.3);';
-  t.textContent = msg;
-  document.body.appendChild(t);
-  setTimeout(function(){ t.remove(); }, 4000);
-})();
-"""
-
-
+async def api_bookmarklet() -> None:
+    """Fail closed because live-form automation is outside the safe flow."""
+    raise HTTPException(
+        410,
+        detail={
+            "message": "Automated live-form filling is disabled.",
+            "next_action": "Generate a paste sheet and submit by hand.",
+        },
+    )
 # ---------------------------------------------------------------------------
 # Network helpers
 # ---------------------------------------------------------------------------
@@ -548,7 +478,14 @@ def get_local_ip() -> str:
 
 
 def run_server(host: str = "127.0.0.1", port: int | None = None) -> None:
-    from jobpilot.core.config import DEFAULT_SERVE_PORT
-
     import uvicorn
-    uvicorn.run(app, host=host, port=port or DEFAULT_SERVE_PORT, log_level="info")
+
+    from jobpilot.core.config import DEFAULT_SERVE_PORT
+    remote = configure_server_access(host)
+    uvicorn.run(
+        app,
+        host=host,
+        port=port or DEFAULT_SERVE_PORT,
+        log_level="info",
+        access_log=not remote,
+    )

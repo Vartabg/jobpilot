@@ -146,14 +146,18 @@ _PERSONALIZATION_SIGNALS: tuple[tuple[tuple[str, ...], str], ...] = (
 )
 
 
-def _matched_personalization_skills(gig: Gig, limit: int = 2) -> list[str]:
-    """Pick user-configured skills that are explicitly present in the gig."""
+def _listing_skill_mentions(gig: Gig, limit: int = 2) -> list[str]:
+    """Pick discovery keywords explicitly present in the listing.
+
+    These keywords help notice relevant posting language; they are not
+    candidate evidence and must never be phrased as the sender's skills.
+    """
     text = _text(gig)
     matches: list[str] = []
     seen: set[str] = set()
     for keyword in preferences.skill_keywords():
         keyword_l = str(keyword).strip().lower()
-        if not keyword_l or keyword_l not in text:
+        if not keyword_l or not _contains_term(text, keyword_l):
             continue
         display = _display_skill(keyword_l)
         normalized = display.lower()
@@ -183,19 +187,15 @@ def _personalization_signal(gig: Gig) -> str:
 def _tailored_hook(gig: Gig) -> str:
     """One grounded personalization sentence for phone-ready drafts.
 
-    The hook uses only the listing's own text plus user-configured skill
-    keywords. It avoids fake company research while removing the old manual
-    step where the user had to write the first personalized line themselves.
+    The hook reports only what appears in the listing. Discovery keywords may
+    select a phrase, but they never become a claim about the candidate.
     """
+    skills = _listing_skill_mentions(gig)
+    if not skills:
+        return ""
     signal = _personalization_signal(gig)
-    skills = _matched_personalization_skills(gig)
-    if skills:
-        if len(skills) == 1:
-            skill_text = skills[0]
-        else:
-            skill_text = f"{skills[0]} and {skills[1]}"
-        return f" The part that fits me is {signal} — I work with {skill_text}."
-    return f" The part that fits me is {signal} — that's the kind of work I do."
+    skill_text = skills[0] if len(skills) == 1 else f"{skills[0]} and {skills[1]}"
+    return f" I noticed {signal}; the posting mentions {skill_text}."
 
 
 @dataclass(frozen=True)
@@ -208,12 +208,7 @@ class RevenueBrief:
 
 
 def email_subject(gig: Gig) -> str:
-    """Compose a hireable, scannable email subject from a gig.
-
-    Prefers `Company — Role` when both are known. Skips title entirely
-    when it's marketing prose (a paragraph instead of a 'Company | Role' line).
-    Caps at ~110 chars for iOS Mail preview.
-    """
+    """Compose a neutral subject without inferring the sender's discipline."""
     company = (gig.company or "").strip()
     role = _display_title(gig)
     if company and role:
@@ -224,21 +219,7 @@ def email_subject(gig: Gig) -> str:
         head = role
     else:
         head = "Your hiring post"
-    tag = _SUBJECT_TAG.get(pick_offer(gig), "full-stack + AI engineer")
-    return f"{head[:72]} — {tag}"[:110]
-
-
-# Short value tag for the subject line, by offer — leads with relevant value
-# instead of the old generic "interested + brief background".
-_SUBJECT_TAG = {
-    "RAG / internal knowledge assistant": "AI / retrieval engineer",
-    "Interactive 3D performance rescue": "front-end + 3D engineer",
-    "AI workflow audit + one automation": "AI automation engineer",
-    "AI workflow audit": "AI / automation engineer",
-    "Forward Deployed / Solutions": "forward deployed / solutions",
-    "Applied AI / builder": "applied AI builder",
-    "Full-stack / product engineer": "full-stack engineer",
-}
+    return f"Interest in {head[:88]}"[:110]
 
 
 def email_body(gig: Gig) -> str:
@@ -258,8 +239,20 @@ def _text(gig: Gig) -> str:
     ).lower()
 
 
+def _contains_term(text: str, term: str) -> bool:
+    """Match a posting term lexically, including punctuated skill labels."""
+    normalized = str(term or "").strip().lower()
+    if not normalized:
+        return False
+    return re.search(
+        rf"(?<![a-z0-9]){re.escape(normalized)}(?![a-z0-9])",
+        text,
+        re.IGNORECASE,
+    ) is not None
+
+
 def _has_any(text: str, keywords: tuple[str, ...]) -> bool:
-    return any(keyword in text for keyword in keywords)
+    return any(_contains_term(text, keyword) for keyword in keywords)
 
 
 def _pick_stack_offer(text: str) -> str | None:
@@ -441,64 +434,6 @@ def _is_contract_lead(gig: Gig) -> bool:
     return bool(_CONTRACT_TITLE_RE.search(f"{gig.title or ''} {gig.description or ''}"))
 
 
-# Full-time framing: honest builder + field/customer track. No year counts,
-# no "end to end", no company-SWE tenure claim. Not a contractor audit pitch.
-_FTE_CAPABILITY = {
-    "RAG / internal knowledge assistant":
-        "I build AI and document-retrieval systems in Python and TypeScript, "
-        "with human review and security in mind. Shipped solo products are "
-        "the proof — I don't have company SWE tenure.",
-    "Interactive 3D performance rescue":
-        "I build web and 3D front-ends in React/Next.js and Three.js, including "
-        "performance work on mobile (solo production work, not a company ladder).",
-    "Forward Deployed / Solutions":
-        "I'm a customer-facing technical builder — Navy electronics, field "
-        "service deployments, and solo AI/full-stack products. I like sitting "
-        "with real users, shipping the fix, and owning the outcome.",
-    "Applied AI / builder":
-        "I build practical LLM and agent tooling (Python/TypeScript, browser "
-        "automation, human-in-the-loop). Solo shipped work is the proof — "
-        "I don't claim company SWE years.",
-    "Full-stack / product engineer":
-        "I ship full-stack web and AI product work as a solo builder "
-        "(Next.js, React, APIs, deploy). Customer-facing field background "
-        "plus the products I ship.",
-    # Legacy contract offer names can still appear if stack-matched on FTE.
-    "AI workflow audit + one automation":
-        "I work on practical LLM and automation workflows — tools, "
-        "orchestration, and human-in-the-loop. Not model training.",
-    "AI workflow audit":
-        "I build practical AI and automation with LLM APIs and tools, with "
-        "human review in the loop.",
-}
-_FTE_CAPABILITY_DEFAULT = (
-    "I'm a customer-facing technical builder with field deployment experience "
-    "and solo AI/full-stack products. No company SWE tenure — the work I ship "
-    "is the proof."
-)
-
-# Contract framing: a bounded, service-shaped offer (appropriate for Upwork /
-# explicit contract roles).
-_CONTRACT_CAPABILITY = {
-    "RAG / internal knowledge assistant":
-        "The scope looks like a fit for a lean RAG MVP: ingestion, chunking, "
-        "citations, a simple UI, and a clear update path. I'd start with a small "
-        "architecture pass, then ship the first working assistant.",
-    "Interactive 3D performance rescue":
-        "My strongest fit is stabilizing Three.js/R3F experiences that are slow "
-        "or fragile on mobile — a focused performance triage, then a short pass "
-        "on the highest-impact fixes.",
-    "AI workflow audit + one automation":
-        "This looks like a practical AI workflow problem, not a model-training "
-        "one. I'd map the current workflow, find the one automation with the "
-        "fastest ROI, and keep anything sensitive out of cloud AI.",
-    "AI workflow audit":
-        "I think the fastest path is a bounded AI workflow audit before "
-        "building — separating no-AI fixes from AI-worthy work and recommending "
-        "the smallest useful automation.",
-}
-_CONTRACT_CAPABILITY_DEFAULT = _CONTRACT_CAPABILITY["AI workflow audit"]
-
 # Offer → which background bullet to use as the concrete proof line.
 _OFFER_PROOF_KEY = {
     "RAG / internal knowledge assistant": "ai_agent_systems",
@@ -544,16 +479,26 @@ def build_revenue_brief(gig: Gig) -> RevenueBrief:
 
     parts = [opening]
     if contract:
-        parts.append(_CONTRACT_CAPABILITY.get(offer, _CONTRACT_CAPABILITY_DEFAULT))
         if proof:
             parts.append(f"A bit of relevant work: {proof}")
-        parts.append(f"Service outline: {pages['service_page']} · Relevant work: {pages['work_page']}")
+        configured_pages = [
+            value
+            for value in (pages.get("service_page", ""), pages.get("work_page", ""))
+            if value and not contains_placeholder(value)
+        ]
+        if configured_pages:
+            parts.append("Service outline / relevant work: " + " · ".join(configured_pages))
         parts.append("Open to a short call to scope it? Happy to share more first.")
     else:
-        parts.append(_FTE_CAPABILITY.get(offer, _FTE_CAPABILITY_DEFAULT))
         if proof:
             parts.append(proof)
-        parts.append(f"Relevant work: {pages['work_page']}")
+        else:
+            parts.append(
+                "Please add a verified background bullet before sending this draft."
+            )
+        work_page = pages.get("work_page", "")
+        if work_page and not contains_placeholder(work_page):
+            parts.append(f"Relevant work: {work_page}")
         parts.append("Is this still open? I'd welcome a short call.")
 
     review_note = (
@@ -561,7 +506,10 @@ def build_revenue_brief(gig: Gig) -> RevenueBrief:
         "rules. Do not auto-submit."
     )
 
-    draft = "\n\n".join(parts) + "\n\n" + preferences.signoff_block() + review_note
+    signoff = preferences.signoff_block()
+    if signoff:
+        parts.append(signoff)
+    draft = "\n\n".join(parts) + review_note
     leak = contains_placeholder(draft)
     if leak:
         log.error(

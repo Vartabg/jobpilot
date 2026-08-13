@@ -9,8 +9,8 @@ On connect():
 
 import os
 from pathlib import Path
-from typing import Optional
-from playwright.async_api import async_playwright, Browser, Page, BrowserContext
+
+from playwright.async_api import Browser, BrowserContext, Page, async_playwright
 
 from jobpilot.core.logger import get_logger
 from jobpilot.core.page_info import PageInfo, build_page_info
@@ -22,7 +22,7 @@ _LINKEDIN_JOBS = "https://www.linkedin.com/jobs/"
 _SYSTEM_CHROME = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
 
 
-def _chrome_executable() -> Optional[str]:
+def _chrome_executable() -> str | None:
     """Prefer system Chrome over Playwright's bundled Chrome for Testing."""
     configured = os.environ.get("JOBPILOT_CHROME_EXECUTABLE", "").strip()
     if configured:
@@ -42,9 +42,9 @@ class CDPBridge:
         self.debug_port = debug_port
         self.debug_url = f"http://127.0.0.1:{debug_port}"
         self._playwright = None
-        self._browser: Optional[Browser] = None  # set only for CDP reconnect path
-        self._context: Optional[BrowserContext] = None
-        self._page: Optional[Page] = None
+        self._browser: Browser | None = None  # set only for CDP reconnect path
+        self._context: BrowserContext | None = None
+        self._page: Page | None = None
 
     async def connect(self) -> bool:
         """Connect to or launch the dedicated browser window."""
@@ -67,19 +67,27 @@ class CDPBridge:
 
         # --- path 2: launch a fresh persistent window ---
         try:
+            executable = _chrome_executable()
+            if executable is None:
+                log.error(
+                    "System Chrome is required; set JOBPILOT_CHROME_EXECUTABLE "
+                    "to an installed Chrome executable"
+                )
+                await self._playwright.stop()
+                self._playwright = None
+                return False
+
             _PROFILE_DIR.mkdir(parents=True, exist_ok=True)
             launch_options = {
                 "headless": False,
+                "executable_path": executable,
                 "args": [
+                    "--remote-debugging-address=127.0.0.1",
                     f"--remote-debugging-port={self.debug_port}",
-                    "--remote-allow-origins=*",
                     "--no-first-run",
                     "--no-default-browser-check",
                 ],
             }
-            executable = _chrome_executable()
-            if executable:
-                launch_options["executable_path"] = executable
             self._context = await self._playwright.chromium.launch_persistent_context(
                 str(_PROFILE_DIR),
                 **launch_options,
@@ -115,7 +123,7 @@ class CDPBridge:
             self._page = None
 
     @property
-    def page(self) -> Optional[Page]:
+    def page(self) -> Page | None:
         """Get the current page"""
         return self._page
 
@@ -130,7 +138,7 @@ class CDPBridge:
         if self._page:
             await self._page.wait_for_load_state("networkidle", timeout=timeout * 1000)
 
-    async def get_active_page(self) -> Optional[Page]:
+    async def get_active_page(self) -> Page | None:
         """Get the best page to work with.
 
         Priority:
@@ -195,7 +203,7 @@ class CDPBridge:
 
 
 # Convenience function for one-off connections
-async def connect_to_chrome(debug_port: int = 9222) -> Optional[CDPBridge]:
+async def connect_to_chrome(debug_port: int = 9222) -> CDPBridge | None:
     """Connect to Chrome and return the bridge, or None on failure"""
     bridge = CDPBridge(debug_port)
     if await bridge.connect():

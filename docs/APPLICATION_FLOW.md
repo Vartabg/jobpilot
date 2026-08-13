@@ -28,15 +28,16 @@ ATS anti-spam systems detect automated browsers. The signals that tripped it:
 
 ## The flow
 
-1. **Source / score** the role with JobPilot (`scan`, `score`).
+1. **Source / assess** the role with JobPilot (`queue --refresh`, `score`). A role reaches `apply_now` only when a current direct ATS listing passes the posting-evidence gate and the full description has enough evidence to assess.
 2. **Draft answers** into `data/answers/<company>/<role>.md` — verified evidence only, no inflation.
-   Apply the supreme alignment filter and the Navy hard rule before drafting.
+   Apply only the explicit policy and truth boundaries configured for this candidate.
 3. **Tailor the resume** and regenerate the PDF (`scripts/render_resume_html.py` for HTML, then the
    Playwright PDF step in `core/resume_tailor.py`). Every claim must be defensible against the live codebase.
 4. **Generate the paste sheet**: `scripts/make_paste_sheet.py <answers.md>` writes `PASTE_SHEET.txt`
    beside it (fields labeled, answers backtick-stripped, links extracted). No browser involved.
 5. **Human submits**: open the form in your *own* normal browser, paste the fields, upload the PDF,
    review, and click Submit yourself.
+6. **Record the explicit outcome**: log human reply, screen, interview, offer, rejection, withdrawal, or an intentionally classified no-response event. Ordinary silence is not automatically a rejection.
 
 ## Hard rule
 
@@ -54,7 +55,24 @@ questions to the agent over repeated automated loads of a form you intend to sub
 |------|---------|
 | `scripts/make_paste_sheet.py` | answers markdown → human `PASTE_SHEET.txt` (no browser) |
 | `data/answers/<company>/<role>.md` | the drafted, approved answers (single source of truth) |
-| `core/form_filler.py` | the generalized field-mapping implementation (the one-off fill drivers that preceded the paste flow were retired; the technique lives here) |
+| `core/form_filler.py` | retired compatibility shim; the public live-fill entry point now fails closed |
+| `data/opportunities.db` | append-only role evidence, assessments, source runs, and funnel events |
+
+## Candidate evidence
+
+`data/profile.json` stores explicit skills, target titles, overall experience, and optional named `domain_experience`. `data/true_accounts.json` may add versioned, truth-bounded life accounts with an `id`, `title`, `summary`, `details`, `skills`, and `truth_boundaries`. Each recommendation links back to those facts or stays unknown. Customer-facing energy, presentation ability, independent problem-solving, and analytical depth are therefore supported by real accounts—not inferred as personality traits.
+
+## Decision and posting-evidence semantics
+
+The decision axes stay separate so a strong work context cannot hide a missing mandatory qualification:
+
+- `qualification_lower_bound`: supported mandatory requirements only.
+- `work_context_match`: observed customer, presentation, autonomy, field, or collaboration evidence.
+- `opportunity`: supported preferred requirements and responsibilities.
+- `logistics`: location, travel, authorization, schedule, and similar constraints.
+- `evidence_coverage`: how much of the posting has direct, adjacent, or contradicted evidence; unknown is not neutral.
+
+Posting evidence uses deterministic grades and gates, not a confidence percentage or a claim about the employer's full corporate identity. Current direct ATS proof may be `recommend`; aggregator/recruiter-only evidence is `review`; stale or unavailable proof is `hold`; and closed, expired, conflicting, or scam-pattern evidence is `block`. Investigate the company separately before sharing sensitive information.
 
 ## Answers file format
 

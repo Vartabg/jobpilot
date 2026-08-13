@@ -8,19 +8,17 @@ and MockChat captures outbound messages.
 
 from __future__ import annotations
 
-import asyncio
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from jobpilot.core.cdp_bridge import PageInfo
-from jobpilot.core.events import EventBus, FIELD_FILLED, APPLICATION_STARTED, APPLICATION_SUBMITTED, APPLICATION_ABANDONED, INFO, WARNING
-from jobpilot.core.engine import ApplicationEngine
-from jobpilot.core.linkedin_parser import FieldType, SemanticType
 from jobpilot.core.autonomy import AutonomyConfig, AutonomyMode
+from jobpilot.core.cdp_bridge import PageInfo
+from jobpilot.core.engine import ApplicationEngine
+from jobpilot.core.events import INFO, EventBus
+from jobpilot.core.linkedin_parser import FieldType, SemanticType
 
-from tests.mock_browser import MockBrowser, MockOverlay, MockChat, MockElement
-
+from .mock_browser import MockBrowser, MockChat, MockElement, MockOverlay
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -126,7 +124,7 @@ def _make_engine(
 # ---------------------------------------------------------------------------
 
 class TestEngineStartup:
-    """Engine.run(watch=False) goes through startup then exits."""
+    """The former browser-monitoring engine now fails closed."""
 
     @pytest.mark.asyncio
     async def test_startup_emits_page_info(self):
@@ -135,9 +133,10 @@ class TestEngineStartup:
         events.on(INFO, lambda **kw: received.append(kw.get("message", "")))
 
         with patch("jobpilot.core.engine.get_health", return_value={"status": "ok", "whisper": "ready"}):
-            await engine.run(watch=False)
+            with pytest.raises(RuntimeError, match="human paste flow"):
+                await engine.run(watch=False)
 
-        assert any("LinkedIn" in msg for msg in received)
+        assert received == []
 
     @pytest.mark.asyncio
     async def test_startup_reports_bro_status(self):
@@ -146,9 +145,10 @@ class TestEngineStartup:
         events.on(INFO, lambda **kw: received.append(kw.get("message", "")))
 
         with patch("jobpilot.core.engine.get_health", return_value={"status": "ok", "whisper": "ready"}):
-            await engine.run(watch=False)
+            with pytest.raises(RuntimeError, match="retired"):
+                await engine.run(watch=False)
 
-        assert any("Bro: ✓" in msg for msg in received)
+        assert received == []
 
     @pytest.mark.asyncio
     async def test_startup_non_linkedin_page(self):
@@ -161,9 +161,10 @@ class TestEngineStartup:
         events.on(INFO, lambda **kw: received.append(kw.get("message", "")))
 
         with patch("jobpilot.core.engine.get_health", return_value={}):
-            await engine.run(watch=False)
+            with pytest.raises(RuntimeError, match="retired"):
+                await engine.run(watch=False)
 
-        assert any("Navigate to LinkedIn" in msg for msg in received)
+        assert received == []
 
 
 # ---------------------------------------------------------------------------
@@ -171,22 +172,22 @@ class TestEngineStartup:
 # ---------------------------------------------------------------------------
 
 class TestFieldFilling:
-    """Engine correctly fills various field types."""
+    """Retired engine mutation entry points fail closed."""
 
     @pytest.mark.asyncio
     async def test_fill_text_field(self):
         engine, *_ = _make_engine()
         field = FakeField("First name", SemanticType.FIRST_NAME)
         result = await engine.fill_field(field, "Alex")
-        assert result is True
-        assert field.element._value  # should have content
+        assert result is False
+        assert not field.element._value
 
     @pytest.mark.asyncio
     async def test_fill_select_field(self):
         engine, *_ = _make_engine()
         field = FakeField("Country", SemanticType.COUNTRY, FieldType.SELECT)
         result = await engine.fill_field(field, "United States")
-        assert result is True
+        assert result is False
 
     @pytest.mark.asyncio
     async def test_fill_checkbox(self):
@@ -194,8 +195,8 @@ class TestFieldFilling:
         field = FakeField("Accept terms", SemanticType.UNKNOWN, FieldType.CHECKBOX)
         field.element._checked = False
         result = await engine.fill_field(field, "yes")
-        assert result is True
-        assert field.element._checked is True
+        assert result is False
+        assert field.element._checked is False
 
     @pytest.mark.asyncio
     async def test_uncheck_checkbox(self):
@@ -203,8 +204,8 @@ class TestFieldFilling:
         field = FakeField("Opt out", SemanticType.UNKNOWN, FieldType.CHECKBOX)
         field.element._checked = True
         result = await engine.fill_field(field, "no")
-        assert result is True
-        assert field.element._checked is False
+        assert result is False
+        assert field.element._checked is True
 
     @pytest.mark.asyncio
     async def test_fill_retries_on_failure(self):
@@ -281,6 +282,36 @@ class TestChatDispatch:
 # ---------------------------------------------------------------------------
 
 class TestVoiceDispatch:
+
+    @pytest.mark.asyncio
+    async def test_approve_command_cannot_mutate_form(self):
+        engine, _, browser, _, chat, recorder, _ = _make_engine()
+        field = FakeField("Name", SemanticType.FIRST_NAME)
+        app_page = FakeAppPage(fields=[field])
+        page_state = (browser.page._value, browser.page._checked, browser.page._pressed_keys)
+
+        await engine.handle_voice({"command": "approve", "args": {}}, app_page)
+
+        assert not field.element._value
+        recorder.record_field_approved.assert_not_called()
+        assert (browser.page._value, browser.page._checked, browser.page._pressed_keys) == page_state
+        assert browser._queries == []
+        assert browser._scripts == []
+        assert any("retired" in message.lower() for message in chat.sent_messages)
+
+    @pytest.mark.asyncio
+    async def test_next_command_cannot_navigate(self):
+        engine, _, browser, _, chat, *_ = _make_engine()
+        page_state = (browser.page._value, browser.page._checked, browser.page._pressed_keys)
+
+        await engine.handle_voice(
+            {"command": "next", "args": {}}, FakeAppPage()
+        )
+
+        assert (browser.page._value, browser.page._checked, browser.page._pressed_keys) == page_state
+        assert browser._queries == []
+        assert browser._scripts == []
+        assert any("retired" in message.lower() for message in chat.sent_messages)
 
     @pytest.mark.asyncio
     async def test_skip_command(self):

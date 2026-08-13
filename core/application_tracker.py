@@ -5,16 +5,21 @@ SQLite-backed store of every application with URL deduplication,
 status tracking, and stats queries.
 """
 
+import re
 import sqlite3
+import threading
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
-from dataclasses import dataclass
-import re
+
 from rich.console import Console
 from rich.table import Table
 
 from jobpilot.core.logger import get_logger
+from jobpilot.core.role_identity import (
+    canonicalize_role_url,
+    explicit_role_identity_key,
+)
 
 console = Console()
 log = get_logger(__name__)
@@ -28,6 +33,12 @@ VALID_STATUSES = {
     "interview",
     "abandoned",
     "skipped",
+    "offer",
+    "withdrawn",
+    "outreach",
+    "human_reply",
+    "screen",
+    "no_response",
 }
 
 
@@ -39,6 +50,7 @@ class TrackedApplication:
     company: str
     applied_at: str
     status: str  # "started", "submitted", "abandoned"
+    source: str = "manual"
 
 
 class ApplicationTracker:
@@ -49,10 +61,10 @@ class ApplicationTracker:
     The database lives alongside other data files in data/applications.db.
     """
 
-    def __init__(self, data_dir: Optional[Path] = None):
+    def __init__(self, data_dir: Path | None = None):
         self.db_path = (data_dir or DB_DIR) / "applications.db"
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn: Optional[sqlite3.Connection] = None
+        self._conn: sqlite3.Connection | None = None
         self._ensure_schema()
 
     def _get_conn(self) -> sqlite3.Connection:
@@ -76,6 +88,14 @@ class ApplicationTracker:
                 updated_at TEXT NOT NULL
             )
         """)
+        columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(applications)").fetchall()
+        }
+        if "source" not in columns:
+            conn.execute(
+                "ALTER TABLE applications ADD COLUMN source TEXT NOT NULL DEFAULT 'legacy'"
+            )
         conn.execute("""
             CREATE UNIQUE INDEX IF NOT EXISTS idx_applications_url
             ON applications(job_url)
@@ -87,13 +107,8 @@ class ApplicationTracker:
     # ------------------------------------------------------------------
 
     def _normalize_url(self, url: str) -> str:
-        """Strip query params and fragments for dedup comparison."""
-        from urllib.parse import urlparse, urlunparse
-        if not url:
-            return ""
-        parsed = urlparse(url)
-        # Keep scheme + host + path only
-        return urlunparse((parsed.scheme, parsed.netloc, parsed.path, "", "", ""))
+        """Canonicalize without dropping provider identity such as Indeed ``jk``."""
+        return canonicalize_role_url(url)
 
     def _normalize_status(self, status: str) -> str:
         normalized = (status or "applied").strip().lower()
@@ -102,6 +117,41 @@ class ApplicationTracker:
                 f"Unsupported status '{status}'. Use one of: {', '.join(sorted(VALID_STATUSES))}"
             )
         return normalized
+
+    def _find_role_row(self, url: str) -> sqlite3.Row | None:
+        """Find an exact URL or provider-native identity match.
+
+        The fallback scan also recognizes rows written before a provider host
+        alias was canonicalized. Application history is small, so this keeps
+        the schema compatible without a destructive URL migration.
+        """
+        normalized = self._normalize_url(url)
+        if not normalized:
+            return None
+        conn = self._get_conn()
+        exact = conn.execute(
+            """SELECT id, job_url, status FROM applications
+               WHERE job_url = ? LIMIT 1""",
+            (normalized,),
+        ).fetchone()
+        if exact is not None:
+            return exact
+
+        identity_key = explicit_role_identity_key(normalized)
+        if not identity_key:
+            return None
+        rows = conn.execute(
+            """SELECT id, job_url, status FROM applications
+               ORDER BY updated_at DESC, id DESC"""
+        ).fetchall()
+        return next(
+            (
+                row
+                for row in rows
+                if explicit_role_identity_key(row["job_url"]) == identity_key
+            ),
+            None,
+        )
 
     def _synthetic_url(
         self,
@@ -122,19 +172,30 @@ class ApplicationTracker:
 
     def has_applied(self, url: str) -> bool:
         """Check if we've already started/submitted this job."""
-        normalized = self._normalize_url(url)
-        row = self._get_conn().execute(
-            "SELECT status FROM applications WHERE job_url = ?",
-            (normalized,),
-        ).fetchone()
-        return row is not None
+        return self._find_role_row(url) is not None
 
-    def get_status(self, url: str) -> Optional[str]:
+    def get_status(self, url: str) -> str | None:
         """Get the status of a previous application."""
+        row = self._find_role_row(url)
+        return row["status"] if row else None
+
+    def role_status(self, company: str, title: str = "", url: str = "") -> str | None:
+        """Return status for this role only; sibling outcomes never propagate."""
         normalized = self._normalize_url(url)
+        if normalized:
+            direct = self.get_status(normalized)
+            if direct is not None:
+                return direct
+            # A concrete URL that did not match is evidence of a different role.
+            # Do not let a repeated company/title inherit a sibling outcome.
+            return None
+        if not company.strip() or not title.strip():
+            return None
         row = self._get_conn().execute(
-            "SELECT status FROM applications WHERE job_url = ?",
-            (normalized,),
+            """SELECT status FROM applications
+               WHERE LOWER(company) = LOWER(?) AND LOWER(job_title) = LOWER(?)
+               ORDER BY updated_at DESC, id DESC LIMIT 1""",
+            (company.strip(), title.strip()),
         ).fetchone()
         return row["status"] if row else None
 
@@ -154,7 +215,7 @@ class ApplicationTracker:
         ).fetchone()
         return row is not None
 
-    def company_status(self, company: str) -> Optional[str]:
+    def company_status(self, company: str) -> str | None:
         """Latest application status for a company (rejected > applied > queued)."""
         if not company or not company.strip():
             return None
@@ -182,7 +243,7 @@ class ApplicationTracker:
         title: str = "",
         url: str = "",
         status: str = "applied",
-        applied_at: Optional[str] = None,
+        applied_at: str | None = None,
         source: str = "manual",
     ) -> TrackedApplication:
         """Log an application from any source.
@@ -204,7 +265,9 @@ class ApplicationTracker:
         now = datetime.now().isoformat()
         conn = self._get_conn()
 
-        if title:
+        if has_real_url:
+            existing = self._find_role_row(normalized_url)
+        elif title:
             # Prefer an exact-URL match over a company+title match, and break
             # company+title ties by most recently updated row, so the row we
             # update is deterministic (and never steals a URL another row owns).
@@ -231,9 +294,10 @@ class ApplicationTracker:
                            job_title = COALESCE(NULLIF(?, ''), job_title),
                            company = ?,
                            status = ?,
+                           source = ?,
                            updated_at = ?
                        WHERE id = ?""",
-                    (stored_url, title, company, normalized_status, now, existing["id"]),
+                    (stored_url, title, company, normalized_status, source, now, existing["id"]),
                 )
             except sqlite3.IntegrityError:
                 # The URL already belongs to a different row — it's the same
@@ -249,17 +313,18 @@ class ApplicationTracker:
                        SET job_title = COALESCE(NULLIF(?, ''), job_title),
                            company = ?,
                            status = ?,
+                           source = ?,
                            updated_at = ?
                        WHERE id = ?""",
-                    (title, company, normalized_status, now, owner["id"]),
+                    (title, company, normalized_status, source, now, owner["id"]),
                 )
         else:
             stored_url = normalized_url
             conn.execute(
                 """INSERT INTO applications
-                   (job_url, job_title, company, applied_at, status, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (stored_url, title, company, date_value, normalized_status, now),
+                   (job_url, job_title, company, applied_at, status, source, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (stored_url, title, company, date_value, normalized_status, source, now),
             )
         conn.commit()
 
@@ -269,22 +334,27 @@ class ApplicationTracker:
             company=company,
             applied_at=date_value,
             status=normalized_status,
+            source=source,
         )
 
-    def mark_started(self, url: str, title: str = "", company: str = ""):
+    def mark_started(
+        self, url: str, title: str = "", company: str = "", source: str = "browser"
+    ):
         """Record that an application was started."""
         normalized = self._normalize_url(url)
         now = datetime.now().isoformat()
         conn = self._get_conn()
         conn.execute("""
-            INSERT INTO applications (job_url, job_title, company, applied_at, status, updated_at)
-            VALUES (?, ?, ?, ?, 'started', ?)
+            INSERT INTO applications
+                (job_url, job_title, company, applied_at, status, source, updated_at)
+            VALUES (?, ?, ?, ?, 'started', ?, ?)
             ON CONFLICT(job_url) DO UPDATE SET
                 job_title = excluded.job_title,
                 company = excluded.company,
                 status = 'started',
+                source = excluded.source,
                 updated_at = excluded.updated_at
-        """, (normalized, title, company, now, now))
+        """, (normalized, title, company, now, source, now))
         conn.commit()
 
     def mark_submitted(self, url: str):
@@ -347,18 +417,18 @@ class ApplicationTracker:
     # Queries
     # ------------------------------------------------------------------
 
-    def get_recent(self, limit: int = 10, status: Optional[str] = None) -> list[TrackedApplication]:
+    def get_recent(self, limit: int = 10, status: str | None = None) -> list[TrackedApplication]:
         """Get the most recent applications."""
         if status:
             normalized_status = self._normalize_status(status)
             rows = self._get_conn().execute(
-                "SELECT job_url, job_title, company, applied_at, status "
+                "SELECT job_url, job_title, company, applied_at, status, source "
                 "FROM applications WHERE status = ? ORDER BY applied_at DESC LIMIT ?",
                 (normalized_status, limit),
             ).fetchall()
         else:
             rows = self._get_conn().execute(
-                "SELECT job_url, job_title, company, applied_at, status "
+                "SELECT job_url, job_title, company, applied_at, status, source "
                 "FROM applications ORDER BY applied_at DESC LIMIT ?",
                 (limit,),
             ).fetchall()
@@ -444,12 +514,17 @@ class ApplicationTracker:
 # ---------------------------------------------------------------------------
 # Global singleton
 # ---------------------------------------------------------------------------
-_tracker: Optional[ApplicationTracker] = None
+_tracker_state = threading.local()
 
 
 def get_application_tracker() -> ApplicationTracker:
-    """Get the global application tracker instance."""
-    global _tracker
-    if _tracker is None:
-        _tracker = ApplicationTracker()
-    return _tracker
+    """Get one tracker connection per thread.
+
+    FastAPI queue refreshes run in a worker thread. A process-global SQLite
+    connection would be reused across threads and fail at runtime.
+    """
+    tracker = getattr(_tracker_state, "tracker", None)
+    if tracker is None:
+        tracker = ApplicationTracker()
+        _tracker_state.tracker = tracker
+    return tracker

@@ -1,8 +1,8 @@
 """ATS-tailored resume draft generation for JobPilot.
 
-Creates a role-specific markdown resume draft from the local profile, optional
-resume text, job description signals, and AI context when a backend is
-available (local Bro server or the Gemini API via GEMINI_API_KEY).
+Creates a role-specific markdown resume draft from explicit local profile
+facts, optional source-resume text, and job-description signals. Model output
+is never used as external resume content.
 """
 
 from __future__ import annotations
@@ -17,8 +17,6 @@ from html import escape
 from pathlib import Path
 from typing import cast
 
-from jobpilot.core import llm_client
-from jobpilot.core.bro_client import is_bro_running, query_rag
 from jobpilot.core.job_scorer import JobFitResult, JobScorer
 from jobpilot.core.logger import get_logger
 from jobpilot.core.profile_store import ProfileStore, UserProfile, get_profile_store
@@ -186,7 +184,12 @@ class ResumeTailor:
         resume_text = self._load_resume_text(resume_path)
         summary_lines = self._build_summary_lines(profile, fit_result, resume_text)
         highlight_bullets = self._build_highlights(profile, fit_result, resume_text)
-        keywords = self._build_keywords(fit_result)
+        verified_skills = self._verified_matched_skills(
+            profile,
+            fit_result,
+            resume_text,
+        )
+        keywords = self._build_keywords(fit_result, profile=profile, resume_text=resume_text)
 
         rendered = self._render_markdown(
             profile,
@@ -221,7 +224,7 @@ class ResumeTailor:
             fit_result=fit_result,
             html_path=html_path,
             pdf_path=pdf_path,
-            matched_skills=fit_result.matched_skills,
+            matched_skills=verified_skills,
             summary_lines=summary_lines,
             highlight_bullets=highlight_bullets,
             keywords=keywords,
@@ -235,45 +238,29 @@ class ResumeTailor:
         fit_result: JobFitResult,
         resume_text: str,
     ) -> list[str]:
-        parsed = fit_result.parsed_jd
-        matched = fit_result.matched_skills[:5]
-
-        ai_lines = self._maybe_ai_summary_lines(profile, fit_result)
-        if ai_lines:
-            return ai_lines
-
-        role = parsed.title or profile.current_title or "Software Engineer"
-        years = profile.years_of_experience
-        company = parsed.company or "the company"
-        if self._is_facilities_target(fit_result):
-            facilities_focus = (
-                ", ".join(matched)
-                if matched
-                else "electrical troubleshooting, field service operations, customer support, and service documentation"
+        summary_lines: list[str] = []
+        if profile.current_title:
+            summary_lines.append(
+                f"Current or most recent professional title: {profile.current_title}."
             )
-            summary_lines = [
-                f"{role} with {years}+ years across electronics, field service, customer-site troubleshooting, and technical operations."
-                if years
-                else f"{role} with hands-on electronics, field service, and customer-site troubleshooting experience.",
-                f"Strong alignment to {company} needs across {facilities_focus}.",
-                self._work_auth_line(profile),
-            ]
-        else:
-            summary_lines = [
-                f"{role} with {years}+ years building production software and user-facing workflows."
-                if years
-                else f"{role} with hands-on experience shipping production software.",
-                f"Strong alignment to {company} needs across {', '.join(matched)}."
-                if matched
-                else f"Targeting {company} with a focus on practical delivery and fast ramp-up.",
-                self._work_auth_line(profile),
-            ]
+        if profile.years_of_experience is not None:
+            summary_lines.append(
+                f"{profile.years_of_experience}+ years of overall professional experience."
+            )
 
-        resume_snippets = self._extract_resume_snippets(resume_text, limit=1)
-        if resume_snippets:
-            summary_lines[1] = resume_snippets[0]
+        summary_lines.extend(self._extract_resume_snippets(resume_text, limit=1))
+        matched = self._verified_matched_skills(
+            profile,
+            fit_result,
+            resume_text,
+        )[:5]
+        if matched:
+            summary_lines.append(f"Documented skills include {', '.join(matched)}.")
 
-        return [line for line in summary_lines if line]
+        work_auth = self._work_auth_line(profile)
+        if work_auth:
+            summary_lines.append(work_auth)
+        return list(dict.fromkeys(summary_lines))
 
     def _build_highlights(
         self,
@@ -281,49 +268,74 @@ class ResumeTailor:
         fit_result: JobFitResult,
         resume_text: str,
     ) -> list[str]:
-        snippets = self._extract_resume_snippets(resume_text, limit=4)
-        if len(snippets) >= 3:
-            return snippets[:4]
+        highlights = self._extract_resume_snippets(resume_text, limit=4)
 
-        parsed = fit_result.parsed_jd
-        focus_terms = ", ".join(fit_result.matched_skills[:4] or self._build_keywords(fit_result)[:4])
-        if not focus_terms:
-            focus_terms = "delivery, collaboration, and execution"
+        if len(highlights) < 3 and profile.current_title:
+            current_focus = profile.current_title
+            if profile.current_company:
+                current_focus = f"{current_focus} at {profile.current_company}"
+            highlights.append(f"Current/most recent focus: {current_focus}.")
 
-        current_focus = profile.current_title or "engineering delivery"
-        if profile.current_company:
-            current_focus = f"{current_focus} at {profile.current_company}"
-
-        highlights = [
-            f"Delivered production work in roles aligned with {parsed.title or 'this target role'}, with emphasis on {focus_terms}.",
-            f"Current/most recent focus: {current_focus}.",
-            f"Prepared to tailor examples toward {parsed.company or 'the employer'} requirements: {', '.join(self._build_keywords(fit_result)[:5]) or 'relevant role keywords'}.",
-        ]
+        if len(highlights) < 3 and profile.skills:
+            highlights.append(f"Documented skills: {', '.join(profile.skills[:6])}.")
 
         if profile.github_url:
-            highlights.append(f"Code samples and shipped work available via {profile.github_url}.")
+            highlights.append(f"GitHub: {profile.github_url}.")
 
         return [line for line in highlights if line]
 
-    def _build_keywords(self, fit_result: JobFitResult) -> list[str]:
-        parsed = fit_result.parsed_jd
-        keywords = list(dict.fromkeys(
-            [*fit_result.matched_skills, *parsed.skills, *fit_result.missing_skills]
-        ))
+    def _build_keywords(
+        self,
+        fit_result: JobFitResult,
+        *,
+        profile: UserProfile,
+        resume_text: str,
+    ) -> list[str]:
+        """Return only skills already matched to candidate evidence.
 
-        if not keywords:
-            # Fall back to short requirement *phrases*, not individual words —
-            # "Document service reports" reads as a skill; "Document • service •
-            # reports" is word-salad on a resume.
-            phrases: list[str] = []
-            for item in parsed.requirements:
-                phrase = re.sub(r"\s+", " ", item).strip(" .;:-•*")
-                # Keep concise, skill-like phrases (drop long sentences).
-                if 2 <= len(phrase) <= 60 and len(phrase.split()) <= 7:
-                    phrases.append(phrase)
-            keywords = list(dict.fromkeys(phrases))
+        Job-description skills and gaps are internal review material. Including
+        either in an external resume would turn an unknown into a candidate
+        claim, so there is intentionally no JD-keyword fallback here.
+        """
+        job_text = fit_result.parsed_jd.raw_text.lower()
+        profile_matches = [skill for skill in profile.skills if skill.lower() in job_text]
+        verified_matches = self._verified_matched_skills(
+            profile,
+            fit_result,
+            resume_text,
+        )
+        return list(dict.fromkeys([*verified_matches, *profile_matches]))[:12]
 
-        return keywords[:12]
+    @staticmethod
+    def _verified_matched_skills(
+        profile: UserProfile,
+        fit_result: JobFitResult,
+        resume_text: str,
+    ) -> list[str]:
+        """Keep skill claims only when explicit candidate evidence contains them."""
+        explicit_skills = {skill.casefold() for skill in profile.skills}
+        explicit_skills.update(
+            part.strip().casefold()
+            for part in re.split(r"[,;\n]", profile.custom_answers.get("skills", ""))
+            if part.strip()
+        )
+        resume_evidence = resume_text.casefold()
+
+        def documented_in_resume(skill: str) -> bool:
+            # A substring is not evidence: short skills such as ``Go`` and
+            # ``Git`` otherwise match ordinary words like ``ongoing`` and
+            # ``digital``.  Require lexical boundaries around the exact label.
+            return re.search(
+                rf"(?<!\w){re.escape(skill.casefold())}(?!\w)",
+                resume_evidence,
+            ) is not None
+
+        return [
+            skill
+            for skill in fit_result.matched_skills
+            if skill.casefold() in explicit_skills
+            or documented_in_resume(skill)
+        ]
 
     def _render_markdown(
         self,
@@ -341,39 +353,25 @@ class ResumeTailor:
 
         lines = [
             f"# {full_name}",
-            profile.current_title or parsed.title or "Professional Resume Draft",
+            profile.current_title or "Professional Resume Draft",
             "",
         ]
         if header:
             lines.extend([header, ""])
+        if parsed.title or parsed.company:
+            target = " at ".join(bit for bit in (parsed.title, parsed.company) if bit)
+            lines.extend([f"Target: {target}", ""])
 
-        lines.extend([
-            "## Target Role",
-            f"- **Role:** {parsed.title or 'Not specified'}",
-            f"- **Company:** {parsed.company or 'Not specified'}",
-            f"- **Fit Snapshot:** {fit_result.score}/100 — {fit_result.recommendation}",
-            "",
-            "## Professional Summary",
-        ])
+        lines.append("## Professional Summary")
         lines.extend([f"- {line}" for line in summary_lines])
 
-        lines.extend(["", "## Core Skills", f"{ ' • '.join(keywords[:10]) if keywords else 'Add role-relevant skills here after review.'}"])
+        if keywords:
+            lines.extend(["", "## Core Skills", " • ".join(keywords[:10])])
 
         lines.extend(["", "## Tailored Experience Highlights"])
         lines.extend([f"- {line}" for line in highlight_bullets])
 
-        if fit_result.risks:
-            lines.extend(["", "## Gaps to Address in Review"])
-            lines.extend([f"- {line}" for line in fit_result.risks[:3]])
-
-        lines.extend([
-            "",
-            "## ATS Notes",
-            "- Keep the wording truthful and review before submitting.",
-            "- Mirror the job description naturally; do not keyword-stuff.",
-            "- Save as PDF after your final edits if the employer requests PDF upload.",
-            "",
-        ])
+        lines.append("")
 
         return "\n".join(lines).strip() + "\n"
 
@@ -389,7 +387,7 @@ class ResumeTailor:
         """Render a styled HTML version of the tailored resume."""
         parsed = fit_result.parsed_jd
         full_name = escape((f"{profile.first_name} {profile.last_name}").strip() or "Candidate Name")
-        role_title = escape(profile.current_title or parsed.title or "Professional Resume Draft")
+        role_title = escape(profile.current_title or "Professional Resume Draft")
         contact_bits = [
             escape(bit)
             for bit in [profile.email, profile.phone, profile.linkedin_url, profile.github_url, profile.portfolio_url]
@@ -399,8 +397,13 @@ class ResumeTailor:
 
         summary_html = "".join(f"<li>{escape(line)}</li>" for line in summary_lines)
         highlights_html = "".join(f"<li>{escape(line)}</li>" for line in highlight_bullets)
-        gaps_html = "".join(f"<li>{escape(line)}</li>" for line in fit_result.risks[:3])
         keyword_html = "".join(f"<span class='chip'>{escape(word)}</span>" for word in keywords[:10])
+        skills_section = ""
+        if keyword_html:
+            skills_section = (
+                "<section><h2>Core Skills</h2>"
+                f"<div class='chips'>{keyword_html}</div></section>"
+            )
 
         return f"""<!doctype html>
 <html lang='en'>
@@ -446,15 +449,7 @@ class ResumeTailor:
       <h1>{full_name}</h1>
       <div class='subtitle'>{role_title}</div>
       <div class='contact'>{contact_html}</div>
-    </section>
-
-    <section>
-      <h2>Target Role</h2>
-      <div class='meta'>
-        <div class='meta-card'><div class='meta-label'>Role</div><div class='meta-value'>{escape(parsed.title or 'Not specified')}</div></div>
-        <div class='meta-card'><div class='meta-label'>Company</div><div class='meta-value'>{escape(parsed.company or 'Not specified')}</div></div>
-        <div class='meta-card'><div class='meta-label'>Fit Snapshot</div><div class='meta-value'>{fit_result.score}/100 — {escape(fit_result.recommendation)}</div></div>
-      </div>
+      <div class='contact'>Target: {escape(' at '.join(bit for bit in (parsed.title, parsed.company) if bit))}</div>
     </section>
 
     <section>
@@ -462,27 +457,13 @@ class ResumeTailor:
       <ul>{summary_html}</ul>
     </section>
 
-    <section>
-      <h2>Core Skills</h2>
-      <div class='chips'>{keyword_html or "<span class='chip'>Review and personalize keywords</span>"}</div>
-    </section>
+    {skills_section}
 
     <section>
       <h2>Tailored Experience Highlights</h2>
       <ul>{highlights_html}</ul>
     </section>
 
-    {f"<section><h2>Gaps to Address in Review</h2><ul>{gaps_html}</ul></section>" if gaps_html else ""}
-
-    <section>
-      <h2>ATS Notes</h2>
-      <ul>
-        <li>Keep the wording truthful and review before submitting.</li>
-        <li>Mirror the job description naturally; do not keyword-stuff.</li>
-        <li>Export to PDF after your final edits if the employer requests PDF upload.</li>
-      </ul>
-      <div class='note'>Generated by JobPilot for review before submission.</div>
-    </section>
   </main>
 </body>
 </html>
@@ -490,13 +471,22 @@ class ResumeTailor:
 
     @staticmethod
     def _export_pdf(html_content: str, pdf_path: Path) -> Path | None:
-        """Render the styled HTML as a PDF via Playwright when available."""
+        """Render through the installed system Chrome, never a bundled test browser."""
         try:
             from playwright.sync_api import sync_playwright
 
+            chrome_path = Path(
+                "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+            )
+            if not chrome_path.is_file():
+                log.warning("PDF export skipped: system Google Chrome is unavailable")
+                return None
             pdf_path.parent.mkdir(parents=True, exist_ok=True)
             with sync_playwright() as playwright:
-                browser = playwright.chromium.launch(headless=True)
+                browser = playwright.chromium.launch(
+                    executable_path=str(chrome_path),
+                    headless=True,
+                )
                 page = browser.new_page()
                 page.set_content(html_content, wait_until="load")
                 page.pdf(
@@ -510,44 +500,6 @@ class ResumeTailor:
         except Exception as exc:
             log.warning("PDF export skipped: %s", exc)
             return None
-
-    def _maybe_ai_summary_lines(
-        self,
-        profile: UserProfile,
-        fit_result: JobFitResult,
-    ) -> list[str]:
-        if not self.use_bro or not llm_client.is_available():
-            return []
-
-        parsed = fit_result.parsed_jd
-        # RAG context only exists on the local Bro backend.
-        context = ""
-        if is_bro_running():
-            context = query_rag(
-                f"Summarize the candidate background most relevant to {parsed.title or 'this role'} at {parsed.company or 'the company'}",
-                top_k=4,
-            )
-        prompt = (
-            "Write exactly 3 ATS-friendly resume summary bullets. "
-            "Each bullet must be concise, truthful, and specific to the job target. "
-            "Return plain bullets only.\n\n"
-            f"Candidate title: {profile.current_title or 'N/A'}\n"
-            f"Experience: {profile.years_of_experience} years\n"
-            f"Job target: {parsed.summary()}\n"
-            f"Matched skills: {', '.join(fit_result.matched_skills) or 'none'}\n"
-        )
-        try:
-            reply = llm_client.complete(prompt, context=context or None, smart=True)
-        except llm_client.LLMUnavailable as exc:
-            log.debug("AI summary skipped, using template fallback: %s", exc)
-            return []
-
-        bullets: list[str] = []
-        for line in reply.splitlines():
-            stripped = line.strip().lstrip("-•* ").strip()
-            if stripped:
-                bullets.append(stripped)
-        return bullets[:3]
 
     @staticmethod
     def _extract_resume_snippets(text: str, *, limit: int = 3) -> list[str]:
@@ -578,11 +530,14 @@ class ResumeTailor:
 
     @staticmethod
     def _work_auth_line(profile: UserProfile) -> str:
-        if profile.authorized_to_work and not profile.requires_sponsorship:
+        if (
+            profile.authorized_to_work is True
+            and profile.requires_sponsorship is False
+        ):
             return "Authorized to work in the United States without sponsorship."
         if profile.requires_sponsorship:
             return "Requires sponsorship; review job authorization requirements carefully."
-        return "Review work authorization wording before submitting."
+        return ""
 
     def _select_resume_source(self, profile: UserProfile, fit_result: JobFitResult) -> str:
         """Choose the strongest local base resume for the target lane.

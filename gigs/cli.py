@@ -16,9 +16,13 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from jobpilot.gigs.core.collect import collect_all, include_upwork_exports
-from jobpilot.gigs.core.dedupe import dedupe_cross_source, dedupe_cross_source_with_groups
 from jobpilot.gigs.core import feedback, pipeline, run_state, source_health
+from jobpilot.gigs.core.away import sync_reminders_from_pipeline
+from jobpilot.gigs.core.collect import collect_all, include_upwork_exports
+from jobpilot.gigs.core.dedupe import (
+    dedupe_cross_source,
+    dedupe_cross_source_with_groups,
+)
 from jobpilot.gigs.core.dispatcher import dispatch, push_failure
 from jobpilot.gigs.core.models import Gig
 from jobpilot.gigs.core.pipeline_migrate import migrate_applied_into_pipeline
@@ -26,7 +30,6 @@ from jobpilot.gigs.core.preferences import write_default_if_missing as _ensure_p
 from jobpilot.gigs.core.scorer import filter_and_rank
 from jobpilot.gigs.core.scrapers.weworkremotely import enrich_apply_urls as enrich_wwr
 from jobpilot.gigs.core.store import filter_new, mark_seen, seen_count
-from jobpilot.gigs.core.away import sync_reminders_from_pipeline
 
 app = typer.Typer(help="Daily tech-gig digest")
 console = Console()
@@ -166,8 +169,8 @@ def hygiene(
     (default 30). Archived IDs stay in pipeline_archive.md and seen.json.
     """
     if dry_run:
+
         from jobpilot.gigs.core import store
-        from datetime import datetime
 
         rows = pipeline.parse()
         new_ids = [r.gig_id for r in rows if r.status == "new" and r.gig_id]
@@ -546,7 +549,7 @@ def weekly_summary():
         if lt and (today - lt) > timedelta(days=7):
             stale.append(r)
     if stale:
-        console.print(f"\n[yellow]Stale (sent > 7 days, no follow-up):[/yellow]")
+        console.print("\n[yellow]Stale (sent > 7 days, no follow-up):[/yellow]")
         for r in stale:
             console.print(f"  • {r.company} — {r.role} (sent {r.last_touched})")
 
@@ -598,14 +601,19 @@ def swipe(
     host: str = typer.Option(
         "127.0.0.1",
         "--host",
-        help="Bind address (loopback by default; use your 100.x Tailscale IP for phone access)",
+        help="Bind address (loopback by default; authenticated Tailscale IPs only remotely)",
     ),
 ):
     """Phone-first job swiper. Run this, open the printed URL on your phone,
     tap Get jobs, then swipe: right to apply (opens a prepped email), left to
     pass. Decisions land in pipeline.md."""
-    from jobpilot.gigs.server import run_server
-    run_server(host=host, port=port)
+    from jobpilot.gigs.server import configure_server_access, run_server
+    try:
+        configure_server_access(host)
+        run_server(host=host, port=port)
+    except ValueError as exc:
+        console.print(f"[red]Refusing unsafe server configuration: {exc}[/red]")
+        raise typer.Exit(code=2) from exc
 
 
 @app.command()

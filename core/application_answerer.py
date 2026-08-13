@@ -1,21 +1,17 @@
-"""Role-aware application answer drafting from true candidate accounts.
+"""Deterministic application-answer drafts from verified candidate accounts.
 
-The generator uses a local account bank as the source of truth. AI drafting is
-allowed only as a rewrite layer over those accounts, never as an evidence
-source.
+No model-generated prose enters an external answer. The optional local account
+bank and explicitly saved profile facts are the only candidate evidence.
 """
 
 from __future__ import annotations
 
 import json
 import re
-import textwrap
 import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
-from jobpilot.core import llm_client
 from jobpilot.core.config import DATA_DIR
 from jobpilot.core.profile_store import ProfileStore, UserProfile, get_profile_store
 
@@ -27,6 +23,46 @@ PROFILE_PLACEHOLDER = "[Add a short background summary with 'jobpilot profile --
 
 # Tags counted as field/customer-site experience in fallback narratives.
 _FIELD_TAGS = {"field", "field-primary", "fieldwork"}
+
+# Words that describe the shape of an experience question rather than the
+# capability the applicant is being asked to prove. Removing them leaves the
+# question-level evidence terms (for example, ``{"kubernetes"}``).
+_EVIDENCE_QUESTION_FILLER = {
+    "about",
+    "administration",
+    "administering",
+    "background",
+    "describe",
+    "direct",
+    "experience",
+    "experiences",
+    "expertise",
+    "familiarity",
+    "familiar",
+    "give",
+    "hands",
+    "have",
+    "knowledge",
+    "practical",
+    "production",
+    "proficiency",
+    "project",
+    "relevant",
+    "skill",
+    "skills",
+    "technical",
+    "tell",
+    "using",
+    "what",
+    "when",
+    "where",
+    "work",
+    "worked",
+    "working",
+    "years",
+    "you",
+    "your",
+}
 
 
 @dataclass
@@ -74,9 +110,9 @@ class ApplicationAnswerer:
 
     def __init__(
         self,
-        profile_store: Optional[ProfileStore] = None,
+        profile_store: ProfileStore | None = None,
         *,
-        accounts_path: Optional[Path] = None,
+        accounts_path: Path | None = None,
         use_bro: bool = True,
     ) -> None:
         self.profile_store = profile_store or get_profile_store()
@@ -95,50 +131,42 @@ class ApplicationAnswerer:
         """Generate one answer for one application question."""
         clean_question = " ".join((question or "").split())
         profile = self.profile_store.load()
-        accounts = self.load_accounts()
         selected = self.select_accounts(clean_question, jd_text=jd_text, company=company, title=title)
 
         if not selected:
+            has_accounts = bool(self.load_accounts())
+            warning = (
+                "Missing evidence: no stored true account matches this question. "
+                "Add or verify a relevant account before drafting."
+                if has_accounts
+                else "No true accounts are available. Add data/true_accounts.json entries before drafting."
+            )
             return AnswerDraft(
                 question=clean_question,
                 answer="",
                 company=company,
                 title=title,
-                warnings=["No true accounts are available. Add data/true_accounts.json entries before drafting."],
+                source="missing_evidence",
+                confidence=0.0,
+                warnings=[warning],
             )
 
-        ai_answer = ""
-        if self.use_bro and llm_client.is_available():
-            ai_answer = self._draft_with_ai(
-                clean_question,
-                profile=profile,
-                accounts=selected,
-                jd_text=jd_text,
-                company=company,
-                title=title,
-                max_words=max_words,
-            )
-
-        if ai_answer:
-            answer = ai_answer
-            source = "ai"
-            confidence = 0.82
-        else:
-            answer = self._fallback_answer(
-                clean_question,
-                profile=profile,
-                accounts=selected,
-                jd_text=jd_text,
-                company=company,
-                title=title,
-                max_words=max_words,
-            )
-            source = "fallback"
-            confidence = 0.58
+        answer = self._fallback_answer(
+            clean_question,
+            profile=profile,
+            accounts=selected,
+            jd_text=jd_text,
+            company=company,
+            title=title,
+            max_words=max_words,
+        )
+        source = "account_grounded"
+        confidence = 0.72
 
         warnings: list[str] = []
-        if source == "fallback":
-            warnings.append("AI backend was unavailable or disabled; used account-grounded fallback drafting.")
+        warnings.append(
+            "Drafted only from stored profile facts and true accounts; review before use."
+        )
         if len(answer.split()) > max_words:
             answer = " ".join(answer.split()[:max_words]).rstrip(",.;") + "."
             warnings.append(f"Trimmed answer to {max_words} words.")
@@ -215,6 +243,7 @@ class ApplicationAnswerer:
             return []
 
         haystack = self._tokenize(" ".join([question, jd_text[:4000], company, title]))
+        required_question_tokens = self._specific_question_evidence_tokens(question)
         scored: list[tuple[int, TrueAccount]] = []
         for account in accounts:
             account_text = " ".join([
@@ -226,6 +255,8 @@ class ApplicationAnswerer:
                 " ".join(account.question_fit),
             ])
             account_tokens = self._tokenize(account_text)
+            if required_question_tokens and not required_question_tokens.intersection(account_tokens):
+                continue
             overlap = len(haystack & account_tokens)
             phrase_hits = sum(
                 2 for phrase in account.question_fit + account.skills
@@ -246,102 +277,11 @@ class ApplicationAnswerer:
 
         scored.sort(key=lambda item: item[0], reverse=True)
         selected = [account for score, account in scored if score > 0][:limit]
-        return selected or [account for _score, account in scored[: min(limit, len(scored))]]
-
-    def _draft_with_ai(
-        self,
-        question: str,
-        *,
-        profile: UserProfile,
-        accounts: list[TrueAccount],
-        jd_text: str,
-        company: str,
-        title: str,
-        max_words: int,
-    ) -> str:
-        prompt = self._build_prompt(
-            question,
-            profile=profile,
-            accounts=accounts,
-            jd_text=jd_text,
-            company=company,
-            title=title,
-            max_words=max_words,
-        )
-        try:
-            reply = llm_client.complete(prompt, smart=True)
-        except llm_client.LLMUnavailable:
-            return ""
-        reply = reply.strip()
-        reply = re.sub(r"^(answer|draft answer)\s*:\s*", "", reply, flags=re.IGNORECASE).strip()
-        if len(reply.split()) < 12:
-            return ""
-        return reply
-
-    def _build_prompt(
-        self,
-        question: str,
-        *,
-        profile: UserProfile,
-        accounts: list[TrueAccount],
-        jd_text: str,
-        company: str,
-        title: str,
-        max_words: int,
-    ) -> str:
-        account_blocks = []
-        for account in accounts:
-            account_blocks.append(
-                "\n".join([
-                    f"ACCOUNT ID: {account.id}",
-                    f"TITLE: {account.title}",
-                    f"TIMEFRAME: {account.timeframe}",
-                    f"SUMMARY: {account.summary}",
-                    "DETAILS:",
-                    *[f"- {detail}" for detail in account.details],
-                    "SKILLS:",
-                    *[f"- {skill}" for skill in account.skills],
-                    "TRUTH BOUNDARIES:",
-                    *[f"- {boundary}" for boundary in account.truth_boundaries],
-                ])
-            )
-
-        profile_bits = [
-            f"Name: {profile.first_name} {profile.last_name}".strip(),
-            f"Current title: {profile.current_title}",
-            f"Location: {profile.city}, {profile.state}",
-            f"Years of experience: {profile.years_of_experience}",
-            "US work authorized: yes" if profile.authorized_to_work else "US work authorized: no",
-            "Requires sponsorship: yes" if profile.requires_sponsorship else "Requires sponsorship: no",
-        ]
-
-        return textwrap.dedent(f"""
-            You are drafting a job application answer for the candidate described below.
-
-            Rules:
-            - Use only the candidate profile, job context, and TRUE ACCOUNTS below.
-            - Do not invent metrics, customer names, employers, degrees, titles, dates, products, or outcomes.
-            - If a detail is not in the true accounts, avoid the claim.
-            - First person, direct, specific, natural.
-            - ASCII only. No em dashes or curly quotes.
-            - Keep it under {max_words} words.
-            - Return only the answer text.
-
-            Candidate profile:
-            {chr(10).join(profile_bits)}
-
-            Target role:
-            Company: {company or "Not specified"}
-            Title: {title or "Not specified"}
-            Job context:
-            {(jd_text or "")[:4500]}
-
-            Application question:
-            {question}
-
-            TRUE ACCOUNTS:
-            {(chr(10) * 2).join(account_blocks)}
-        """).strip()
+        if selected:
+            return selected
+        if self._is_broad_background_question(question):
+            return accounts[:limit]
+        return []
 
     def _fallback_answer(
         self,
@@ -365,21 +305,28 @@ class ApplicationAnswerer:
             None,
         )
 
+        if self._is_broad_background_question(question):
+            return self._background_answer(profile, accounts, narrative)
+
         if any(token in q for token in ("why", "interest", "excited", "motivat")):
             pitch = narrative.get("value_proposition", "")
             if pitch:
                 opener = f"I am interested in {org} because {role} maps closely to the work I do best: {pitch}."
             else:
-                opener = f"I am interested in {org} because {role} maps closely to work I can back with specific examples."
+                opener = f"I am interested in {role} at {org}."
             parts = [
                 opener,
                 f"The clearest account is {self._account_label(primary)}: {self._first_person_summary(primary)}",
             ]
             if field_account and field_account.id != primary.id:
-                parts.append(f"I also bring field experience from {self._account_label(field_account)}, where the work required customer-site execution, debugging, and ownership under pressure.")
+                parts.append(
+                    f"A second relevant account is "
+                    f"{self._account_label(field_account)}: "
+                    f"{self._first_person_summary(field_account)}"
+                )
             elif secondary:
                 parts.append(f"A second relevant account is {self._account_label(secondary)}: {self._first_person_summary(secondary)}")
-            parts.append("That mix is why the role feels like a practical fit rather than just a keyword match.")
+            parts.append("I would welcome the chance to discuss those examples.")
             return " ".join(parts)
 
         if any(token in q for token in ("experience", "tell us about", "describe", "project", "challenge")):
@@ -393,25 +340,35 @@ class ApplicationAnswerer:
 
         if any(token in q for token in ("strength", "bring", "contribution", "fit")):
             skills = ", ".join(primary.skills[:5])
-            opener = narrative.get("strengths_opener", "") or "My strengths come from documented work rather than generic claims."
+            opener = narrative.get("strengths_opener", "")
+            parts = [opener] if opener else []
             if skills:
-                answer = f"{opener} From {self._account_label(primary)}, I can point to hands-on work across {skills}. "
-            else:
-                answer = f"{opener} From {self._account_label(primary)}, I can point to documented hands-on work. "
+                parts.append(
+                    f"Stored skills for {self._account_label(primary)} include {skills}."
+                )
+            summary = self._first_person_summary(primary)
+            if summary:
+                parts.append(summary)
             if secondary:
                 secondary_pitch = narrative.get("strengths_secondary", "") or ", ".join(secondary.skills[:4])
                 if secondary_pitch:
-                    answer += f"From {self._account_label(secondary)}, I bring {secondary_pitch}."
+                    parts.append(
+                        f"Stored evidence for {self._account_label(secondary)} "
+                        f"includes {secondary_pitch}."
+                    )
                 else:
-                    answer += f"A second relevant account is {self._account_label(secondary)}: {self._first_person_summary(secondary)}"
-            return answer
-
-        if any(token in q for token in ("yourself", "background", "who are you")):
-            return self._background_answer(profile, accounts, narrative)
+                    secondary_summary = self._first_person_summary(secondary)
+                    if secondary_summary:
+                        parts.append(
+                            f"A second relevant account is "
+                            f"{self._account_label(secondary)}: {secondary_summary}"
+                        )
+            return " ".join(parts)
 
         return (
-            f"The most relevant true account is {self._account_label(primary)}. {self._first_person_summary(primary)} "
-            f"I would connect that experience to {role} by focusing on practical ownership, fast learning, and clear delivery against real workflow constraints."
+            f"The most relevant stored account is {self._account_label(primary)}. "
+            f"{self._first_person_summary(primary)} "
+            f"I would welcome the chance to discuss how that account relates to {role}."
         )
 
     def _background_answer(
@@ -448,6 +405,31 @@ class ApplicationAnswerer:
             token for token in re.sub(r"[^a-z0-9+#.]+", " ", (text or "").lower()).split()
             if len(token) > 2 and token not in {"the", "and", "for", "with", "this", "that", "role", "job"}
         }
+
+    @staticmethod
+    def _is_broad_background_question(question: str) -> bool:
+        """Return true only for prompts asking for a general self-introduction."""
+        normalized = re.sub(r"[^a-z0-9]+", " ", (question or "").lower()).strip()
+        patterns = (
+            r"(?:please )?tell (?:me|us) (?:a little )?about yourself",
+            r"(?:please )?(?:briefly )?(?:describe|summarize|share) your "
+            r"(?:professional )?background",
+            r"(?:please )?walk (?:me|us) through your (?:professional )?background",
+            r"(?:please )?(?:introduce yourself|who are you)",
+        )
+        return any(re.fullmatch(pattern, normalized) for pattern in patterns)
+
+    @classmethod
+    def _specific_question_evidence_tokens(cls, question: str) -> set[str]:
+        """Return terms that a skill/experience answer must evidence directly."""
+        normalized = (question or "").lower()
+        asks_for_evidence = re.search(
+            r"\b(?:experience|skills?|knowledge|expertise|proficiency|familiarity|background)\b",
+            normalized,
+        )
+        if not asks_for_evidence or cls._is_broad_background_question(question):
+            return set()
+        return cls._tokenize(question) - _EVIDENCE_QUESTION_FILLER
 
     @staticmethod
     def _ascii_clean(text: str) -> str:

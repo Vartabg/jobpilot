@@ -2,8 +2,13 @@
 Tests for ApplicationTracker — SQLite-backed job application deduplication and tracking.
 """
 
-import pytest
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+
+import pytest
+
+import jobpilot.core.application_tracker as tracker_module
 from jobpilot.core.application_tracker import ApplicationTracker
 
 
@@ -35,6 +40,52 @@ class TestMarkAndQuery:
     def test_url_normalization_strips_query(self, tracker: ApplicationTracker):
         tracker.mark_started("https://linkedin.com/jobs/view/99?ref=feed", "Job", "Co")
         assert tracker.has_applied("https://linkedin.com/jobs/view/99") is True
+
+    def test_url_normalization_preserves_indeed_role_identity(
+        self, tracker: ApplicationTracker
+    ):
+        tracker.mark_started(
+            "https://www.indeed.com/viewjob?jk=ROLE-A&utm_source=feed",
+            "Engineer A",
+            "Acme",
+        )
+
+        assert tracker.has_applied(
+            "https://www.indeed.com/viewjob?jk=ROLE-A&from=web"
+        ) is True
+        assert tracker.has_applied(
+            "https://www.indeed.com/viewjob?jk=ROLE-B"
+        ) is False
+
+    def test_greenhouse_alias_and_title_variant_reuse_provider_history(
+        self, tracker: ApplicationTracker
+    ):
+        tracker.log_application(
+            company="Acme",
+            title="Customer Engineer (Remote)",
+            url="https://job-boards.greenhouse.io/acme/jobs/123?gh_src=campaign",
+            status="applied",
+        )
+
+        alias = "https://boards.greenhouse.io/acme/jobs/123"
+        assert tracker.has_applied(alias) is True
+        assert tracker.role_status("Acme", "Customer Engineer", alias) == "applied"
+
+    def test_provider_identity_does_not_inherit_same_title_sibling_status(
+        self, tracker: ApplicationTracker
+    ):
+        tracker.log_application(
+            company="Acme",
+            title="Customer Engineer",
+            url="https://boards.greenhouse.io/acme/jobs/123",
+            status="rejected",
+        )
+
+        assert tracker.role_status(
+            "Acme",
+            "Customer Engineer",
+            "https://boards.greenhouse.io/acme/jobs/456",
+        ) is None
 
     def test_duplicate_start_updates(self, tracker: ApplicationTracker):
         tracker.mark_started("https://linkedin.com/jobs/view/5", "Old Title", "Old Co")
@@ -71,6 +122,22 @@ class TestMarkAndQuery:
         assert recent[0].status == "interview"
         assert tracker.company_status("Titan AI") == "interview"
 
+    def test_distinct_real_requisitions_with_same_title_keep_separate_history(
+        self, tracker: ApplicationTracker
+    ):
+        tracker.log_application(
+            company="Acme", title="Engineer",
+            url="https://jobs.ashbyhq.com/acme/role-a", status="rejected",
+        )
+        tracker.log_application(
+            company="Acme", title="Engineer",
+            url="https://jobs.ashbyhq.com/acme/role-b", status="applied",
+        )
+
+        assert tracker.get_status("https://jobs.ashbyhq.com/acme/role-a") == "rejected"
+        assert tracker.get_status("https://jobs.ashbyhq.com/acme/role-b") == "applied"
+        assert len(tracker.get_recent(limit=10)) == 2
+
     def test_log_application_without_url_preserves_existing_real_url(self, tracker: ApplicationTracker):
         tracker.log_application(
             company="Titan AI",
@@ -90,6 +157,45 @@ class TestMarkAndQuery:
     def test_log_application_rejects_unknown_status(self, tracker: ApplicationTracker):
         with pytest.raises(ValueError):
             tracker.log_application(company="Titan AI", status="maybe")
+
+    @pytest.mark.parametrize(
+        "status",
+        ["offer", "withdrawn", "outreach", "human_reply", "screen", "no_response"],
+    )
+    def test_extended_status_and_source_are_persisted(
+        self, tracker: ApplicationTracker, status: str
+    ):
+        app = tracker.log_application(
+            company=f"Acme {status}", status=status, source="gmail"
+        )
+
+        stored = tracker.get_recent(limit=1)[0]
+        assert app.source == "gmail"
+        assert stored.status == status
+        assert stored.source == "gmail"
+
+    def test_started_source_is_persisted(self, tracker: ApplicationTracker):
+        tracker.mark_started(
+            "https://jobs.example.test/acme/1", "Engineer", "Acme",
+            source="linkedin",
+        )
+
+        assert tracker.get_recent()[0].source == "linkedin"
+
+    def test_role_status_does_not_inherit_sibling_rejection(
+        self, tracker: ApplicationTracker
+    ):
+        tracker.log_application(
+            company="Acme", title="Role A", url="https://acme.test/a",
+            status="rejected",
+        )
+
+        assert tracker.role_status(
+            "Acme", "Role B", "https://acme.test/b"
+        ) is None
+        assert tracker.role_status(
+            "Acme", "Role A", "https://acme.test/a"
+        ) == "rejected"
 
     def test_log_application_url_owned_by_other_row(self, tracker: ApplicationTracker):
         """Regression: re-logging with a URL another row already owns must not
@@ -203,3 +309,18 @@ class TestLifecycle:
         t2 = ApplicationTracker(data_dir=tmp_path)
         assert t2.has_applied("https://job/x") is True
         t2.close()
+
+    def test_global_accessor_uses_thread_local_sqlite_connections(
+        self, monkeypatch, tmp_path: Path
+    ):
+        monkeypatch.setattr(tracker_module, "DB_DIR", tmp_path)
+        monkeypatch.setattr(tracker_module, "_tracker_state", threading.local())
+        local_tracker = tracker_module.get_application_tracker()
+        local_tracker.log_application("Acme", "Engineer", status="applied")
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            worker_total = executor.submit(
+                lambda: tracker_module.get_application_tracker().get_stats()["total"]
+            ).result()
+
+        assert worker_total == 1

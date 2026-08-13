@@ -9,11 +9,12 @@ from typing import Optional
 
 from jobpilot.core.queue_builder import QueueJob, update_job_status
 from jobpilot.gigs.core.models import Gig
+from jobpilot.gigs.core.safe_urls import safe_external_url
 from jobpilot.ui.view_helpers import materials_ready
 
 
 def open_url(url: str) -> bool:
-    url = (url or "").strip()
+    url = safe_external_url(url)
     if not url:
         return False
     subprocess.run(["open", url], check=False)
@@ -32,7 +33,7 @@ def copy_text(text: str) -> bool:
 
 
 def selected_gig_url(gig: Gig) -> str:
-    return (gig.apply_url or gig.url or "").strip()
+    return safe_external_url(gig.apply_url) or safe_external_url(gig.url)
 
 
 def set_gig_pipeline_status(gig: Gig, status: str, *, note: str = "") -> str:

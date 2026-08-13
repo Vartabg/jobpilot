@@ -6,12 +6,21 @@ Chrome-internal pages enforce Trusted Types CSP the default-policy workaround
 cannot bypass.
 """
 
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 
+from jobpilot.core import cdp_bridge as cdp_bridge_module
 from jobpilot.core.cdp_bridge import CDPBridge
+
+
+def test_bridge_debug_endpoint_is_loopback_only_without_wildcard_origins():
+    source = Path(cdp_bridge_module.__file__).read_text()
+
+    assert "--remote-debugging-address=127.0.0.1" in source
+    assert "--remote-allow-origins=*" not in source
 
 
 def _make_page(url: str, *, has_easy_apply_modal: bool = False):
@@ -78,3 +87,24 @@ async def test_get_active_page_returns_none_when_only_chrome_internal_pages():
     ])
 
     assert await bridge.get_active_page() is None
+
+
+@pytest.mark.asyncio
+async def test_connect_never_launches_bundled_browser_without_system_chrome(
+    monkeypatch,
+):
+    chromium = SimpleNamespace(
+        connect_over_cdp=AsyncMock(side_effect=RuntimeError("not running")),
+        launch_persistent_context=AsyncMock(),
+    )
+    playwright = SimpleNamespace(chromium=chromium, stop=AsyncMock())
+    manager = SimpleNamespace(start=AsyncMock(return_value=playwright))
+    monkeypatch.setattr(cdp_bridge_module, "async_playwright", lambda: manager)
+    monkeypatch.setattr(cdp_bridge_module, "_chrome_executable", lambda: None)
+
+    bridge = CDPBridge()
+
+    assert await bridge.connect() is False
+    chromium.launch_persistent_context.assert_not_awaited()
+    playwright.stop.assert_awaited_once_with()
+    assert bridge._playwright is None

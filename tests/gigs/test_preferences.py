@@ -224,3 +224,7 @@ def test_signoff_block_uses_resolved_identity(
     assert "Ada Lovelace" in block
     assert "555-0100" in block
     assert "https://www.linkedin.com/in/ada | https://ada.example.org" in block
+
+
+def test_signoff_block_is_empty_without_explicit_identity(tmp_path: Path) -> None:
+    assert preferences.signoff_block(preferences.load(_missing(tmp_path))) == ""

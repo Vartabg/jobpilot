@@ -1,3 +1,4 @@
+import inspect
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -6,11 +7,11 @@ import pytest
 
 from jobpilot.core.form_filler import (
     DECLINE_TO_SELF_IDENTIFY,
-    _answer_yesno_radios,
-    _check_required_acknowledgments,
+    _field_to_value,
     _preferred_resume_upload,
     _radio_option_matches,
     _yesno_for_question,
+    fill_application,
     submit_application,
 )
 from jobpilot.core.profile_store import UserProfile
@@ -58,6 +59,70 @@ async def test_submit_application_is_disabled_by_policy():
     assert "Auto-submit disabled" in message
 
 
+def test_unknown_work_authorization_never_becomes_yes_or_no():
+    profile = UserProfile()
+
+    assert _field_to_value("Are you authorized to work in the US?", profile) is None
+    assert _field_to_value("Will you require sponsorship?", profile) is None
+
+
+@pytest.mark.asyncio
+async def test_fill_application_is_disabled_by_policy():
+    result = await fill_application(
+        "https://jobs.example.test/acme/1",
+        "Customer Engineer",
+        "Acme",
+        UserProfile(),
+    )
+
+    assert result.success is False
+    assert result.stopped_before_submit is True
+    assert "paste sheet" in result.error.lower()
+
+
+def test_form_filler_module_contains_no_browser_mutation_capability():
+    import jobpilot.core.form_filler as form_filler
+
+    source = inspect.getsource(form_filler)
+    forbidden = (
+        "async_playwright",
+        "connect_over_cdp",
+        "set_input_files",
+        ".click(",
+        ".check(",
+        ".fill(",
+        ".type(",
+    )
+
+    assert all(token not in source for token in forbidden)
+
+
+def test_unknown_experience_never_becomes_none_or_zero_text():
+    assert _field_to_value("Years of experience", UserProfile()) == ""
+
+
+def test_unset_profile_does_not_invent_employer_salary_or_referral() -> None:
+    profile = UserProfile()
+
+    assert _field_to_value("Current employer", profile) == ""
+    assert _field_to_value("Desired salary", profile) == ""
+    assert _field_to_value("How did you hear about this job?", profile) is None
+
+
+def test_willingness_and_conflict_answers_require_explicit_user_evidence() -> None:
+    profile = UserProfile()
+
+    assert _yesno_for_question("Are you willing to relocate?", profile) is None
+    assert _yesno_for_question("Do you have a conflict of interest?", profile) is None
+
+    profile.custom_answers = {
+        "Are you willing to relocate?": "No",
+        "Do you have a conflict of interest?": "Yes",
+    }
+    assert _yesno_for_question("Are you willing to relocate?", profile) == "No"
+    assert _yesno_for_question("Do you have a conflict of interest?", profile) == "Yes"
+
+
 # ---------------------------------------------------------------------------
 # Radio option matching — exact / word-boundary, never loose substring
 # ---------------------------------------------------------------------------
@@ -81,84 +146,6 @@ def test_radio_word_boundary_matches_verbose_labels():
         "I identify as one or more of the classifications of a protected veteran",
         "",
     ) is True
-
-
-# ---------------------------------------------------------------------------
-# Fakes for the async DOM helpers
-# ---------------------------------------------------------------------------
-
-class _FakeRadio:
-    def __init__(self, label: str, value: str = ""):
-        self.label = label
-        self.value = value
-        self.checked = False
-
-    async def get_attribute(self, name: str):
-        return self.value if name == "value" else None
-
-    async def check(self):
-        self.checked = True
-
-
-class _FakeRadioGroup:
-    def __init__(self, question: str, radios: list[_FakeRadio]):
-        self.question = question
-        self.radios = radios
-
-    async def query_selector_all(self, selector: str):
-        return self.radios
-
-
-class _FakePage:
-    """Answers page.evaluate(js, element) with the element's stored label."""
-
-    def __init__(self, elements):
-        self.elements = elements
-
-    async def query_selector_all(self, selector: str):
-        return self.elements
-
-    async def evaluate(self, script: str, arg=None):
-        if isinstance(arg, _FakeRadioGroup):
-            return arg.question
-        return getattr(arg, "label", "")
-
-
-class _FakeCheckbox:
-    def __init__(self, label: str):
-        self.label = label
-        self.checked = False
-
-    async def is_visible(self):
-        return True
-
-    async def is_checked(self):
-        return self.checked
-
-    async def get_attribute(self, name: str):
-        return None
-
-    async def check(self):
-        self.checked = True
-
-
-@pytest.mark.asyncio
-async def test_answer_radios_picks_exact_no_not_none_of_the_above():
-    none_radio = _FakeRadio("None of the above")
-    not_sure_radio = _FakeRadio("Not sure")
-    no_radio = _FakeRadio("No")
-    group = _FakeRadioGroup(
-        "Will you require visa sponsorship?",
-        [none_radio, not_sure_radio, no_radio],
-    )
-    page = _FakePage([group])
-
-    answered = await _answer_yesno_radios(page, UserProfile())
-
-    assert no_radio.checked is True
-    assert none_radio.checked is False
-    assert not_sure_radio.checked is False
-    assert len(answered) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -207,22 +194,3 @@ def test_demographics_fall_back_to_custom_answers():
     answer = _yesno_for_question("Are you a protected veteran?", profile)
 
     assert answer == "I identify as a protected veteran"
-
-
-# ---------------------------------------------------------------------------
-# Acknowledgment checkboxes — auto-checks must be surfaced for review
-# ---------------------------------------------------------------------------
-
-@pytest.mark.asyncio
-async def test_auto_checked_acknowledgments_are_tagged_for_review():
-    ack = _FakeCheckbox("I acknowledge the privacy policy")
-    marketing = _FakeCheckbox("I agree to receive marketing newsletters")
-    page = _FakePage([ack, marketing])
-
-    checked = await _check_required_acknowledgments(page)
-
-    assert ack.checked is True
-    assert marketing.checked is False
-    assert len(checked) == 1
-    assert "I acknowledge the privacy policy" in checked[0]
-    assert "[checked for you — please read]" in checked[0]

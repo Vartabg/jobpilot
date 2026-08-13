@@ -83,3 +83,21 @@ def test_placeholder_portfolio_does_not_propagate():
     }
     out = preferences.links(prefs)
     assert out["work_page"] == preferences.DEFAULTS["links"]["work_page"]
+
+
+def test_fresh_preferences_never_emit_placeholder_identity_or_links(monkeypatch):
+    monkeypatch.setattr(preferences, "load", lambda path=preferences.PREFS_PATH: preferences.DEFAULTS)
+    monkeypatch.setattr(
+        preferences,
+        "background_bullets",
+        lambda prefs=None: dict(preferences.DEFAULTS["background_bullets"]),
+    )
+
+    brief = proposals.build_revenue_brief(
+        _gig(title="Implementation Engineer", description="Work with customers")
+    )
+
+    assert proposals.contains_placeholder(brief.draft) is None
+    assert "you@example.com" not in brief.draft
+    assert "000-000-0000" not in brief.draft
+    assert "Your Name" not in brief.draft

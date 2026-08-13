@@ -9,15 +9,13 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Optional, Protocol
+from typing import Protocol
 
 from jobpilot.core import llm_client
 from jobpilot.core.bro_client import is_bro_running, query_rag
 from jobpilot.core.jd_parser import _SALARY_PATTERN, JDParser, ParsedJD
 from jobpilot.core.policy_config import Policy, get_policy
-from jobpilot.core.work_style import score_work_style, title_seniority_penalty
 from jobpilot.core.profile_store import ProfileStore, UserProfile, get_profile_store
-
 
 _STOPWORDS = {
     "a", "an", "and", "at", "for", "in", "of", "on", "or", "the", "to",
@@ -123,7 +121,6 @@ class JobScorer:
         exp_points, exp_risk = self._score_experience(profile.years_of_experience, raw_text)
         auth_points, auth_risk = self._score_work_auth(profile.authorized_to_work, profile.requires_sponsorship, raw_text)
         location_points = self._score_location(parsed_jd.location_type or self._extract_location_type(raw_text))
-        work_style_points, work_style_reasons = self._score_work_style(raw_text, parsed_jd.title)
 
         components = {
             "Alignment": alignment_points,
@@ -132,7 +129,6 @@ class JobScorer:
             "Experience": exp_points,
             "Work auth": auth_points,
             "Location": location_points,
-            "Work style": work_style_points,
         }
 
         total = max(0, min(100, sum(components.values())))
@@ -150,11 +146,6 @@ class JobScorer:
             strengths.append("Experience level looks aligned with the role")
         if parsed_jd.location_type == "remote":
             strengths.append("Remote role — lower friction to pursue")
-        if work_style_points >= 12:
-            strengths.append("Work style looks autonomous (async/contract/deadline signals)")
-        for reason in work_style_reasons:
-            if reason.startswith("-schedule:") or reason.startswith("-w2-only"):
-                risks.append(f"Schedule/employment flag: {reason.split(':', 1)[-1]}")
 
         if missing_skills:
             risks.append(f"Missing or unclear skills: {', '.join(missing_skills[:4])}")
@@ -240,7 +231,10 @@ class JobScorer:
     )
 
     @staticmethod
-    def _score_experience(years_of_experience: int, raw_text: str) -> tuple[int, str]:
+    def _score_experience(
+        years_of_experience: int | None,
+        raw_text: str,
+    ) -> tuple[int, str]:
         matches = []
         for m in JobScorer._EXPERIENCE_RE.finditer(raw_text):
             n = m.group(1) or m.group(2)
@@ -249,9 +243,14 @@ class JobScorer:
         required_years = max(matches) if matches else 0
 
         if required_years <= 0:
-            return (12 if years_of_experience else 8), ""
+            return (12 if years_of_experience is not None else 0), ""
+        if years_of_experience is None:
+            return 0, (
+                f"Role asks for about {required_years}+ years; "
+                "profile experience is unknown."
+            )
 
-        ratio = min(1.0, (years_of_experience or 0) / required_years)
+        ratio = min(1.0, years_of_experience / required_years)
         points = min(20, max(0, int(round(20 * ratio))))
         risk = ""
         if years_of_experience < required_years:
@@ -259,7 +258,11 @@ class JobScorer:
         return points, risk
 
     @staticmethod
-    def _score_work_auth(authorized_to_work: bool, requires_sponsorship: bool, raw_text: str) -> tuple[int, str]:
+    def _score_work_auth(
+        authorized_to_work: bool | None,
+        requires_sponsorship: bool | None,
+        raw_text: str,
+    ) -> tuple[int, str]:
         lowered = raw_text.lower()
         mentions_auth = "authorized to work" in lowered or "work authorization" in lowered
         mentions_no_sponsorship = any(
@@ -271,6 +274,11 @@ class JobScorer:
                 "cannot sponsor",
             ]
         )
+
+        if authorized_to_work is None or requires_sponsorship is None:
+            if mentions_auth or mentions_no_sponsorship:
+                return 0, "Work authorization evidence is unknown."
+            return 0, ""
 
         if mentions_no_sponsorship and requires_sponsorship:
             return 0, "Posting requires work authorization without sponsorship."
@@ -289,19 +297,6 @@ class JobScorer:
         if location_type == "onsite":
             return 5
         return 7
-
-    def _score_work_style(self, raw_text: str, title: str) -> tuple[int, list[str]]:
-        """Autonomy / contract / anti-9-5 adjustment mapped to 0-20 points."""
-        queue_policy = self.policy.queue
-        deprioritize = queue_policy.title_deprioritize_keywords or (
-            "senior engineer", "senior software", "senior ai",
-        )
-        senior_pen, _ = title_seniority_penalty(title, deprioritize)
-        delta, reasons = score_work_style(raw_text, title=title)
-        # Map work_style delta (-35..25) + senior penalty into a 0-20 component.
-        combined = delta + senior_pen
-        points = max(0, min(20, 10 + combined // 2))
-        return points, reasons
 
     def _check_alignment(self, parsed_jd: ParsedJD) -> tuple[str, str]:
         """Apply the user's policy filter (``data/policy.json``).
@@ -455,7 +450,8 @@ class JobScorer:
             "Sentence 1: strongest reason to pursue. "
             "Sentence 2: biggest risk or gap to watch.\n\n"
             f"Candidate title: {profile.current_title or 'N/A'}\n"
-            f"Experience: {profile.years_of_experience} years\n"
+            f"Experience: "
+            f"{f'{profile.years_of_experience} years' if profile.years_of_experience is not None else 'unknown'}\n"
             f"Job: {parsed_jd.summary()}\n"
             f"Matched skills: {', '.join(matched_skills) or 'none'}\n"
             f"Missing skills: {', '.join(missing_skills[:4]) or 'none'}"

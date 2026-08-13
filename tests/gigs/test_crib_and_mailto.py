@@ -5,7 +5,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from jobpilot.gigs.core import preferences
-from jobpilot.gigs.core.crib import write_crib_sheet
+from jobpilot.gigs.core.crib import mobile_crib, write_crib_sheet
 from jobpilot.gigs.core.dispatcher import _apply_target, _build_actions
 from jobpilot.gigs.core.models import Gig
 from jobpilot.gigs.core.proposals import email_body, email_subject
@@ -101,7 +101,9 @@ def test_build_actions_single_apply_button() -> None:
     g = _gig(apply_url="mailto:jobs@acme.ai")
     actions = _build_actions(g)
     assert actions.count("view, ") == 1
-    assert "Apply" in actions
+    assert "View role" in actions
+    assert g.url in actions
+    assert "mailto:" not in actions
     assert "View post" not in actions
 
 
@@ -111,12 +113,13 @@ def test_crib_sheet_has_standard_answers_and_per_lead_section(tmp_path: Path) ->
     # Identity block — email comes from preferences (DEFAULTS or
     # data/preferences.json), never hardcoded here.
     assert preferences.identity()["email"] in text
-    # Standard Greenhouse answers table
-    assert "Authorized to work in the US?" in text
+    # Standard answers remain truth-bounded: unset authorization is omitted.
+    assert "Authorized to work in the US?" not in text
     assert "Veteran status" in text
-    # Per-lead section: candidate-facing salary (pasteable) + private anchor
+    # Per-lead section: no inferred salary assent; employer range is private context.
     assert "Acme AI" in text
-    assert "Desired salary (paste)" in text
+    assert "Desired salary (paste)" not in text
+    assert "Review and answer manually" in text
     assert "Your anchor (don't paste)" in text
     # Candidate-facing band references the stated 180-200K band
     assert "K" in text and "180" in text and "200" in text
@@ -131,8 +134,12 @@ def test_crib_sheet_relocate_answer_flips_for_non_home_metro_role(
 ) -> None:
     # Home metro comes from preferences (empty by default — neutral defaults
     # ship no location). Simulate a user whose home metro is New York.
-    prefs = dict(preferences.DEFAULTS)
+    prefs = preferences.load()
     prefs["location"] = {"home_metro_tags": ["new york", "nyc"]}
+    prefs["work_style"] = {
+        **preferences.DEFAULTS["work_style"],
+        "relocate_default": "Open to relocation",
+    }
     monkeypatch.setattr(preferences, "load", lambda path=None: prefs)
 
     home = _gig(location="New York, NY")
@@ -150,6 +157,28 @@ def test_crib_sheet_relocate_answer_flips_for_non_home_metro_role(
     assert "local to this role" not in text_other
 
 
+def test_role_is_not_local_from_headquarters_mentioned_in_description(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    prefs = preferences.load()
+    prefs["location"] = {"home_metro_tags": ["austin"]}
+    prefs["work_style"] = {
+        **preferences.DEFAULTS["work_style"],
+        "relocate_default": "Based in Austin; open to relocation",
+    }
+    monkeypatch.setattr(preferences, "load", lambda path=None: prefs)
+    berlin = _gig(
+        location="Berlin, Germany",
+        title="Austin company — Engineer",
+        description="Headquartered in Austin; this role is based in Berlin.",
+    )
+
+    text = write_crib_sheet([berlin], crib_dir=tmp_path).read_text()
+
+    assert "Based in Austin; open to relocation — local to this role" not in text
+
+
 def test_crib_sheet_relocate_answer_is_data_driven(tmp_path: Path, monkeypatch) -> None:
     # The relocate answer comes from preferences work_style — never hardcoded.
     prefs = dict(preferences.DEFAULTS)
@@ -160,7 +189,41 @@ def test_crib_sheet_relocate_answer_is_data_driven(tmp_path: Path, monkeypatch) 
     assert "Based in Testville" in text
 
 
-def test_crib_sheet_handles_no_pay_band(tmp_path: Path) -> None:
+def test_crib_sheet_handles_no_pay_band_without_inventing_response(tmp_path: Path) -> None:
     g = _gig(salary_min=0, salary_max=0, pay_hourly_est=0)
     text = write_crib_sheet([g], crib_dir=tmp_path).read_text()
-    assert "happy to discuss range" in text
+    assert "Review and answer manually" in text
+    assert "happy to discuss range" not in text
+
+
+def test_crib_uses_exact_explicit_candidate_salary_response(tmp_path: Path, monkeypatch) -> None:
+    prefs = preferences.load()
+    prefs["pay"] = {**prefs["pay"], "candidate_response": "My target base is $160,000."}
+    monkeypatch.setattr(preferences, "load", lambda path=None: prefs)
+
+    crib = mobile_crib(_gig())
+
+    assert crib["salary_paste"] == "My target base is $160,000."
+
+
+def test_fresh_profile_crib_has_no_inferred_sensitive_answers(monkeypatch) -> None:
+    from jobpilot.core import profile_store
+    from jobpilot.core.profile_store import UserProfile
+
+    monkeypatch.setattr(
+        profile_store,
+        "get_profile_store",
+        lambda: type("Store", (), {"load": lambda self: UserProfile()})(),
+    )
+    prefs = preferences.load()
+    prefs["work_style"] = dict(preferences.DEFAULTS["work_style"])
+    monkeypatch.setattr(preferences, "load", lambda path=None: prefs)
+
+    crib = mobile_crib(_gig())
+    answers = {row["label"]: row["value"] for row in crib["ats_answers"]}
+
+    assert "Authorized to work in the US?" not in answers
+    assert "Require visa sponsorship?" not in answers
+    assert "Privacy consent" not in answers
+    assert "How did you hear about us?" not in answers
+    assert crib["relocate"] == ""

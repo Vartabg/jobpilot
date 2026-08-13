@@ -1,7 +1,6 @@
 from html.parser import HTMLParser
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -51,3 +50,24 @@ def test_dashboard_labels_controls_and_announces_updates() -> None:
         assert attrs.get("aria-label") or attrs.get("id") in parser.label_targets, (
             f"{tag}#{attrs.get('id', '')} needs a programmatic label"
         )
+
+
+def test_dashboard_explains_evidence_without_claiming_personality() -> None:
+    source, _parser = parse("ui/dashboard.html")
+
+    assert "personality" not in source.lower()
+    assert "Qualification floor" in source
+    assert "Work-context evidence" in source
+    assert "Evidence coverage" in source
+    assert "Posting evidence state" in source
+    assert "Investigation reason" in source
+    assert "Biggest gap" in source
+    assert "matched_accounts" in source
+    assert "Investigate" in source
+    assert "isApplyReady" in source
+    assert "safePostingUrl" in source
+    assert "parsed.protocol === 'https:'" in source
+    assert "ready companies" in source
+    assert "roles to investigate" in source
+    assert "if (status === 'queued') return jobs.filter(isApplyReady);" in source
+    assert "width: 100vw" not in source

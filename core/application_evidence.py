@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
-from urllib.parse import urlparse, urlunparse
+
+from jobpilot.core.role_identity import (
+    canonicalize_role_url,
+    explicit_role_identity_key,
+    identify_role,
+)
 
 
 class EvidenceSourceError(RuntimeError):
@@ -22,6 +26,8 @@ class EvidenceRecord:
     url: str = ""
     status: str = "started"
     source: str = "tracker"
+    occurred_at: str = ""
+    provenance: dict[str, str] = field(default_factory=dict)
 
 
 def _norm_text(value: str) -> str:
@@ -29,23 +35,12 @@ def _norm_text(value: str) -> str:
 
 
 def _norm_url(value: str) -> str:
-    if not value:
-        return ""
-    parsed = urlparse(value)
-    return urlunparse((
-        parsed.scheme.lower(),
-        parsed.netloc.lower(),
-        parsed.path.rstrip("/"),
-        "",
-        "",
-        "",
-    ))
+    return canonicalize_role_url(value)
 
 
-_COMPANY_SUFFIXES = {
+_TRAILING_LEGAL_SUFFIXES = {
     "inc", "incorporated", "corp", "corporation", "llc", "llp", "ltd", "limited",
-    "co", "company", "group", "holding", "holdings", "americas", "america",
-    "usa", "us", "international", "intl", "gmbh", "sa",
+    "co", "company", "lp", "plc", "gmbh", "ag", "sa", "bv",
 }
 
 
@@ -53,7 +48,9 @@ def _norm_company(value: str) -> str:
     """Normalize a company name, dropping trailing corporate suffixes so that
     'Crown Equipment' matches 'Crown Equipment Corporation'."""
     base = _norm_text(value)
-    tokens = [t for t in base.split() if t not in _COMPANY_SUFFIXES]
+    tokens = base.split()
+    while len(tokens) > 1 and tokens[-1] in _TRAILING_LEGAL_SUFFIXES:
+        tokens.pop()
     return " ".join(tokens) or base
 
 
@@ -62,7 +59,7 @@ def _same_role(left: str, right: str) -> bool:
     right_n = _norm_text(right)
     if not left_n or not right_n:
         return False
-    return left_n == right_n or left_n in right_n or right_n in left_n
+    return left_n == right_n
 
 
 class ApplicationEvidenceIndex:
@@ -71,7 +68,7 @@ class ApplicationEvidenceIndex:
     def __init__(
         self,
         records: list[EvidenceRecord],
-        errors: Optional[list[str]] = None,
+        errors: list[str] | None = None,
     ):
         self.records = records
         self.errors = errors or []
@@ -81,10 +78,10 @@ class ApplicationEvidenceIndex:
         cls,
         *,
         tracker,
-        employment_dir: Optional[Path] = None,
-        gmail_cache_path: Optional[Path] = None,
+        employment_dir: Path | None = None,
+        gmail_cache_path: Path | None = None,
         gmail_cache_max_age_hours: int = 0,
-    ) -> "ApplicationEvidenceIndex":
+    ) -> ApplicationEvidenceIndex:
         records: list[EvidenceRecord] = []
         errors: list[str] = []
 
@@ -96,6 +93,8 @@ class ApplicationEvidenceIndex:
                     url=item.job_url,
                     status=item.status,
                     source="tracker",
+                    occurred_at=item.applied_at,
+                    provenance={"tracker_source": getattr(item, "source", "legacy")},
                 ))
         except Exception as exc:
             errors.append(f"canonical application tracker could not be read ({exc})")
@@ -127,16 +126,22 @@ class ApplicationEvidenceIndex:
                 heading = re.sub(r"^#+\s*", "", first_line[0]).strip()
                 if "not submitted" in heading.lower():
                     continue
-                parts = [part.strip() for part in re.split(r"\s+[—–]\s+", heading)]
+                parts = [
+                    part.strip()
+                    for part in re.split(r"\s+[\u2014\u2013]\s+", heading)
+                ]
                 if len(parts) < 2:
                     continue
                 company, title = parts[0], parts[1]
                 status = "submitted" if path.name == "SUBMITTED.md" else "started"
+                date_match = re.search(r"\d{4}-\d{2}-\d{2}", path.parent.name)
                 records.append(EvidenceRecord(
                     company=company,
                     title=title,
                     status=status,
                     source="employment",
+                    occurred_at=date_match.group(0) if date_match else "",
+                    provenance={"packet": str(path.relative_to(root))},
                 ))
         except Exception as exc:
             errors.append(f"application packet folder could not be read ({exc})")
@@ -185,6 +190,16 @@ class ApplicationEvidenceIndex:
                     url=str(item.get("url", "")),
                     status=str(item.get("status", "applied")),
                     source="gmail",
+                    occurred_at=str(
+                        item.get("occurred_at") or item.get("date")
+                        or item.get("applied_at") or item.get("received_at") or ""
+                    ),
+                    provenance={
+                        str(key): str(value)
+                        for key, value in item.items()
+                        if key not in {"company", "title", "url", "status"}
+                        and value is not None
+                    },
                 ))
         except Exception as exc:
             errors.append(f"Gmail application cache could not be read ({exc})")
@@ -198,18 +213,81 @@ class ApplicationEvidenceIndex:
                 f"run `jobpilot jobs` again: {detail}"
             )
 
-    def match(self, company: str, title: str, url: str) -> Optional[EvidenceRecord]:
+    def match(self, company: str, title: str, url: str) -> EvidenceRecord | None:
         url_n = _norm_url(url)
         if url_n:
             for record in self.records:
                 if record.url and _norm_url(record.url) == url_n:
                     return record
 
+        identity_key = explicit_role_identity_key(url)
+        if identity_key:
+            for record in self.records:
+                if (
+                    record.url
+                    and explicit_role_identity_key(record.url) == identity_key
+                ):
+                    return record
+
         company_n = _norm_company(company)
         if not company_n:
             return None
         for record in self.records:
+            # A different explicit requisition ID is a sibling role even when
+            # the employer reused the same title. URL-less/manual evidence can
+            # still use the conservative exact company+title fallback below.
+            record_identity_key = explicit_role_identity_key(record.url)
+            if identity_key and record_identity_key:
+                continue
             same_company = _norm_company(record.company) == company_n
             if same_company and _same_role(record.title, title):
                 return record
         return None
+
+    def import_into(self, ledger) -> int:
+        """Import all evidence idempotently without resolving source conflicts."""
+        status_events = {
+            "started": "discovered", "submitted": "applied", "abandoned": "withdrawn",
+            "skipped": "discovered",
+        }
+        before = ledger.table_count("events")
+        for record in self.records:
+            event_type = status_events.get(record.status, record.status)
+            if event_type not in {
+                "discovered", "verified", "applied", "outreach", "human_reply",
+                "screen", "interview", "offer", "rejected", "withdrawn", "no_response",
+            }:
+                continue
+            identity = identify_role(record.url)
+            explicit_identity = (
+                identity.key
+                if identity.provider and identity.provider_job_id
+                else ""
+            )
+            opportunity_id = ledger.upsert_opportunity(
+                record.company,
+                record.title,
+                canonical_url=identity.canonical_url,
+                provider=identity.provider,
+                provider_job_id=identity.provider_job_id,
+                identity_key=explicit_identity,
+            )
+            provenance = {
+                **record.provenance,
+                "original_status": record.status,
+                "evidence_source": record.source,
+            }
+            ledger.append_event(
+                opportunity_id, event_type, record.occurred_at,
+                record.source, provenance,
+                idempotency_key=json.dumps({
+                    "company": _norm_company(record.company),
+                    "title": _norm_text(record.title),
+                    "url": _norm_url(record.url),
+                    "event_type": event_type,
+                    "occurred_at": record.occurred_at,
+                    "source": record.source,
+                    "provenance": provenance,
+                }, sort_keys=True),
+            )
+        return ledger.table_count("events") - before

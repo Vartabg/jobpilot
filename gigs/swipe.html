@@ -7,6 +7,27 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="GigPilot" />
 <meta name="theme-color" content="#0d1117" />
+<meta name="referrer" content="no-referrer" />
+<script>
+function consumeRemoteToken() {
+  const url = new URL(window.location.href);
+  const queryToken = url.searchParams.get("token") || "";
+  if (url.searchParams.has("token")) {
+    try {
+      if (queryToken) sessionStorage.setItem("jobpilotRemoteToken", queryToken);
+    } catch (_) {}
+    url.searchParams.delete("token");
+    history.replaceState(history.state, "", url.pathname + url.search + url.hash);
+  }
+  if (queryToken) return queryToken;
+  try {
+    return sessionStorage.getItem("jobpilotRemoteToken") || "";
+  } catch (_) {
+    return "";
+  }
+}
+const remoteToken = consumeRemoteToken();
+</script>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23161b22'/%3E%3Ctext x='32' y='44' font-size='38' text-anchor='middle' fill='%2358a6ff'%3EG%3C/text%3E%3C/svg%3E" />
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' fill='%230d1117'/%3E%3Ctext x='32' y='44' font-size='38' text-anchor='middle' fill='%2358a6ff'%3EG%3C/text%3E%3C/svg%3E" />
 <title>GigPilot Swipe</title>
@@ -137,6 +158,12 @@ const show = (id, on) => $(id).hidden = !on;
 const safeUrl = u => /^https?:\/\//i.test(u || "");
 const ageLabel = d => d == null ? "" : d <= 0 ? "today" : d === 1 ? "1d ago" : d + "d ago";
 
+function remoteFetch(path, opts = {}) {
+  const headers = new Headers(opts.headers || {});
+  if (remoteToken) headers.set("X-JobPilot-Token", remoteToken);
+  return fetch(path, { ...opts, headers });
+}
+
 function esc(s) { const d = document.createElement("div"); d.textContent = s == null ? "" : s; return d.innerHTML; }
 
 function setCriteria(m) {
@@ -195,7 +222,9 @@ async function load(refresh) {
   show("loading", true);
   let data = null, ok = false;
   try {
-    const r = await fetch("/api/queue?refresh=" + (refresh ? 1 : 0));
+    const r = refresh || !cards.length
+      ? await remoteFetch("/api/queue/refresh", { method:"POST" })
+      : await remoteFetch("/api/queue");
     ok = r.ok;
     data = await r.json();
   } catch (e) { ok = false; }
@@ -244,8 +273,11 @@ function render() {
     ["Portfolio", id.portfolio],
   ].filter(([,v]) => v).map(([l,v]) => copyRow(l, v)).join("");
 
+  const salaryResponse = crib.salary_paste
+    ? copyRow("Desired salary (paste)", crib.salary_paste)
+    : `<div class="row"><div class="left"><span class="lab">Desired salary</span><span class="val">Not configured — answer manually</span></div></div>`;
   const salaryBlock = `
-    ${copyRow("Desired salary (paste)", crib.salary_paste || "")}
+    ${salaryResponse}
     <div class="row"><div class="left"><span class="lab">Your anchor (don't paste)</span>
       <span class="val anchor">${esc(crib.salary_anchor || "")}</span></div></div>
     ${copyRow("Relocate", crib.relocate || "")}
@@ -298,7 +330,7 @@ async function decide(action, viaFling) {
   }
   let ok = false;
   try {
-    const r = await fetch("/api/decision", { method:"POST", headers:{"Content-Type":"application/json"},
+    const r = await remoteFetch("/api/decision", { method:"POST", headers:{"Content-Type":"application/json"},
       body: JSON.stringify({ id: c.id, action }) });
     ok = r.ok;
   } catch (e) { ok = false; }
@@ -313,14 +345,14 @@ async function decide(action, viaFling) {
   const motionDelay = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 220;
   setTimeout(() => {
     i++; busy = false; render();
-    toast(action === "apply" ? "Applied" : "Passed", undo);
+    toast(action === "apply" ? "Opened — confirm sent in pipeline after sending" : "Passed", undo);
   }, motionDelay);
 }
 
 async function undo() {
   if (!last) return;
   const c = last; last = null; hideSnack();
-  try { await fetch("/api/undo", { method:"POST", headers:{"Content-Type":"application/json"},
+  try { await remoteFetch("/api/undo", { method:"POST", headers:{"Content-Type":"application/json"},
     body: JSON.stringify({ id: c.id }) }); } catch (e) {}
   cards.splice(i, 0, c);
   render();
@@ -364,7 +396,7 @@ function flingEl(el, dir) {
 // Prefetch criteria for the start screen without a full scan.
 (async () => {
   try {
-    const r = await fetch("/api/meta");
+    const r = await remoteFetch("/api/meta");
     if (r.ok) setCriteria(await r.json());
   } catch (e) {}
 })();

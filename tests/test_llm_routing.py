@@ -1,10 +1,10 @@
 """
-Tests that every AI feature routes through core/llm_client.py.
+Tests the boundary between advisory AI and deterministic external drafts.
 
 Bro is optional: with the local stack down, any configured backend (e.g.
-Gemini) must still power answer drafting, job-fit verdicts, question
-fallback/enrichment, and cover letters. All llm_client calls are mocked —
-no network access.
+Gemini) may power job-fit advice and question fallback/enrichment. Application
+answers and cover letters remain deterministic. All llm_client calls are
+mocked, so these tests perform no network access.
 """
 
 import json
@@ -17,8 +17,8 @@ from jobpilot.core import cover_letter_gen
 from jobpilot.core.application_answerer import ApplicationAnswerer
 from jobpilot.core.job_scorer import JobScorer
 from jobpilot.core.llm_client import LLMUnavailable
-from jobpilot.core.question_matcher import QuestionMatcher
 from jobpilot.core.profile_store import UserProfile
+from jobpilot.core.question_matcher import QuestionMatcher
 
 LONG_REPLY = (
     "I built a small automation tool that handled the exact workflow this "
@@ -61,34 +61,26 @@ def _answerer(tmp_path: Path) -> ApplicationAnswerer:
 # ---------------------------------------------------------------------------
 
 class TestAnswererRouting:
-    @patch("jobpilot.core.application_answerer.llm_client.complete", return_value=LONG_REPLY)
-    @patch("jobpilot.core.application_answerer.llm_client.is_available", return_value=True)
-    def test_ai_draft_uses_llm_client(self, _avail, mock_complete, tmp_path):
-        draft = _answerer(tmp_path).draft("Why are you interested in this role?")
+    def test_external_answer_draft_stays_account_grounded(self, tmp_path):
+        draft = _answerer(tmp_path).draft(
+            "Why are you interested in this role?",
+            jd_text="Coordinate scheduling and operations for a busy clinic.",
+            title="Operations Coordinator",
+        )
 
-        assert draft.source == "ai"
-        assert draft.answer.startswith("I built a small automation tool")
-        assert mock_complete.call_args[1]["smart"] is True
+        assert draft.source == "account_grounded"
+        assert "clinic" in draft.answer.lower() or "scheduling" in draft.answer.lower()
 
-    @patch(
-        "jobpilot.core.application_answerer.llm_client.complete",
-        side_effect=LLMUnavailable("down"),
-    )
-    @patch("jobpilot.core.application_answerer.llm_client.is_available", return_value=True)
-    def test_backend_failure_falls_back_to_accounts(self, _avail, _complete, tmp_path):
-        draft = _answerer(tmp_path).draft("Why are you interested in this role?")
+    def test_answer_draft_does_not_depend_on_backend(self, tmp_path):
+        draft = _answerer(tmp_path).draft(
+            "Why are you interested in this role?",
+            jd_text="Coordinate scheduling and operations for a busy clinic.",
+            title="Operations Coordinator",
+        )
 
-        assert draft.source == "fallback"
+        assert draft.source == "account_grounded"
         assert draft.answer  # account-grounded fallback still drafts
-        assert any("AI backend was unavailable" in w for w in draft.warnings)
-
-    @patch("jobpilot.core.application_answerer.llm_client.is_available", return_value=False)
-    def test_no_backend_skips_ai_entirely(self, _avail, tmp_path):
-        with patch("jobpilot.core.application_answerer.llm_client.complete") as mock_complete:
-            draft = _answerer(tmp_path).draft("Why are you interested in this role?")
-
-        assert draft.source == "fallback"
-        mock_complete.assert_not_called()
+        assert any("true accounts" in warning for warning in draft.warnings)
 
 
 # ---------------------------------------------------------------------------
@@ -195,7 +187,7 @@ class TestQuestionMatcherRouting:
 
 
 # ---------------------------------------------------------------------------
-# Cover letter generator
+# Cover letter truth boundary
 # ---------------------------------------------------------------------------
 
 LETTER = (
@@ -206,15 +198,13 @@ LETTER = (
 )
 
 
-class TestCoverLetterRouting:
+class TestCoverLetterTruthBoundary:
     @pytest.fixture(autouse=True)
     def _isolated_cache(self, tmp_path, monkeypatch):
         monkeypatch.setattr(cover_letter_gen, "DATA_DIR", tmp_path / "cover_letters")
 
-    @patch("jobpilot.core.bro_client.is_bro_running", return_value=False)
     @patch("jobpilot.core.llm_client.complete", return_value=LETTER)
-    @patch("jobpilot.core.llm_client.is_available", return_value=True)
-    def test_generates_without_bro(self, _avail, mock_complete, _bro):
+    def test_generates_without_using_model_prose(self, mock_complete):
         letter = cover_letter_gen.generate_cover_letter(
             jd_title="Operations Coordinator",
             jd_company="Acme Health",
@@ -223,29 +213,30 @@ class TestCoverLetterRouting:
             candidate_name="Riley Nguyen",
         )
 
-        assert letter == LETTER
-        assert mock_complete.call_args[1]["smart"] is True
+        assert "Operations Coordinator" in letter
+        assert "Acme Health" in letter
+        assert "Riley Nguyen" in letter
+        assert "seven years" not in letter.lower()
+        mock_complete.assert_not_called()
         cached = list((cover_letter_gen.DATA_DIR).glob("*.txt"))
         assert len(cached) == 1
 
-    @patch("jobpilot.core.llm_client.is_available", return_value=False)
-    def test_returns_none_without_any_backend(self, _avail):
+    def test_generates_without_any_backend(self):
         letter = cover_letter_gen.generate_cover_letter(
             jd_title="Operations Coordinator",
             jd_company="Acme Health",
             jd_requirements=[],
             jd_raw_text="unique-no-backend-jd-text",
         )
-        assert letter is None
+        assert "preparation draft" in letter.lower()
 
-    @patch("jobpilot.core.bro_client.is_bro_running", return_value=False)
     @patch("jobpilot.core.llm_client.complete", side_effect=LLMUnavailable("down"))
-    @patch("jobpilot.core.llm_client.is_available", return_value=True)
-    def test_backend_failure_returns_none(self, _avail, _complete, _bro):
+    def test_backend_is_never_called(self, complete):
         letter = cover_letter_gen.generate_cover_letter(
             jd_title="Operations Coordinator",
             jd_company="Acme Health",
             jd_requirements=[],
             jd_raw_text="unique-backend-down-jd-text",
         )
-        assert letter is None
+        assert letter
+        complete.assert_not_called()

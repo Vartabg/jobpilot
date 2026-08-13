@@ -1,8 +1,9 @@
 """Work-style signals — autonomy, async, contract, anti-9-5.
 
 Shared by the jobs lane (queue + job_scorer) and gigs lane (scorer).
-Reads optional loved/hated tokens from ``data/psyche_profile.json`` when
-present; the keyword lists below are the neutral shipped defaults.
+Reads optional legacy preference tokens from ``data/psyche_profile.json``
+when present; they are treated as declared work-context preferences, never as
+a personality inference. The keyword lists below are neutral shipped defaults.
 """
 
 from __future__ import annotations
@@ -10,8 +11,6 @@ from __future__ import annotations
 import json
 import re
 from functools import lru_cache
-from pathlib import Path
-from typing import Any
 
 from jobpilot.core.config import DATA_DIR
 
@@ -61,7 +60,7 @@ def _hits(haystack: str, phrases: tuple[str, ...]) -> list[str]:
 
 
 @lru_cache(maxsize=1)
-def _psyche_tokens() -> tuple[list[str], list[str]]:
+def _preference_tokens() -> tuple[list[str], list[str]]:
     try:
         raw = json.loads(PSYCHE_PATH.read_text())
     except Exception:
@@ -116,15 +115,15 @@ def score_work_style(text: str, *, title: str = "") -> tuple[int, list[str]]:
         delta -= 8
         reasons.append("-w2-only")
 
-    loved, hated = _psyche_tokens()
+    loved, hated = _preference_tokens()
     for tok in loved:
         if tok and tok in hay:
             delta += 2
-            reasons.append(f"+psyche:{tok}")
+            reasons.append(f"+preference:{tok}")
     for tok in hated:
         if tok and tok in hay:
             delta -= 3
-            reasons.append(f"-psyche:{tok}")
+            reasons.append(f"-preference:{tok}")
 
     # Cap contributions so one JD cannot dominate the entire score.
     delta = max(-35, min(25, delta))

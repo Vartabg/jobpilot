@@ -19,7 +19,7 @@ def _gig(**kw):
 def test_fte_draft_leads_with_engineer_framing_and_cta():
     body = proposals.email_body(_gig(title="Founding Engineer"))
     assert "Is this still open?" in body          # low-friction CTA
-    assert "I build" in body or "I work" in body or "builder" in body
+    assert "add a verified background bullet" in body
     assert "Service outline" not in body          # no contractor service pitch
     assert "example.com" not in body
     # humble/straight: no flourish words
@@ -64,10 +64,11 @@ def test_is_contract_lead_detection():
     assert proposals._is_contract_lead(_gig(title="Senior AI Engineer")) is False
 
 
-def test_subject_leads_with_value_tag_not_generic():
+def test_subject_is_role_specific_without_inferred_candidate_title():
     subj = proposals.email_subject(_gig(title="Founding Engineer"))
-    assert "interested + brief background" not in subj
-    assert "engineer" in subj.lower()
+    assert subj.startswith("Interest in ")
+    assert "Founding Engineer" in subj
+    assert "full-stack engineer" not in subj.lower()
     assert len(subj) <= 110
 
 

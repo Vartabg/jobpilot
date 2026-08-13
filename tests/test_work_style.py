@@ -30,6 +30,20 @@ def test_score_work_style_boosts_async_contract():
     assert any("contract" in r or "async" in r for r in reasons)
 
 
+def test_work_style_reasons_never_claim_a_psychological_profile(monkeypatch):
+    monkeypatch.setattr(
+        "jobpilot.core.work_style._preference_tokens",
+        lambda: (["founding"], ["fixed hierarchy"]),
+    )
+
+    _delta, reasons = score_work_style(
+        "Founding role without a fixed hierarchy"
+    )
+
+    assert any("preference" in reason for reason in reasons)
+    assert all("psyche" not in reason for reason in reasons)
+
+
 def test_senior_title_penalty():
     pen, kw = title_seniority_penalty("Senior Software Engineer", ("senior software",))
     assert pen < 0

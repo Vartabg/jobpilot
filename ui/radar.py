@@ -13,7 +13,12 @@ from rich.table import Table
 
 from jobpilot.gigs.core.models import Gig
 from jobpilot.gigs.core.scorer import apply_friction
-from jobpilot.ui.income_data import IncomeViewOptions, gig_pay_label, load_gigs, load_jobs
+from jobpilot.ui.income_data import (
+    IncomeViewOptions,
+    gig_pay_label,
+    load_gigs,
+    load_jobs,
+)
 from jobpilot.ui.view_helpers import materials_ready, score_bar
 
 # Backward-compatible alias — radar now shares IncomeViewOptions with HUD.
@@ -43,22 +48,28 @@ def _gigs_table(gigs: list[Gig]) -> Table:
 
 
 def _jobs_table(jobs) -> Table:
-    table = Table(title="Jobs lane backup (queued ATS)", box=box.SIMPLE_HEAVY, expand=True)
+    table = Table(title="Jobs lane (verified apply-ready)", box=box.SIMPLE_HEAVY, expand=True)
     table.add_column("#", width=3, justify="right", style="dim")
-    table.add_column("Fit", width=14)
+    table.add_column("Decision", width=10)
+    table.add_column("Qual", width=4, justify="right")
+    table.add_column("Ctx", width=4, justify="right")
+    table.add_column("Cov", width=4, justify="right")
+    table.add_column("Posting", width=11)
     table.add_column("Company", max_width=14)
-    table.add_column("Title", style="green", max_width=30)
-    table.add_column("Location", max_width=16, style="magenta")
+    table.add_column("Title", style="green", max_width=26)
     table.add_column("ID", width=8, style="dim")
     table.add_column("📋", width=3, justify="center")
     for i, j in enumerate(jobs, 1):
         ready = "✓" if materials_ready(j.company) else "·"
         table.add_row(
             str(i),
-            score_bar(j.fit_score),
+            j.decision.replace("_", " "),
+            str(j.qualification_lower_bound) if j.qualification_lower_bound is not None else "?",
+            str(j.work_context_match) if j.work_context_match is not None else "?",
+            str(j.evidence_coverage),
+            f"{j.evidence_grade}/{j.legitimacy_state}",
             j.company[:14],
-            j.title[:30],
-            (j.location or "—")[:16],
+            j.title[:26],
             j.id,
             ready,
         )
@@ -114,7 +125,7 @@ def build_radar_renderable(opts: Optional[IncomeViewOptions] = None) -> Renderab
     header = Panel(
         f"[bold cyan]Autonomous Income Radar[/bold cyan]\n"
         f"[dim]{_mode_caption(opts)} · gigs ≥{opts.min_gig_score} · June 30 Austin return[/dim]\n"
-        f"[dim]Primary: contract gigs · Backup: non-senior queued ATS[/dim]",
+        f"[dim]Primary: contract gigs · Jobs: verified evidence decisions[/dim]",
         border_style="cyan",
         box=box.DOUBLE,
     )
@@ -145,7 +156,7 @@ def build_radar_renderable(opts: Optional[IncomeViewOptions] = None) -> Renderab
         parts.append(_jobs_table(jobs))
     else:
         parts.append(Panel(
-            "[dim]No queued backup jobs for this filter.[/dim]",
+            "[dim]No verified apply-ready jobs for this filter.[/dim]",
             title="Jobs lane",
         ))
 
@@ -166,6 +177,7 @@ def render_radar(console: Console, *, opts: Optional[IncomeViewOptions] = None) 
 
 def watch_radar(console: Console, *, opts: Optional[IncomeViewOptions] = None, interval: float = 30.0) -> None:
     import time
+
     from rich.live import Live
 
     with Live(console=console, refresh_per_second=2, screen=True) as live:

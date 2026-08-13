@@ -4,19 +4,17 @@ Tests for core/engine.py — ApplicationEngine with mocked browser/services.
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass, field
 from typing import Optional
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from jobpilot.core.events import EventBus, INFO, WARNING, FIELD_FILLED, APPLICATION_STARTED, APPLICATION_SUBMITTED
+from jobpilot.core.autonomy import AutonomyConfig, AutonomyMode
 from jobpilot.core.engine import ApplicationEngine, _build_job_context
 from jobpilot.core.engine_run import _build_review_fields
-from jobpilot.core.autonomy import AutonomyConfig, AutonomyMode
+from jobpilot.core.events import EventBus
 from jobpilot.core.linkedin_parser import FieldType, SemanticType
-
 
 # ---------------------------------------------------------------------------
 # Lightweight fakes
@@ -231,7 +229,7 @@ class TestChatDispatch:
     async def test_freeform_message_backend_down_replies_with_hint(
         self, mock_complete, engine, mock_chat
     ):
-        from jobpilot.core.llm_client import LLMUnavailable, NO_BACKEND_MESSAGE
+        from jobpilot.core.llm_client import NO_BACKEND_MESSAGE, LLMUnavailable
 
         mock_complete.side_effect = LLMUnavailable(NO_BACKEND_MESSAGE)
         await engine.handle_chat("what is python?", FakePageInfo(), None, None)
@@ -240,6 +238,30 @@ class TestChatDispatch:
 
 
 class TestVoiceDispatch:
+    @pytest.mark.asyncio
+    async def test_approve_command_cannot_mutate_form(
+        self, engine, mock_chat, mock_recorder, mock_bridge
+    ):
+        field = FakeFormField()
+        field.element.fill = AsyncMock()
+        app = FakeApplicationPage(fields=[field])
+
+        await engine.handle_voice({"command": "approve"}, app)
+
+        field.element.fill.assert_not_awaited()
+        mock_recorder.record_field_approved.assert_not_called()
+        assert "retired" in mock_chat.send_message.call_args[0][0].lower()
+        assert not mock_bridge.page.mock_calls
+
+    @pytest.mark.asyncio
+    async def test_next_command_cannot_navigate(
+        self, engine, mock_chat, mock_bridge
+    ):
+        await engine.handle_voice({"command": "next"}, FakeApplicationPage())
+
+        assert "retired" in mock_chat.send_message.call_args[0][0].lower()
+        assert not mock_bridge.page.mock_calls
+
     @pytest.mark.asyncio
     async def test_skip_command(self, engine, mock_chat, mock_recorder):
         app = FakeApplicationPage(fields=[FakeFormField()])
@@ -271,7 +293,8 @@ class TestFillField:
         field.element.press = AsyncMock()
 
         result = await engine.fill_field(field, "test@example.com")
-        assert result is True
+        assert result is False
+        field.element.fill.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_fill_select_field(self, engine):
@@ -280,7 +303,8 @@ class TestFillField:
         field.element.select_option = AsyncMock()
 
         result = await engine.fill_field(field, "Option A")
-        assert result is True
+        assert result is False
+        field.element.select_option.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_fill_checkbox_check(self, engine):
@@ -290,8 +314,8 @@ class TestFillField:
         field.element.check = AsyncMock()
 
         result = await engine.fill_field(field, "yes")
-        assert result is True
-        field.element.check.assert_called_once()
+        assert result is False
+        field.element.check.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_fill_retries_on_failure(self, engine):
@@ -350,49 +374,27 @@ class TestReviewGate:
 
 class TestResumeUpload:
     @pytest.mark.asyncio
-    async def test_upload_files_prefers_latest_tailored_pdf(self, engine, mock_profile_store, tmp_path):
+    async def test_upload_files_cannot_access_browser(
+        self, engine, mock_profile_store
+    ):
         profile = mock_profile_store.load.return_value
-        primary_resume = tmp_path / "profile_resume.pdf"
-        tailored_resume = tmp_path / "tailored_resume.pdf"
-        primary_resume.write_text("primary resume")
-        tailored_resume.write_text("tailored resume")
-        profile.resume_path = str(primary_resume)
-
-        file_input = MagicMock()
-        file_input.set_input_files = AsyncMock()
         app = FakeApplicationPage(has_resume_upload=True)
 
-        with (
-            patch("jobpilot.core.engine.FILE_INPUTS.query_all", new=AsyncMock(return_value=[file_input])),
-            patch(
-                "jobpilot.core.engine.ResumeTailor.load_latest_draft_summary",
-                return_value={"pdf_path": str(tailored_resume)},
-            ),
-        ):
-            await engine.upload_files(app, profile)
+        await engine.upload_files(app, profile)
 
-        file_input.set_input_files.assert_awaited_once_with(str(tailored_resume))
+        assert not engine.bridge.page.mock_calls
 
 
 class TestEventEmission:
     @pytest.mark.asyncio
-    async def test_run_emits_info_on_start(self, engine, events, mock_bridge):
-        received = []
-        events.on(INFO, lambda **kw: received.append(kw))
-
-        # run() with watch=False exits immediately after initial status
-        await engine.run(watch=False)
-        assert len(received) > 0
-        messages = " ".join(r.get("message", "") for r in received)
-        assert "Ready" in messages
+    async def test_run_is_retired(self, engine, events, mock_bridge):
+        with pytest.raises(RuntimeError, match="human paste flow"):
+            await engine.run(watch=False)
 
     @pytest.mark.asyncio
     @patch("jobpilot.core.engine.get_health")
-    async def test_run_reports_bro_status(self, mock_health, engine, events, mock_bridge):
+    async def test_run_never_reaches_legacy_health_path(self, mock_health, engine, events, mock_bridge):
         mock_health.return_value = {"status": "ok", "whisper": "ready"}
-        received = []
-        events.on(INFO, lambda **kw: received.append(kw))
-
-        await engine.run(watch=False)
-        messages = " ".join(r.get("message", "") for r in received)
-        assert "Bro:" in messages
+        with pytest.raises(RuntimeError, match="retired"):
+            await engine.run(watch=False)
+        mock_health.assert_not_called()

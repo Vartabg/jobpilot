@@ -2,7 +2,7 @@
 JobPilot CLI — thin entry point.
 
 Usage:
-    jobpilot start       - Launch and connect to Chrome
+    jobpilot start       - Explain the retired live-form automation flow
     jobpilot profile     - View/edit your profile
     jobpilot templates   - Manage answer templates
     jobpilot stats       - Show application statistics
@@ -26,23 +26,21 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 
-from jobpilot.core.cdp_bridge import connect_to_chrome
-from jobpilot.core.profile_store import get_profile_store
-from jobpilot.core.question_matcher import get_question_matcher
-from jobpilot.core.application_tracker import get_application_tracker
-from jobpilot.core.autonomy import AutonomyMode, get_autonomy_config, set_autonomy_mode
-from jobpilot.core.logger import get_logger
-from jobpilot.core.events import EventBus, INFO, WARNING, ERROR, FIELD_FILLED, FIELD_SKIPPED, FIELD_EDITED, APPLICATION_STARTED, APPLICATION_SUBMITTED, APPLICATION_ABANDONED
-from jobpilot.core.engine import ApplicationEngine
 from jobpilot.core import llm_client
+from jobpilot.core.application_answerer import TRUE_ACCOUNTS_PATH, ApplicationAnswerer
+from jobpilot.core.application_tracker import get_application_tracker
 from jobpilot.core.bro_client import get_health
+from jobpilot.core.cdp_bridge import connect_to_chrome
+from jobpilot.core.doctor import run_doctor
+from jobpilot.core.interview_prep import InterviewPrepGenerator
 from jobpilot.core.jd_parser import JDParser
 from jobpilot.core.job_scorer import JobScorer
+from jobpilot.core.logger import get_logger
 from jobpilot.core.portal_scanner import PortalScanner, ScanTarget
-from jobpilot.core.doctor import run_doctor
+from jobpilot.core.profile_store import get_profile_store
+from jobpilot.core.question_matcher import get_question_matcher
 from jobpilot.core.resume_tailor import ResumeTailor
-from jobpilot.core.interview_prep import InterviewPrepGenerator
-from jobpilot.core.application_answerer import ApplicationAnswerer, TRUE_ACCOUNTS_PATH
+from jobpilot.core.role_decision import RoleDecision, RoleDecisionEngine
 from jobpilot.learning.action_recorder import get_action_recorder
 
 # Named `logger`, not `log`: the `log` CLI command below would shadow it and
@@ -51,7 +49,7 @@ logger = get_logger(__name__)
 
 app = typer.Typer(
     name="jobpilot",
-    help="Semi-automated LinkedIn job application copilot",
+    help="Evidence-led job search and application preparation assistant",
 )
 console = Console()
 
@@ -79,51 +77,6 @@ def _resolve_claim_lock_path() -> Optional[Path]:
 
 
 # ---------------------------------------------------------------------------
-# Event → Rich Console wiring
-# ---------------------------------------------------------------------------
-
-def _wire_events(bus: EventBus) -> None:
-    """Subscribe console output to engine events."""
-
-    def _on_info(message: str = "", **_kw):
-        console.print(f"[cyan]{message}[/cyan]")
-
-    def _on_warning(message: str = "", **_kw):
-        console.print(f"[yellow]{message}[/yellow]")
-
-    def _on_error(message: str = "", **_kw):
-        console.print(f"[red]{message}[/red]")
-
-    def _on_field_filled(label: str = "", **_kw):
-        console.print(f"[green]⚡ Auto-filled {label}[/green]")
-
-    def _on_field_skipped(label: str = "", **_kw):
-        console.print(f"[dim]✗ Skipped {label}[/dim]")
-
-    def _on_field_edited(label: str = "", old: str = "", new: str = "", **_kw):
-        console.print(f"[yellow]🧠 Learned correction: {label}[/yellow]")
-
-    def _on_app_started(title: str = "", **_kw):
-        console.print(f"\n[bold cyan]📋 Application Started: {title[:60]}[/bold cyan]")
-
-    def _on_app_submitted(**_kw):
-        console.print("\n[bold green]🎊 SUCCESS: Application Submitted! 🎉[/bold green]\n")
-
-    def _on_app_abandoned(step: int = 1, **_kw):
-        console.print(f"[dim]⚠  Application abandoned at step {step}[/dim]")
-
-    bus.on(INFO, _on_info)
-    bus.on(WARNING, _on_warning)
-    bus.on(ERROR, _on_error)
-    bus.on(FIELD_FILLED, _on_field_filled)
-    bus.on(FIELD_SKIPPED, _on_field_skipped)
-    bus.on(FIELD_EDITED, _on_field_edited)
-    bus.on(APPLICATION_STARTED, _on_app_started)
-    bus.on(APPLICATION_SUBMITTED, _on_app_submitted)
-    bus.on(APPLICATION_ABANDONED, _on_app_abandoned)
-
-
-# ---------------------------------------------------------------------------
 # Resume auto-index helper (unchanged)
 # ---------------------------------------------------------------------------
 
@@ -137,8 +90,8 @@ def _check_and_index_resume() -> None:
         if not resume_path:
             return
 
-        from pathlib import Path
         import sys
+        from pathlib import Path
 
         resume = Path(resume_path).expanduser()
         if not resume.exists():
@@ -180,7 +133,13 @@ def _check_and_index_resume() -> None:
 def _load_score_source(source: str) -> tuple[str, str]:
     """Resolve inline JD text or a file path into scoreable text."""
     candidate = Path(source).expanduser()
-    if candidate.exists() and candidate.is_file():
+    try:
+        is_file = candidate.is_file()
+    except OSError:
+        # Long pasted JDs are inline text, but some filesystems reject them
+        # before ``Path.is_file`` can simply return false.
+        is_file = False
+    if is_file:
         if candidate.suffix.lower() == ".pdf":
             console.print(
                 "[red]That's a PDF — JobPilot can't read job descriptions out of PDFs yet.[/red]\n"
@@ -232,6 +191,22 @@ def _parse_years_of_experience(raw: str) -> Optional[int]:
     """
     match = re.match(r"(\d+)", str(raw or "").strip())
     return int(match.group(1)) if match else None
+
+
+def _parse_csv_list(raw: str) -> list[str]:
+    """Parse a friendly comma/semicolon/newline list without duplicates."""
+    values = (part.strip() for part in re.split(r"[,;\n]", str(raw or "")))
+    return list(dict.fromkeys(part for part in values if part))
+
+
+def _parse_optional_yes_no(raw: str) -> Optional[bool]:
+    """Parse an explicit yes/no answer, leaving blank or unknown unset."""
+    value = str(raw or "").strip().lower()
+    if value in {"y", "yes", "true", "1"}:
+        return True
+    if value in {"n", "no", "false", "0"}:
+        return False
+    return None
 
 
 def _norm_claim_text(value: object) -> str:
@@ -316,7 +291,7 @@ def _enforce_claim_lock(job, *, claim_approved: bool) -> None:
             "[red]Claim-lock blocked staging:[/red] "
             f"{job.company} is not present in {lock_path}."
         )
-        console.print("[dim]Claude must vet it and set materials_status to 'ready' before JobPilot fills it.[/dim]")
+        console.print("[dim]Claude must vet it and set materials_status to 'ready' before JobPilot prepares it.[/dim]")
         raise typer.Exit(1)
 
     decision = _norm_claim_text(target.get("decision"))
@@ -343,46 +318,157 @@ def _enforce_claim_lock(job, *, claim_approved: bool) -> None:
             raise typer.Exit(0)
 
 
-def _render_score_result(result, source_label: str) -> None:
-    """Display a job-fit score in the terminal."""
+def _render_score_result(
+    result: RoleDecision,
+    source_label: str,
+    *,
+    title: str = "",
+    company: str = "",
+) -> None:
+    """Display a truth-bounded role decision with its evidence axes."""
     from rich.table import Table
 
-    border_style = "green" if result.score >= 65 else "yellow" if result.score >= 50 else "red"
-    title = result.parsed_jd.title or "Job Fit Review"
-    company = result.parsed_jd.company or "Unknown company"
+    decision_style = {
+        "apply_now": "green",
+        "stretch": "cyan",
+        "investigate": "yellow",
+        "skip": "red",
+    }.get(result.decision, "yellow")
+    title = title or "Role evidence review"
+    company = company or "Company not identified"
+    status = result.status.replace("_", " ")
+    decision = result.decision.replace("_", " ")
 
-    console.print(Panel.fit(
-        f"[bold cyan]{title}[/bold cyan]\n"
-        f"[white]{company}[/white]\n"
-        f"[bold]{result.score}/100[/bold] • {result.recommendation}\n"
-        f"[dim]{source_label}[/dim]",
-        border_style=border_style,
-    ))
+    console.print(
+        Panel.fit(
+            f"[bold cyan]{title}[/bold cyan]\n"
+            f"[white]{company}[/white]\n"
+            f"Status: [bold]{status}[/bold]  •  "
+            f"Decision: [bold {decision_style}]{decision}[/bold {decision_style}]\n"
+            f"[dim]{source_label}[/dim]",
+            border_style=decision_style,
+            title="Evidence-linked role decision",
+        )
+    )
 
-    table = Table(title="Fit Breakdown")
-    table.add_column("Area", style="cyan")
-    table.add_column("Points", justify="right", style="white")
-    for label, points in result.components.items():
-        table.add_row(label, str(points))
+    def axis(value) -> str:
+        return "unknown" if value is None else f"{value}/100"
+
+    matched_accounts = ", ".join(result.matched_accounts) or "none linked"
+    table = Table(title="Evidence axes")
+    table.add_column("Evidence", style="cyan")
+    table.add_column("Finding", style="white")
+    table.add_row("Role family", result.role_family.replace("_", " "))
+    table.add_row("Qualification lower bound", axis(result.qualification_lower_bound))
+    table.add_row("Work-context evidence", axis(result.work_context_match))
+    table.add_row("Evidence coverage", f"{result.evidence_coverage}%")
+    table.add_row("Opportunity evidence", axis(result.opportunity))
+    table.add_row("Logistics evidence", axis(result.logistics))
+    table.add_row("Matched accounts", matched_accounts)
+    table.add_row("Biggest gap", result.biggest_gap or "none recorded")
     console.print(table)
 
-    if result.matched_skills:
-        console.print(f"[green]Matched:[/green] {', '.join(result.matched_skills[:6])}")
-    if result.missing_skills:
-        console.print(f"[yellow]Gaps:[/yellow] {', '.join(result.missing_skills[:6])}")
+    if result.status == "unscorable":
+        console.print(
+            "[yellow]Unscorable:[/yellow] a full job description is required; "
+            "unknown evidence received no neutral points."
+        )
+    if result.rationale:
+        console.print(f"[dim]{result.rationale}[/dim]")
 
-    for strength in result.strengths[:3]:
-        console.print(f"[green]•[/green] {strength}")
-    for risk in result.risks[:3]:
-        console.print(f"[yellow]•[/yellow] {risk}")
 
-    if result.ai_summary:
-        console.print(f"\n[dim]{result.ai_summary}[/dim]")
+_SCORE_SECTION_HEADINGS = frozenset(
+    {
+        "about the role",
+        "about us",
+        "logistics",
+        "preferred qualifications",
+        "requirements",
+        "required qualifications",
+        "responsibilities",
+        "work context",
+        "work environment",
+    }
+)
+
+
+def _score_identity(raw_text: str) -> tuple[str, str]:
+    """Infer the role identity without invoking the legacy additive scorer."""
+    labels = {
+        "company": "company",
+        "employer": "company",
+        "organization": "company",
+        "job title": "title",
+        "position": "title",
+        "role": "title",
+        "title": "title",
+    }
+    found = {"title": "", "company": ""}
+    candidates = []
+    for raw_line in (raw_text or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        label, separator, value = line.partition(":")
+        field = labels.get(label.strip().lower()) if separator else None
+        if field and value.strip():
+            found[field] = found[field] or value.strip()[:120]
+            continue
+        if (
+            line.lower().rstrip(":") not in _SCORE_SECTION_HEADINGS
+            and not line.startswith(("-", "*", "•"))
+            and 3 <= len(line) <= 120
+        ):
+            candidates.append(line)
+
+    if not found["title"] and candidates:
+        found["title"] = candidates[0]
+    if not found["company"] and len(candidates) > 1:
+        found["company"] = candidates[1]
+    return found["title"], found["company"]
+
+
+def _missing_jd_decision() -> RoleDecision:
+    """Return an explicit fail-closed decision when no JD body was captured."""
+    return RoleDecision(
+        status="unscorable",
+        decision="investigate",
+        role_family="unknown",
+        qualification_lower_bound=None,
+        work_context_match=None,
+        opportunity=None,
+        logistics=None,
+        evidence_coverage=0,
+        biggest_gap="A full job description is required.",
+        matched_accounts=(),
+        matches=(),
+        rationale=("Missing job-description evidence; no neutral points were awarded."),
+    )
+
+
+def _assess_score_text(*, title: str, jd_text: str) -> RoleDecision:
+    """Assess public score input against the current truth-bounded profile."""
+    if not (jd_text or "").strip():
+        return _missing_jd_decision()
+    accounts_path = TRUE_ACCOUNTS_PATH if TRUE_ACCOUNTS_PATH.is_file() else None
+    return RoleDecisionEngine().assess(
+        title=title,
+        jd_text=jd_text,
+        profile=get_profile_store().load(),
+        accounts_path=accounts_path,
+    )
 
 
 def _render_resume_result(result, source_label: str) -> None:
-    """Display the output of a tailored resume draft."""
+    """Display a tailored draft with the current evidence-based decision."""
     parsed = result.fit_result.parsed_jd
+    decision = _assess_score_text(title=parsed.title, jd_text=parsed.raw_text)
+    decision_label = decision.decision.replace("_", " ")
+    qualification_floor = (
+        "unknown"
+        if decision.qualification_lower_bound is None
+        else f"{decision.qualification_lower_bound}/100"
+    )
     saved_paths = [f"Markdown: {result.output_path}"]
     if result.html_path:
         saved_paths.append(f"HTML: {result.html_path}")
@@ -392,10 +478,15 @@ def _render_resume_result(result, source_label: str) -> None:
     console.print(Panel.fit(
         f"[bold cyan]ATS Resume Draft Ready[/bold cyan]\n"
         f"[white]{parsed.title or 'Target role'} @ {parsed.company or 'Target company'}[/white]\n"
-        f"[bold]{result.fit_result.score}/100[/bold] • {result.fit_result.recommendation}\n"
+        f"Decision: [bold]{decision_label}[/bold]\n"
+        f"Qualification floor: {qualification_floor}  •  "
+        f"Evidence coverage: {decision.evidence_coverage}%\n"
         f"[dim]{source_label}\n" + "\n".join(saved_paths) + "[/dim]",
         border_style="cyan",
     ))
+
+    if decision.biggest_gap:
+        console.print(f"[yellow]Biggest gap:[/yellow] {decision.biggest_gap}")
 
     if result.keywords:
         console.print(f"[green]Keywords:[/green] {', '.join(result.keywords[:10])}")
@@ -590,8 +681,8 @@ async def _resume_active_page(
 
 
 async def _score_active_page(port: int) -> bool:
-    """Score the currently open LinkedIn job page in Chrome."""
-    console.print("\n[cyan]Connecting to Chrome for active job scoring...[/cyan]")
+    """Assess the currently open LinkedIn role from its full JD evidence."""
+    console.print("\n[cyan]Connecting to Chrome for active role evidence...[/cyan]")
     bridge = await connect_to_chrome(port)
 
     if not bridge:
@@ -602,19 +693,30 @@ async def _score_active_page(port: int) -> bool:
         await bridge.get_active_page()
         page_info = await bridge.get_page_info()
         if not page_info.is_linkedin:
-            console.print("[yellow]Open a LinkedIn job listing first, or pass JD text/file directly.[/yellow]")
+            console.print(
+                "[yellow]Open a LinkedIn job listing first, or pass JD text/file directly.[/yellow]"
+            )
             return False
 
         parsed_jd = await JDParser(bridge.page).parse()
     finally:
         await bridge.disconnect()
 
-    if not parsed_jd or not (parsed_jd.raw_text or parsed_jd.summary()):
-        console.print("[yellow]Could not read the active job description.[/yellow]")
-        return False
-
-    result = JobScorer().score_parsed_jd(parsed_jd)
-    _render_score_result(result, page_info.url)
+    if parsed_jd is None:
+        result = _missing_jd_decision()
+        title = getattr(page_info, "title", "")
+        company = ""
+    else:
+        inferred_title, inferred_company = _score_identity(parsed_jd.raw_text)
+        title = parsed_jd.title or inferred_title
+        company = parsed_jd.company or inferred_company
+        result = _assess_score_text(title=title, jd_text=parsed_jd.raw_text)
+    _render_score_result(
+        result,
+        page_info.url,
+        title=title,
+        company=company,
+    )
     return True
 
 
@@ -734,62 +836,37 @@ async def _doctor_async(port: int, *, bro: bool = True) -> int:
 
 @app.command()
 def start(
-    port: int = typer.Option(9222, help="Chrome debugging port"),
-    watch: bool = typer.Option(True, help="Stay connected and watch for applications"),
-    mode: str = typer.Option("semi-auto", help="Autonomy: suggest, semi-auto, full-auto"),
+    port: int = typer.Option(
+        9222, help="Retained for compatibility; no browser is opened"
+    ),
+    watch: bool = typer.Option(
+        True, help="Retained for compatibility; monitoring is retired"
+    ),
+    mode: str = typer.Option(
+        "semi-auto", help="Retained for compatibility; automation is retired"
+    ),
 ):
-    """Connect to Chrome and start assisting with job applications"""
-    try:
-        set_autonomy_mode(AutonomyMode(mode))
-    except ValueError:
-        console.print(f"[red]Invalid mode '{mode}'. Use: suggest, semi-auto, full-auto[/red]")
-        raise typer.Exit(1)
-
-    console.print(Panel.fit(
-        f"[bold cyan]🚀 JobPilot Smart Dashboard[/bold cyan]\n"
-        f"[dim]Mode: {mode} | Strategy: LinkedIn Fast-Track[/dim]\n"
-        f"[dim]Status: [green]Active & Monitoring[/green][/dim]",
-        border_style="cyan",
-    ))
-
-    try:
-        asyncio.run(_start_async(port, watch))
-    except KeyboardInterrupt:
-        # Ctrl+C lands here, not inside the coroutine — asyncio cancels the
-        # task and re-raises KeyboardInterrupt out of asyncio.run().
-        console.print("\n[cyan]Session saved. Run 'jobpilot start' to resume.[/cyan]")
+    """Explain the retired browser-monitoring flow and stop safely."""
+    console.print(
+        Panel.fit(
+            "[bold yellow]`jobpilot start` is retired.[/bold yellow]\n"
+            "JobPilot no longer monitors Chrome or fills live ATS forms.\n\n"
+            "Use [cyan]jobpilot queue --refresh[/cyan] to verify roles, "
+            "[cyan]jobpilot score <jd.txt>[/cyan] to review evidence, then "
+            "draft a paste sheet and paste, review, and submit by hand.",
+            title="Human paste-and-submit boundary",
+            border_style="yellow",
+        )
+    )
+    raise typer.Exit(1)
 
 
 async def _start_async(port: int, watch: bool):
-    """Bootstrap services, wire events, delegate to engine."""
-    console.print("\n[cyan]Launching browser...[/cyan]")
-    bridge = await connect_to_chrome(port)
-
-    if not bridge:
-        console.print("\n[red]Failed to launch browser. Check logs above.[/red]")
-        return
-
-    # Auto-index resume
-    _check_and_index_resume()
-
-    # Wire event bus
-    events = EventBus()
-    _wire_events(events)
-
-    # Assemble engine
-    engine = ApplicationEngine(
-        bridge=bridge,
-        events=events,
-        overlay=None,
-        chat_overlay=None,
-        profile_store=get_profile_store(),
-        question_matcher=get_question_matcher(),
-        action_recorder=get_action_recorder(),
-        app_tracker=get_application_tracker(),
-        autonomy_config=get_autonomy_config(),
+    """Fail closed for callers that retained the former private entry point."""
+    del port, watch
+    raise RuntimeError(
+        "Live ATS monitoring and filling are retired; use the human paste flow."
     )
-
-    await engine.run(watch=watch)
 
 
 @app.command()
@@ -894,15 +971,26 @@ def resume(
 
 
 def _render_prep_result(result, source_label: str) -> None:
-    """Display the output of an interview prep brief."""
+    """Display an interview brief with the current evidence-based decision."""
     parsed = result.fit_result.parsed_jd
+    decision = _assess_score_text(title=parsed.title, jd_text=parsed.raw_text)
+    decision_label = decision.decision.replace("_", " ")
+    qualification_floor = (
+        "unknown"
+        if decision.qualification_lower_bound is None
+        else f"{decision.qualification_lower_bound}/100"
+    )
     console.print(Panel.fit(
         f"[bold cyan]Interview Brief Ready[/bold cyan]\n"
         f"[white]{parsed.title or 'Target role'} @ {parsed.company or 'Target company'}[/white]\n"
-        f"[bold]{result.fit_result.score}/100[/bold] • {result.fit_result.recommendation}\n"
+        f"Decision: [bold]{decision_label}[/bold]\n"
+        f"Qualification floor: {qualification_floor}  •  "
+        f"Evidence coverage: {decision.evidence_coverage}%\n"
         f"[dim]{source_label}\nHTML: {result.output_path}[/dim]",
         border_style="cyan",
     ))
+    if decision.biggest_gap:
+        console.print(f"[yellow]Biggest gap:[/yellow] {decision.biggest_gap}")
     if result.likely_questions:
         console.print("[green]Likely questions:[/green]")
         for q in result.likely_questions[:3]:
@@ -985,21 +1073,26 @@ def score(
         help="Job description text or a path to a JD text file. Omit to score the active LinkedIn page.",
     ),
     port: int = typer.Option(9222, help="Chrome debugging port for --active mode"),
-    active: bool = typer.Option(False, "--active", help="Score the active LinkedIn job tab in Chrome"),
+    active: bool = typer.Option(
+        False, "--active", help="Score the active LinkedIn job tab in Chrome"
+    ),
 ):
-    """Score a role before spending time on the application."""
+    """Review a role using profile-linked evidence and explicit unknowns."""
     if active or not source:
         if not asyncio.run(_score_active_page(port)):
             raise typer.Exit(1)
         return
 
     if source.startswith(("http://", "https://")):
-        console.print("[yellow]Open the job in Chrome and run `jobpilot score --active`, or paste the JD text directly.[/yellow]")
+        console.print(
+            "[yellow]Open the job in Chrome and run `jobpilot score --active`, or paste the JD text directly.[/yellow]"
+        )
         raise typer.Exit(1)
 
     text, label = _load_score_source(source)
-    result = JobScorer().score_text(text)
-    _render_score_result(result, label)
+    title, company = _score_identity(text)
+    result = _assess_score_text(title=title, jd_text=text)
+    _render_score_result(result, label, title=title, company=company)
 
 
 @app.command()
@@ -1026,18 +1119,76 @@ def _edit_profile(store):
     p.phone = typer.prompt("Phone", default=p.phone or "")
     p.city = typer.prompt("City", default=p.city or "")
     p.state = typer.prompt("State", default=p.state or "")
+    p.country = typer.prompt(
+        "Country (leave blank if unknown)",
+        default=p.country or "",
+        show_default=False,
+    )
     p.linkedin_url = typer.prompt("LinkedIn URL", default=p.linkedin_url or "")
     p.portfolio_url = typer.prompt("Portfolio URL", default=p.portfolio_url or "")
     p.github_url = typer.prompt("GitHub URL", default=p.github_url or "")
     p.resume_path = typer.prompt("Resume file path", default=p.resume_path or "")
     while True:
-        exp = typer.prompt("Years of experience", default=str(p.years_of_experience or 0))
+        authorized = typer.prompt(
+            "Authorized to work in the United States? (yes/no, blank if unknown)",
+            default=(
+                "yes" if p.authorized_to_work is True
+                else "no" if p.authorized_to_work is False
+                else ""
+            ),
+            show_default=False,
+        )
+        parsed_authorized = _parse_optional_yes_no(authorized)
+        if not authorized.strip() or parsed_authorized is not None:
+            p.authorized_to_work = parsed_authorized
+            break
+        console.print("[yellow]Enter yes, no, or leave it blank.[/yellow]")
+    while True:
+        sponsorship = typer.prompt(
+            "Will you now or later require employment sponsorship? (yes/no, blank if unknown)",
+            default=(
+                "yes" if p.requires_sponsorship is True
+                else "no" if p.requires_sponsorship is False
+                else ""
+            ),
+            show_default=False,
+        )
+        parsed_sponsorship = _parse_optional_yes_no(sponsorship)
+        if not sponsorship.strip() or parsed_sponsorship is not None:
+            p.requires_sponsorship = parsed_sponsorship
+            break
+        console.print("[yellow]Enter yes, no, or leave it blank.[/yellow]")
+    while True:
+        exp = typer.prompt(
+            "Years of experience (leave blank if unknown)",
+            default=(
+                str(p.years_of_experience)
+                if p.years_of_experience is not None
+                else ""
+            ),
+            show_default=False,
+        )
+        if not exp.strip():
+            p.years_of_experience = None
+            break
         parsed_exp = _parse_years_of_experience(exp)
-        if parsed_exp is not None:
+        if parsed_exp is not None and parsed_exp > 0:
             p.years_of_experience = parsed_exp
             break
-        console.print("[yellow]Couldn't read a number from that — enter digits, like 5.[/yellow]")
+        console.print(
+            "[yellow]Enter a positive number like 5, or leave it blank if unknown.[/yellow]"
+        )
     p.current_title = typer.prompt("Current job title", default=p.current_title or "")
+    p.skills = _parse_csv_list(typer.prompt(
+        "Skills (comma-separated)",
+        default=", ".join(p.skills),
+        show_default=False,
+    ))
+    p.target_titles = _parse_csv_list(typer.prompt(
+        "Target role titles (comma-separated)",
+        default=", ".join(p.target_titles),
+        show_default=False,
+    ))
 
     store.save(p)
 
@@ -1091,10 +1242,8 @@ def history(
 def serve(
     host: str = typer.Option(
         "127.0.0.1",
-        help="Bind address. Loopback by default (safe). The dashboard serves "
-        "your name/email/phone with no authentication, so only widen this "
-        "deliberately — e.g. --host 100.x.y.z for a specific Tailscale IP. "
-        "Avoid 0.0.0.0, which exposes your PII to everyone on the network.",
+        help="Bind address. Loopback by default. Remote binds accept only a "
+        "specific Tailscale IPv4 address and require JOBPILOT_REMOTE_TOKEN.",
     ),
     port: Optional[int] = typer.Option(
         None,
@@ -1107,19 +1256,24 @@ def serve(
     Tailscale, pass your machine's Tailscale IP explicitly with --host.
     """
     from jobpilot.core.config import DEFAULT_SERVE_PORT
-    from jobpilot.core.server import run_server, get_tailscale_ip, get_local_ip
+    from jobpilot.core.server import configure_server_access, run_server
 
     serve_port = port or DEFAULT_SERVE_PORT
-    ts_ip = get_tailscale_ip()
-    lan_ip = get_local_ip()
+    try:
+        remote = configure_server_access(host)
+    except ValueError as exc:
+        console.print(f"[red]Refusing unsafe server configuration: {exc}[/red]")
+        raise typer.Exit(code=2) from exc
 
     console.print(Panel.fit(
-        f"[bold cyan]🚀 JobPilot Remote Dashboard[/bold cyan]\n"
-        + (f"[bold green]Tailscale:[/bold green]  http://{ts_ip}:{serve_port}\n" if ts_ip else "[yellow]Tailscale not detected — start it with `tailscale up`[/yellow]\n")
-        + f"[bold]LAN:[/bold]        http://{lan_ip}:{serve_port}\n"
-        + f"[dim]Local:       http://127.0.0.1:{serve_port}[/dim]\n"
-        + f"\n[dim]Open the Tailscale URL on your phone to apply remotely.[/dim]\n"
-        + f"[dim]Keep this terminal open. Ctrl+C to stop.[/dim]",
+        "[bold cyan]🚀 JobPilot Remote Dashboard[/bold cyan]\n"
+        + f"[bold]{'Tailscale' if remote else 'Local'}:[/bold]  http://{host}:{serve_port}/\n"
+        + (
+            "[yellow]Authentication required. Append "
+            "?token=$JOBPILOT_REMOTE_TOKEN on first open.[/yellow]\n"
+            if remote else "[dim]Loopback access does not require a token.[/dim]\n"
+        )
+        + "[dim]Keep this terminal open. Ctrl+C to stop.[/dim]",
         border_style="cyan",
         title="Mobile Access",
     ))
@@ -1284,7 +1438,7 @@ def radar(
 
 @app.command()
 def board(
-    fresh: bool = typer.Option(True, "--fresh/--all", help="Show only queued roles (default) or full queue"),
+    fresh: bool = typer.Option(True, "--fresh/--all", help="Show only verified apply-ready roles (default) or full queue"),
     austin: bool = typer.Option(False, "--austin", "-a", help="Filter to Austin-area roles"),
     autonomous: bool = typer.Option(False, "--autonomous", help="Hide senior-titled queued roles"),
     location: str = typer.Option("", "--location", "-l", help="Substring filter on location field"),
@@ -1314,45 +1468,50 @@ def board(
 def queue(
     refresh: bool = typer.Option(False, "--refresh", "-r", help="Re-scan all portals and rebuild queue"),
     limit: int = typer.Option(50, "--limit", "-n", help="Max jobs to queue"),
-    open_dashboard: bool = typer.Option(True, "--open/--no-open", help="Open dashboard in browser after building"),
+    open_dashboard: bool = typer.Option(True, "--open/--no-open", help="Show how to open the local dashboard server"),
     fresh: bool = typer.Option(False, "--fresh", help="Show only roles you haven't applied to / been rejected from (dedup vs applications.db)"),
     as_json: bool = typer.Option(False, "--json", help="Emit the queue (filtered) as JSON to stdout. Suppresses dashboard + console table. For piping into other tools/agents."),
     no_board: bool = typer.Option(False, "--no-board", help="Skip the terminal board after queue build/load"),
 ):
-    """Scan ATS boards, score jobs, and open the apply dashboard."""
-    from jobpilot.core.queue_builder import build_queue, load_queue, save_queue
-    from jobpilot.ui.terminal_board import BoardFilters, render_board
-    import subprocess
+    """Scan ATS boards, assess roles, and show the evidence-led slate."""
     from dataclasses import asdict
 
-    dashboard_path = Path(__file__).parent / "ui" / "dashboard.html"
+    from jobpilot.core.queue_builder import (
+        is_apply_ready,
+        load_queue,
+        reconcile_queue_with_tracker,
+        refresh_queue,
+    )
+    from jobpilot.ui.terminal_board import BoardFilters, render_board
 
     # JSON mode: emit raw queue (respecting --fresh and --limit) and exit.
     # Designed for cross-agent / scripting use without dashboard/UI side effects.
     if as_json:
         if refresh or not (Path(__file__).parent / "data" / "queue.json").exists():
-            jobs = build_queue(limit=limit)
-            save_queue(jobs)
+            jobs = refresh_queue(limit=limit)
         else:
+            reconcile_queue_with_tracker()
             jobs = load_queue()
-        view = [j for j in jobs if j.status == "queued"] if fresh else jobs
+        view = [j for j in jobs if is_apply_ready(j)] if fresh else jobs
         view = view[:limit]
         console.print_json(data=[asdict(j) for j in view])
         return
 
     if not refresh and (Path(__file__).parent / "data" / "queue.json").exists():
+        reconcile_queue_with_tracker()
         jobs = load_queue()
-        queued = [j for j in jobs if j.status == "queued"]
-        console.print(f"[cyan]Loaded existing queue: {len(queued)} jobs ready to apply[/cyan]")
-        if not queued:
-            console.print(f"[dim]Run with --refresh to re-scan portals[/dim]")
+        ready = [j for j in jobs if is_apply_ready(j)]
+        console.print(
+            f"[cyan]Loaded existing queue: {len(ready)} verified roles ready to apply[/cyan]"
+        )
+        if not ready:
+            console.print("[dim]Run with --refresh to re-scan portals[/dim]")
     else:
         console.print("[cyan]Scanning ATS boards (this takes ~30 seconds)...[/cyan]")
-        jobs = build_queue(limit=limit)
+        jobs = refresh_queue(limit=limit)
         if not jobs:
             console.print("[yellow]No jobs found. Check data/portals.json and your internet connection.[/yellow]")
             raise typer.Exit(1)
-        save_queue(jobs)
         console.print(f"[green]✓ Built queue: {len(jobs)} jobs across tech + field ops[/green]")
 
     if not no_board:
@@ -1364,23 +1523,26 @@ def queue(
             ),
         )
 
-    if open_dashboard and dashboard_path.exists():
-        subprocess.run(["open", str(dashboard_path)], check=False)
-        console.print(f"[green]✓ Web dashboard opened — or run [cyan]jobpilot board --watch[/cyan] in another tab[/green]")
-    elif not dashboard_path.exists():
-        console.print(f"[yellow]Dashboard not found at {dashboard_path}[/yellow]")
+    if open_dashboard:
+        console.print(
+            "[cyan]Queue saved.[/cyan] Run [bold]jobpilot serve[/bold], then open "
+            "[link=http://127.0.0.1:8767/]http://127.0.0.1:8767/[/link]. "
+            "The dashboard requires its local API server."
+        )
 
 
 @app.command()
 def apply(
     job_id: str = typer.Argument(..., help="Job ID from the queue (shown in dashboard or 'jobpilot queue')"),
-    port: int = typer.Option(9222, help="Chrome debugging port"),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be filled without filling"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show the preparation gate without changing anything"),
     claim_approved: bool = typer.Option(False, "--claim-approved", help="Use only if you've already approved staging this Claude-ready target"),
 ):
-    """Auto-fill a job application. Stops before submit — you approve."""
-    from jobpilot.core.queue_builder import get_job, update_job_status
-    from jobpilot.core.form_filler import fill_application
+    """Prepare a verified role for the human paste-and-submit flow."""
+    from jobpilot.core.queue_builder import (
+        get_job,
+        has_current_action_provenance,
+        is_apply_ready,
+    )
 
     job = get_job(job_id)
     if not job:
@@ -1392,56 +1554,38 @@ def apply(
         if not typer.confirm("Apply again anyway?"):
             raise typer.Exit(0)
 
+    if not is_apply_ready(job) or not has_current_action_provenance(job):
+        console.print(
+            "[yellow]This role is not apply-ready.[/yellow]\n"
+            f"Decision: {getattr(job, 'decision', 'investigate')} · "
+            f"Posting evidence: {getattr(job, 'legitimacy_state', 'hold')} "
+            f"({getattr(job, 'evidence_grade', 'F')})\n"
+            "Next action: refresh the source and review the evidence card."
+        )
+        raise typer.Exit(1)
+
     console.print(Panel.fit(
         f"[bold cyan]{job.title}[/bold cyan]\n"
         f"[white]{job.company}[/white]  •  {job.location}\n"
         f"[dim]{job.url}[/dim]\n"
-        f"[bold]Fit Score: {job.fit_score}/100[/bold]  •  Track: {job.track}",
+        f"[bold]Qualification floor: "
+        f"{job.qualification_lower_bound if job.qualification_lower_bound is not None else 'unknown'}"
+        f"[/bold]  •  Evidence coverage: {job.evidence_coverage}%",
         border_style="cyan",
-        title="Applying to",
+        title="Preparing verified role",
     ))
 
     if dry_run:
-        console.print("[dim]Dry run — no form filling. Pass without --dry-run to apply.[/dim]")
+        console.print("[dim]Dry run — no files or browser state changed.[/dim]")
         raise typer.Exit(0)
 
     _enforce_claim_lock(job, claim_approved=claim_approved)
-
-    profile = get_profile_store().load()
-
-    console.print("[cyan]Starting LLM form filler...[/cyan]")
-    console.print("[dim]Chrome will navigate to the job page. Watch it fill the form.[/dim]")
-    console.print("[yellow]⚠  It will STOP before submitting. You approve in this terminal.[/yellow]\n")
-
-    result = asyncio.run(fill_application(
-        job_url=job.url,
-        job_title=job.title,
-        company=job.company,
-        profile=profile,
-        cdp_port=port,
-    ))
-
-    if not result.success:
-        console.print(f"[red]Form filler failed: {result.error}[/red]")
-        raise typer.Exit(1)
-
-    console.print("\n[bold green]✓ Form filled. Review what was filled:[/bold green]")
-    for f in result.filled_fields:
-        console.print(f"  [green]•[/green] {f}")
-
-    console.print("\n[bold yellow]Review the form in Chrome now.[/bold yellow]")
-    console.print("Make any corrections in the browser, then come back here.\n")
-
-    confirmed = typer.confirm("Everything looks good? Submit the application?", default=False)
-
-    if confirmed:
-        console.print("[cyan]Go to Chrome and click the Submit button.[/cyan]")
-        console.print("[dim](JobPilot never auto-submits — that's your call.)[/dim]")
-        input("Press Enter once you've submitted in Chrome...")
-        update_job_status(job_id, "applied")
-        console.print("[bold green]🎊 Marked as applied! Keep going.[/bold green]")
-    else:
-        console.print("[dim]Not submitted. Job stays in queue.[/dim]")
+    console.print(
+        "[green]✓ Role cleared for preparation.[/green]\n"
+        f"Open the posting in your normal browser: [link={job.url}]{job.url}[/link]\n"
+        "Draft answers and a tailored résumé from verified evidence, create a paste sheet, "
+        "then paste, review, and submit by hand. JobPilot will not fill the live ATS form."
+    )
 
 
 @app.command()
@@ -1450,7 +1594,7 @@ def report(
     days: int = typer.Option(7, "--days", "-d", help="Number of days to include"),
 ):
     """Generate application analytics report"""
-    from jobpilot.core.analytics import export_csv, daily_digest
+    from jobpilot.core.analytics import daily_digest, export_csv
 
     if csv_export:
         path = export_csv(days=days)
@@ -1465,8 +1609,9 @@ def review(
     fix: bool = typer.Option(False, "--fix", "-f", help="Interactive mode: edit or delete each template"),
 ):
     """Review templates with low approval rates"""
+    from rich.prompt import Confirm, Prompt
     from rich.table import Table
-    from rich.prompt import Prompt, Confirm
+
     from jobpilot.learning.learning_db import get_learning_db
 
     db = get_learning_db()
@@ -1521,11 +1666,11 @@ def review(
         if action == "edit":
             new_answer = Prompt.ask("  New answer", default=t["answer"])
             db.upsert_template(t["question"], new_answer)
-            console.print(f"  [green]✓ Updated[/green]")
+            console.print("  [green]✓ Updated[/green]")
         elif action == "delete":
-            if Confirm.ask(f"  Really delete?", default=False):
+            if Confirm.ask("  Really delete?", default=False):
                 db.delete_template(t["question"])
-                console.print(f"  [red]✗ Deleted[/red]")
+                console.print("  [red]✗ Deleted[/red]")
         elif action == "skip":
             break
 
@@ -1641,7 +1786,6 @@ def answer_save(
     that ATS forms render as AI-usage tells. Optionally pbcopies in one step.
     """
     import shutil
-    import subprocess as _sp
 
     if from_file is None and not text:
         console.print("[red]Provide --from-file <path> or --text '...'.[/red]")
@@ -1667,7 +1811,7 @@ def answer_save(
 
     if pbcopy:
         if _copy_file_to_clipboard(target):
-            console.print(f"[cyan]→ on clipboard. Cmd+V in the field, then Enter where you want paragraph breaks.[/cyan]")
+            console.print("[cyan]→ on clipboard. Cmd+V in the field, then Enter where you want paragraph breaks.[/cyan]")
         else:
             console.print("[yellow]pbcopy not found — clipboard skipped (non-macOS?).[/yellow]")
 
@@ -1769,7 +1913,6 @@ def answer_copy(
 ):
     """Load a saved answer onto your clipboard. `jobpilot answer copy extend q1-vetnav`."""
     import shutil
-    import subprocess as _sp
 
     target = _answer_path(company, question)
     if not target.exists():
@@ -1792,7 +1935,7 @@ def answer_copy(
     _copy_file_to_clipboard(target)
     chars = len(target.read_text())
     console.print(f"[cyan]✓ on clipboard[/cyan] · {target.name} · {chars} chars")
-    console.print(f"[dim]Cmd+V in the field, then Enter where you want paragraph breaks.[/dim]")
+    console.print("[dim]Cmd+V in the field, then Enter where you want paragraph breaks.[/dim]")
 
 
 @answer_app.command("list")
@@ -1824,7 +1967,7 @@ def answer_list(
     for r in rows:
         table.add_row(r[0], r[1], str(r[2]), r[3])
     console.print(table)
-    console.print(f"[dim]Copy any of these with: jobpilot answer copy <company> <question>[/dim]")
+    console.print("[dim]Copy any of these with: jobpilot answer copy <company> <question>[/dim]")
 
 
 @answer_app.command("show")
@@ -1841,95 +1984,25 @@ def answer_show(
 
 
 @app.command()
-def psyche(
-    sample: bool = typer.Option(True, "--sample/--no-sample",
-                                help="Show the top scoring breakdown for current queue.json"),
-):
-    """View your work-style profile + how it's scoring real jobs.
-
-    Reads `data/psyche_profile.json`. Edit that file directly to retune.
-    Fork it for your own preferences — JobPilot's psycho-fit dimension
-    (15 of 100 total points) is driven entirely by what's in there.
-    """
-    from jobpilot.core.queue_builder import (
-        _load_psyche_profile, _score_psyche_fit, _load_portal_notes,
-        MOAT_COMPANY_TAGS, PSYCHE_PROFILE_PATH,
-    )
-    from rich.panel import Panel
-    from rich.table import Table
-
-    profile = _load_psyche_profile()
-    user = profile.get("user", "(unset)")
-    dims = profile.get("dimensions", {}) or {}
-
-    console.print(Panel.fit(
-        f"[bold]Psyche profile:[/bold] {user}\n"
-        f"[dim]{PSYCHE_PROFILE_PATH}[/dim]",
-        title="🧠 jobpilot psyche",
-    ))
-
-    if dims:
-        dim_table = Table(title="Dimensions", show_header=True, header_style="bold")
-        dim_table.add_column("Dimension", style="cyan")
-        dim_table.add_column("Value", style="white")
-        for k, v in dims.items():
-            dim_table.add_row(k, str(v))
-        console.print(dim_table)
-
-    loved = profile.get("loved_signals", {}) or {}
-    hated = profile.get("hated_signals", {}) or {}
-    sig_table = Table(title="Signal counts", show_header=True, header_style="bold")
-    sig_table.add_column("Bucket", style="cyan")
-    sig_table.add_column("Loved", style="green")
-    sig_table.add_column("Hated", style="red")
-    for bucket in ("title", "company_or_note", "industry"):
-        sig_table.add_row(
-            bucket,
-            f"{len(loved.get(bucket, []) or [])} tokens",
-            f"{len(hated.get(bucket, []) or [])} tokens",
-        )
-    console.print(sig_table)
-
-    if not sample:
-        return
-
-    queue_path = Path(__file__).parent / "data" / "queue.json"
-    if not queue_path.exists():
-        console.print("[yellow]No queue.json yet — run `jobpilot queue --refresh` first to see scoring in action.[/yellow]")
-        return
-
-    queue = json.loads(queue_path.read_text())
-    queue.sort(key=lambda j: -j.get("psyche_score", 0))
-    top = queue[:8]
-    sample_table = Table(title="Top 8 by Psycho-fit (live queue)", show_header=True, header_style="bold")
-    sample_table.add_column("Psy", style="magenta", width=4)
-    sample_table.add_column("Total", style="cyan", width=6)
-    sample_table.add_column("Company", style="white", max_width=18)
-    sample_table.add_column("Role", style="green", max_width=42)
-    sample_table.add_column("Status", style="yellow", width=10)
-    for j in top:
-        sample_table.add_row(
-            str(j.get("psyche_score", 0)),
-            str(j.get("fit_score", 0)),
-            j["company"],
-            j["title"][:42],
-            j["status"],
-        )
-    console.print(sample_table)
-    console.print(
-        f"[dim]Edit {PSYCHE_PROFILE_PATH} and re-run `jobpilot queue --refresh` "
-        f"to see scoring shift.[/dim]"
-    )
-
-
-@app.command()
 def log(
     company: str = typer.Argument(..., help="Company name (used for dedup)"),
     title: str = typer.Option("", "--title", "-t", help="Role title"),
     url: str = typer.Option("", "--url", "-u", help="Apply URL (used as primary dedup key)"),
-    status: str = typer.Option("applied", "--status", "-s",
-                               help="applied | submitted | rejected | interview | abandoned"),
+    status: str = typer.Option(
+        "applied",
+        "--status",
+        "-s",
+        help=(
+            "applied | outreach | human_reply | screen | interview | offer | "
+            "rejected | withdrawn | no_response"
+        ),
+    ),
     date: Optional[str] = typer.Option(None, "--date", "-d", help="ISO date (defaults to today)"),
+    channel: str = typer.Option(
+        "unknown",
+        "--channel",
+        help="How the role was acquired: direct | referral | recruiter | outreach | unknown",
+    ),
 ):
     """Log an application to the tracker.
 
@@ -1951,6 +2024,33 @@ def log(
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1)
     stats = tracker.get_stats()
+    from jobpilot.core.opportunity_ledger import EVENT_TYPES, OpportunityLedger
+
+    event_type = {
+        "started": "discovered",
+        "submitted": "applied",
+        "abandoned": "withdrawn",
+    }.get(app_row.status, app_row.status)
+    if event_type in EVENT_TYPES:
+        ledger = OpportunityLedger()
+        try:
+            opportunity_id = ledger.upsert_opportunity(
+                app_row.company,
+                app_row.job_title,
+                canonical_url=app_row.job_url,
+            )
+            ledger.append_event(
+                opportunity_id,
+                event_type,
+                app_row.applied_at,
+                "manual-log",
+                {
+                    "acquisition_channel": channel.strip().lower() or "unknown",
+                    "original_status": app_row.status,
+                },
+            )
+        finally:
+            ledger.close()
     console.print(
         f"[green]✓ Tracked: {app_row.company} — {app_row.job_title or '(role)'} "
         f"[{app_row.status}][/green]"

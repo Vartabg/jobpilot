@@ -3,11 +3,13 @@ Tests for analytics.py — CSV export and daily digest report.
 """
 
 import csv
-import pytest
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import patch, MagicMock
-from jobpilot.core.analytics import export_csv, daily_digest
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from jobpilot.core.analytics import _calibration_note, daily_digest, export_csv
 from jobpilot.core.application_tracker import ApplicationTracker
 
 
@@ -125,3 +127,19 @@ class TestDailyDigest:
 
         out = capsys.readouterr().out
         assert "No applications recorded yet" in out
+
+
+class TestCalibrationGuidance:
+
+    def test_sparse_sample_keeps_weights_fixed(self):
+        note = _calibration_note(decided=19, review_eligible=False)
+
+        assert "Weights stay fixed" in note
+        assert "never changes weights automatically" in note
+        assert "Silence is censored" in note
+
+    def test_threshold_only_unlocks_explicit_manual_review(self):
+        note = _calibration_note(decided=20, review_eligible=True)
+
+        assert "eligible for explicit manual review only" in note
+        assert "never changes weights automatically" in note

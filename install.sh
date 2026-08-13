@@ -11,13 +11,64 @@ RED='\033[0;31m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
+JOBPILOT_REPOSITORY="https://github.com/Vartabg/jobpilot.git"
+JOBPILOT_EXPECTED_BRANCH="main"
+
 say()  { printf "${CYAN}▶${NC} %s\n" "$1"; }
 ok()   { printf "${GREEN}✓${NC} %s\n" "$1"; }
 warn() { printf "${YELLOW}⚠${NC}  %s\n" "$1"; }
 die()  { printf "${RED}✗${NC} %s\n" "$1"; exit 1; }
 
+is_canonical_jobpilot_origin() {
+  local origin="${1%/}"
+  case "$origin" in
+    https://github.com/Vartabg/jobpilot|https://github.com/Vartabg/jobpilot.git|\
+    git@github.com:Vartabg/jobpilot|git@github.com:Vartabg/jobpilot.git|\
+    ssh://git@github.com/Vartabg/jobpilot|ssh://git@github.com/Vartabg/jobpilot.git)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+verify_existing_install() {
+  local repo="$1"
+  local origin
+  local branch
+  local worktree_status
+
+  if ! git -C "$repo" rev-parse --is-inside-work-tree &>/dev/null; then
+    die "$repo exists but is not a Git working tree. Move it aside and re-run."
+  fi
+
+  if ! origin="$(git -C "$repo" remote get-url origin 2>/dev/null)"; then
+    die "Existing install has no origin remote. Refusing to update it."
+  fi
+  if ! is_canonical_jobpilot_origin "$origin"; then
+    die "Existing install origin is not the canonical Vartabg/jobpilot repository. Refusing to update it."
+  fi
+
+  if ! branch="$(git -C "$repo" symbolic-ref --quiet --short HEAD)"; then
+    die "Existing install is in detached-HEAD state. Check out main and re-run."
+  fi
+  if [[ "$branch" != "$JOBPILOT_EXPECTED_BRANCH" ]]; then
+    die "Existing install is not on '$JOBPILOT_EXPECTED_BRANCH'. Refusing to update it."
+  fi
+
+  if ! worktree_status="$(git -C "$repo" status --porcelain=v1 --untracked-files=all)"; then
+    die "Could not verify the existing install's working-tree status. Refusing to update it."
+  fi
+  if [[ -n "$worktree_status" ]]; then
+    die "Existing install has local changes or untracked files. Preserve or remove them, then re-run."
+  fi
+}
+
+main() {
+
 echo ""
-printf "${BOLD}JobPilot Installer${NC}\n"
+printf '%bJobPilot Installer%b\n' "$BOLD" "$NC"
 echo "──────────────────────────────────────────"
 echo ""
 
@@ -31,7 +82,6 @@ ok "macOS detected"
 PYTHON=""
 for cmd in python3.12 python3.11 python3; do
   if command -v "$cmd" &>/dev/null; then
-    version=$("$cmd" -c 'import sys; print(sys.version_info[:2])')
     if "$cmd" -c 'import sys; sys.exit(0 if sys.version_info >= (3,11) else 1)' 2>/dev/null; then
       PYTHON="$cmd"
       break
@@ -66,16 +116,20 @@ ok "Git found"
 # ── 4. Clone or update ────────────────────────────────────────────────────────
 INSTALL_DIR="$HOME/jobpilot"
 
-if [[ -d "$INSTALL_DIR/.git" ]]; then
+if [[ -e "$INSTALL_DIR" ]]; then
+  verify_existing_install "$INSTALL_DIR"
   say "Updating existing JobPilot install at $INSTALL_DIR..."
-  git -C "$INSTALL_DIR" pull --quiet
+  git -C "$INSTALL_DIR" pull --ff-only --quiet origin "$JOBPILOT_EXPECTED_BRANCH"
   ok "Updated"
 else
   say "Downloading JobPilot to $INSTALL_DIR..."
-  git clone --quiet https://github.com/Vartabg/jobpilot.git "$INSTALL_DIR"
+  git clone --quiet --branch "$JOBPILOT_EXPECTED_BRANCH" \
+    "$JOBPILOT_REPOSITORY" "$INSTALL_DIR"
   ok "Downloaded"
 fi
 
+# Pull/clone hooks must not leave changes behind before local code is installed.
+verify_existing_install "$INSTALL_DIR"
 cd "$INSTALL_DIR"
 
 # ── 5. Virtual environment ────────────────────────────────────────────────────
@@ -90,12 +144,7 @@ say "Installing JobPilot (this takes about a minute)..."
 pip install -e . --quiet
 ok "JobPilot installed"
 
-# ── 7. Install Chromium for browser automation ────────────────────────────────
-say "Installing browser components..."
-playwright install chromium
-ok "Browser ready"
-
-# ── 8. Shell activation shortcut ─────────────────────────────────────────────
+# ── 7. Shell activation shortcut ─────────────────────────────────────────────
 SHELL_RC=""
 if [[ "$SHELL" == *"zsh"* ]]; then
   SHELL_RC="$HOME/.zshrc"
@@ -116,19 +165,24 @@ fi
 
 # ── Done ──────────────────────────────────────────────────────────────────────
 echo ""
-printf "${GREEN}${BOLD}Installation complete!${NC}\n"
+printf '%b%bInstallation complete!%b\n' "$GREEN" "$BOLD" "$NC"
 echo ""
 echo "── Next steps ──────────────────────────────────────────────────────────"
 echo ""
 echo "  1. Activate JobPilot (do this each time you open a new Terminal window):"
-printf "     ${BOLD}source ~/jobpilot/.venv/bin/activate${NC}\n"
+printf '     %bsource ~/jobpilot/.venv/bin/activate%b\n' "$BOLD" "$NC"
 echo ""
 echo "  2. Set up your profile (just once):"
-printf "     ${BOLD}jobpilot profile --edit${NC}\n"
+printf '     %bjobpilot profile --edit%b\n' "$BOLD" "$NC"
 echo ""
 echo "  3. Run a health check:"
-printf "     ${BOLD}jobpilot doctor${NC}\n"
+printf '     %bjobpilot doctor%b\n' "$BOLD" "$NC"
 echo ""
 echo "  Full guide: https://github.com/Vartabg/jobpilot#your-first-10-minutes"
 echo "────────────────────────────────────────────────────────────────────────"
 echo ""
+}
+
+if [[ -z "${BASH_SOURCE[0]:-}" || "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi

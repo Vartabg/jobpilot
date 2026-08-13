@@ -1,4 +1,4 @@
-"""Regression tests for the Lane-C scorer + psycho-fit + location gate.
+"""Regression tests for the legacy Lane-C scorer and location gate.
 
 All gates are policy-driven (core/policy_config.py). These tests inject a
 fixture policy so they exercise the MECHANISM without depending on anyone's
@@ -6,16 +6,16 @@ personal data/policy.json — a fresh clone (neutral defaults: no kill
 keywords, location gate off) must also behave as asserted below.
 """
 
+import json
+
 import pytest
 
 import jobpilot.core.policy_config as pc
-import jobpilot.core.queue_builder as qb
 from jobpilot.core.policy_config import policy_from_dict
 from jobpilot.core.portal_scanner import PortalJob
 from jobpilot.core.queue_builder import (
     _is_allowed_location,
     _score_job,
-    _score_psyche_fit,
     reset_caches,
 )
 
@@ -53,11 +53,9 @@ FIXTURE_POLICY = {
 
 @pytest.fixture
 def gated_policy(monkeypatch):
-    """Install the fixture policy + neutral psyche/notes caches."""
+    """Install the fixture policy."""
     reset_caches()
     monkeypatch.setattr(pc, "_policy_cache", policy_from_dict(FIXTURE_POLICY))
-    qb._psyche_profile_cache = {"loved_signals": {}, "hated_signals": {}}
-    qb._portal_notes_cache = {}
     yield
     reset_caches()
 
@@ -67,8 +65,6 @@ def neutral_policy(monkeypatch):
     """Install the shipped (neutral) defaults — what a fresh clone gets."""
     reset_caches()
     monkeypatch.setattr(pc, "_policy_cache", policy_from_dict({}))
-    qb._psyche_profile_cache = {"loved_signals": {}, "hated_signals": {}}
-    qb._portal_notes_cache = {}
     yield
     reset_caches()
 
@@ -97,26 +93,13 @@ def test_neutral_policy_kills_no_titles(neutral_policy):
 
 
 def test_founding_fde_in_moat_industry_scores_high(gated_policy):
-    """Founding FDE at a high-moat company should clear ~75.
-
-    Injects a minimal psyche profile via the cache so the test does not depend
-    on `data/psyche_profile.json` existing (it's user-specific and gitignored,
-    so a fresh clone would not have it).
-    """
-    qb._psyche_profile_cache = {
-        "loved_signals": {
-            "title": ["founding", "deployed", "forward deployed", "fde"],
-            "company_or_note": [],
-            "industry": ["logistics_ai", "manufacturing"],
-        },
-        "hated_signals": {"title": [], "company_or_note": [], "industry": []},
-    }
-    score, track, psy = _score_job(_job(
+    """Founding FDE at a high-moat company should clear ~75."""
+    score, track, legacy_compat = _score_job(_job(
         "Founding Forward Deployed Engineer", "HappyRobot", "Remote",
     ))
     assert score >= 75, f"expected ≥75 for founding FDE in high-moat, got {score}"
     assert track == "both"
-    assert psy >= 12, f"psycho-fit should be high for founding/FDE titles, got {psy}"
+    assert legacy_compat == 0
 
 
 def test_location_gate_allows_configured_metros_and_remote(gated_policy):
@@ -197,13 +180,43 @@ def test_policy_company_hq_overrides_builtin_table(gated_policy, monkeypatch):
     assert not _is_allowed_location("Engineer", "HappyRobot", "")
 
 
-def test_psyche_fit_responds_to_loved_signal():
-    """A title carrying a loved signal scores higher than a generic title."""
-    reset_caches()
-    profile = {
-        "loved_signals": {"title": ["founding"], "company_or_note": [], "industry": []},
-        "hated_signals": {"title": [], "company_or_note": [], "industry": []},
-    }
-    loved = _score_psyche_fit("founding forward deployed engineer", "x", None, "", profile)
-    plain = _score_psyche_fit("forward deployed engineer", "x", None, "", profile)
-    assert loved > plain, f"loved ({loved}) should beat plain ({plain})"
+def test_legacy_preference_file_cannot_change_employment_order(
+    gated_policy, monkeypatch, tmp_path
+):
+    """Even an extreme legacy profile cannot reorder employment roles."""
+    import jobpilot.core.work_style as work_style
+
+    legacy_path = tmp_path / "psyche_profile.json"
+    monkeypatch.setattr(work_style, "PSYCHE_PATH", legacy_path)
+    roles = [
+        _job("Forward Deployed Engineer", "HappyRobot", "Remote"),
+        _job("Generic Engineer", "HappyRobot", "Remote"),
+    ]
+
+    def score_with(*, loved: list[str], hated: list[str]):
+        legacy_path.write_text(
+            json.dumps(
+                {
+                    "loved_signals": {"title": loved},
+                    "hated_signals": {"title": hated},
+                }
+            )
+        )
+        work_style._preference_tokens.cache_clear()
+        return [_score_job(role) for role in roles]
+
+    try:
+        favor_generic = score_with(
+            loved=["generic"] * 100,
+            hated=["forward", "deployed"] * 100,
+        )
+        favor_fde = score_with(
+            loved=["forward", "deployed"] * 100,
+            hated=["generic"] * 100,
+        )
+    finally:
+        work_style._preference_tokens.cache_clear()
+
+    assert favor_generic == favor_fde
+    assert favor_generic[0][0] > favor_generic[1][0]
+    assert [compat for _score, _track, compat in favor_generic] == [0, 0]

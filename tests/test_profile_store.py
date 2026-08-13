@@ -5,8 +5,10 @@ Covers edge cases: missing fields, defaults, field mapping, update method.
 """
 
 import json
-import pytest
 from pathlib import Path
+
+import pytest
+
 from jobpilot.core.profile_store import ProfileStore, UserProfile
 
 
@@ -72,7 +74,35 @@ class TestDefaults:
         p = s.load()
         assert isinstance(p, UserProfile)
         assert p.first_name == ""
-        assert p.years_of_experience == 0
+        assert p.country == ""
+        assert p.years_of_experience is None
+        assert p.authorized_to_work is None
+        assert p.requires_sponsorship is None
+
+    def test_preserves_matching_fields_and_domain_experience(self, tmp_path: Path):
+        payload = {
+            "skills": ["systems troubleshooting", "Python"],
+            "target_titles": ["Implementation Engineer"],
+            "years_of_experience": None,
+            "domain_experience": {"field service": 4, "software": None},
+        }
+        (tmp_path / "profile.json").write_text(json.dumps(payload))
+
+        profile_store = ProfileStore(data_dir=tmp_path)
+        profile = profile_store.load()
+        profile_store.save(profile)
+        saved = json.loads((tmp_path / "profile.json").read_text())
+
+        assert profile.skills == payload["skills"]
+        assert profile.target_titles == payload["target_titles"]
+        assert saved["domain_experience"] == payload["domain_experience"]
+
+    def test_zero_years_is_treated_as_unknown(self, tmp_path: Path):
+        (tmp_path / "profile.json").write_text('{"years_of_experience": 0}')
+        profile_store = ProfileStore(data_dir=tmp_path)
+
+        assert profile_store.load().years_of_experience is None
+        assert profile_store.get_field_value("years_experience") == ""
 
 
 class TestCustomAnswers:

@@ -11,7 +11,6 @@ from jobpilot.gigs.core.scrapers.weworkremotely import (
     extract_apply_url_from_listing,
 )
 
-
 # ---- description-based extraction (no network) --------------------------
 
 
@@ -113,6 +112,12 @@ def test_extract_returns_empty_when_no_signal() -> None:
     assert extract_apply_url_from_listing(html) == ""
 
 
+def test_extract_rejects_untrusted_custom_protocol() -> None:
+    html = '<a href="shortcuts://run-shortcut?name=Untrusted">Apply now</a>'
+
+    assert extract_apply_url_from_listing(html) == ""
+
+
 def test_enrich_apply_urls_skips_non_wwr() -> None:
     hn_gig = Gig(id="hn-1", source="hn", title="X", url="https://news.ycombinator.com/item?id=1")
     wwr_gig = Gig(id="wwr-1", source="wwr", title="Y", url="https://weworkremotely.com/x")
@@ -120,7 +125,7 @@ def test_enrich_apply_urls_skips_non_wwr() -> None:
     with patch("jobpilot.gigs.core.scrapers.weworkremotely.requests.get") as get:
         get.return_value.text = '<a href="mailto:jobs@acme.io">Apply</a>'
         get.return_value.raise_for_status = lambda: None
-        out = enrich_apply_urls([hn_gig, wwr_gig])
+        enrich_apply_urls([hn_gig, wwr_gig])
 
     assert hn_gig.apply_url == ""
     assert wwr_gig.apply_url == "mailto:jobs@acme.io"

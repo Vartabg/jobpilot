@@ -1,6 +1,6 @@
 #!/bin/bash
 # JobPilot CLI runner
-# Usage: ./jobpilot doctor | ./jobpilot start
+# Usage: ./jobpilot doctor | ./jobpilot queue --refresh
 
 set -euo pipefail
 

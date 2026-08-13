@@ -2,19 +2,32 @@
 
 from __future__ import annotations
 
-import re
-from dataclasses import dataclass
 from collections.abc import Callable
-from typing import Any, Optional
+from dataclasses import dataclass
+from typing import Any
 
-from jobpilot.core.queue_builder import QueueJob, load_queue
+from jobpilot.core import queue_builder
+from jobpilot.core.queue_builder import QueueJob
 from jobpilot.core.work_style import is_contract_friendly, is_schedule_rigid
 from jobpilot.gigs.core.collect import collect_all
 from jobpilot.gigs.core.dedupe import dedupe_cross_source
 from jobpilot.gigs.core.models import Gig
-from jobpilot.gigs.core.scorer import apply_friction, filter_and_rank
+from jobpilot.gigs.core.scorer import filter_and_rank
 from jobpilot.gigs.core.store import filter_new
 from jobpilot.ui.view_helpers import is_senior_title
+
+_DECISION_RANK = {
+    "apply_now": 4,
+    "stretch": 3,
+    "investigate": 2,
+    "skip": 1,
+}
+_LEGITIMACY_RANK = {
+    "recommend": 4,
+    "review": 3,
+    "hold": 2,
+    "block": 1,
+}
 
 
 @dataclass
@@ -39,9 +52,9 @@ def gig_pay_label(gig: Gig) -> str:
     if gig.pay_hourly_est:
         return f"${gig.pay_hourly_est:.0f}/hr"
     if gig.salary_max and gig.salary_min:
-        return f"${gig.salary_min/1000:.0f}-${gig.salary_max/1000:.0f}K"
+        return f"${gig.salary_min / 1000:.0f}-${gig.salary_max / 1000:.0f}K"
     if gig.salary_max:
-        return f"≤${gig.salary_max/1000:.0f}K"
+        return f"≤${gig.salary_max / 1000:.0f}K"
     return "?"
 
 
@@ -72,15 +85,51 @@ def short_url(url: str, max_len: int = 42) -> str:
     return u[: max_len - 3] + "..."
 
 
+def _evidence_number(value: Any) -> int:
+    """Normalize persisted evidence values without promoting missing data."""
+    if value is None or value == "":
+        return -1
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return -1
+
+
+def _is_apply_ready(job: QueueJob) -> bool:
+    """Delegate to the canonical queue gate and fail closed on malformed rows."""
+    try:
+        return bool(queue_builder.is_apply_ready(job))
+    except Exception:
+        return False
+
+
+def _job_evidence_sort_key(job: QueueJob) -> tuple[int, int, int, int, int, int]:
+    """Rank each evidence axis once, with aggregate fit only as a tie-breaker."""
+    return (
+        _DECISION_RANK.get(str(getattr(job, "decision", "")), 0),
+        _LEGITIMACY_RANK.get(str(getattr(job, "legitimacy_state", "")), 0),
+        _evidence_number(getattr(job, "qualification_lower_bound", None)),
+        _evidence_number(getattr(job, "evidence_coverage", None)),
+        _evidence_number(getattr(job, "work_context_match", None)),
+        _evidence_number(getattr(job, "fit_score", None)),
+    )
+
+
 def load_gigs(
     opts: IncomeViewOptions,
     *,
-    on_progress: Optional[Callable[[str], None]] = None,
+    on_progress: Callable[[str], None] | None = None,
 ) -> tuple[list[Gig], dict[str, Any]]:
     gigs, results = collect_all(on_progress=on_progress)
-    meta: dict[str, Any] = {"sources": [], "collected": len(gigs), "fresh_only": opts.gigs_fresh_only}
+    meta: dict[str, Any] = {
+        "sources": [],
+        "collected": len(gigs),
+        "fresh_only": opts.gigs_fresh_only,
+    }
     for r in results:
-        meta["sources"].append({"name": r.name, "ok": r.ok, "fetched": r.fetched, "error": r.error})
+        meta["sources"].append(
+            {"name": r.name, "ok": r.ok, "fetched": r.fetched, "error": r.error}
+        )
 
     if opts.gigs_fresh_only:
         new_ids = set(filter_new([g.id for g in gigs]))
@@ -100,23 +149,28 @@ def load_gigs(
 
 
 def load_jobs(opts: IncomeViewOptions) -> list[QueueJob]:
-    jobs = [j for j in load_queue() if j.status == "queued"]
+    jobs = [
+        job for job in queue_builder.load_current_slate()
+        if _is_apply_ready(job)
+    ]
     if opts.hide_senior_jobs:
         jobs = [j for j in jobs if not is_senior_title(j.title)]
     if opts.austin:
         jobs = [
-            j for j in jobs
+            j
+            for j in jobs
             if "austin" in (j.location or "").lower()
             or "remote" in (j.location or "").lower()
             or (j.location or "").lower() in {"", "not specified", "united states"}
         ]
-    jobs.sort(key=lambda j: (j.fit_score, j.psyche_score), reverse=True)
+    jobs.sort(key=_job_evidence_sort_key, reverse=True)
     return jobs[: opts.jobs_limit]
 
 
 def load_pipeline_rows(opts: IncomeViewOptions) -> list[Any]:
     try:
         from jobpilot.gigs.core import pipeline
+
         rows = pipeline.parse()
     except Exception:
         return []

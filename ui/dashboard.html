@@ -4,6 +4,27 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#ffffff">
+<meta name="referrer" content="no-referrer">
+<script>
+function consumeRemoteToken() {
+  const url = new URL(window.location.href);
+  const queryToken = url.searchParams.get('token') || '';
+  if (url.searchParams.has('token')) {
+    try {
+      if (queryToken) sessionStorage.setItem('jobpilotRemoteToken', queryToken);
+    } catch (_) {}
+    url.searchParams.delete('token');
+    history.replaceState(history.state, '', url.pathname + url.search + url.hash);
+  }
+  if (queryToken) return queryToken;
+  try {
+    return sessionStorage.getItem('jobpilotRemoteToken') || '';
+  } catch (_) {
+    return '';
+  }
+}
+const remoteToken = consumeRemoteToken();
+</script>
 <title>JobPilot</title>
 <style>
   :root {
@@ -424,48 +445,8 @@
   tr.rejected td { color: var(--quiet); background: #fff5f5; }
   tr.skipped td { color: var(--quiet); background: #fafbfc; }
 
-  .score-cell {
-    width: 112px;
-  }
-
-  .score-stack {
-    display: grid;
-    gap: 5px;
-  }
-
-  .score-line {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-  }
-
-  .score {
-    min-width: 38px;
-    font-weight: 760;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .meter {
-    width: 54px;
-    height: 5px;
-    border-radius: 999px;
-    background: var(--surface-2);
-    overflow: hidden;
-  }
-
-  .meter span {
-    display: block;
-    height: 100%;
-    background: var(--accent);
-  }
-
-  .psyche {
-    color: var(--muted);
-    font-size: 11px;
-  }
-
   .company-cell {
-    width: 190px;
+    width: 170px;
   }
 
   .company {
@@ -483,20 +464,73 @@
     line-height: 1.25;
   }
 
-  .signals {
-    display: flex;
-    gap: 6px;
-    flex-wrap: wrap;
-    margin-top: 7px;
+  .role-cell {
+    width: 190px;
   }
 
-  .signal {
+  .evidence-cell {
+    padding-top: 9px;
+    padding-bottom: 9px;
+  }
+
+  .evidence-card {
+    margin: 0;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 9px 14px;
     border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 10px;
+    background: var(--surface);
+  }
+
+  .evidence-item {
+    min-width: 0;
+  }
+
+  .evidence-item.wide {
+    grid-column: 1 / -1;
+  }
+
+  .evidence-item dt {
+    color: var(--quiet);
+    font-size: 10px;
+    font-weight: 760;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .evidence-item dd {
+    margin: 3px 0 0;
+    color: var(--ink);
+    font-size: 12px;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+  }
+
+  .decision-badge {
+    display: inline-block;
+    border: 1px solid var(--line-strong);
     border-radius: 999px;
     padding: 2px 7px;
-    color: var(--muted);
-    font-size: 11px;
-    background: var(--surface);
+    background: var(--bg);
+    font-weight: 720;
+  }
+
+  .account-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .account-list li {
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 1px 6px;
+    background: var(--bg);
   }
 
   .alts {
@@ -506,14 +540,14 @@
   }
 
   .status {
-    width: 92px;
+    width: 82px;
     font-size: 12px;
     color: var(--muted);
     text-transform: capitalize;
   }
 
   .row-actions {
-    width: 248px;
+    width: 210px;
   }
 
   .row-actions .wrap {
@@ -563,16 +597,25 @@
   }
 
   @media (forced-colors: active) {
-    button, a.button, .chip, .table-shell, tr { border: 1px solid ButtonText; }
+    button, a.button, .chip, .table-shell, .evidence-card, .decision-badge,
+    .account-list li, tr { border: 1px solid ButtonText; }
+  }
+
+  @media (min-width: 901px) and (max-width: 1180px) {
+    .evidence-card { grid-template-columns: 1fr; }
+    .evidence-item.wide { grid-column: auto; }
+    .company-cell { width: 150px; }
+    .role-cell { width: 170px; }
+    .row-actions { width: 150px; }
   }
 
   @media (max-width: 900px) {
     body { overflow-x: hidden; }
-    .shell { display: block; width: 100vw; overflow-x: hidden; }
+    .shell { display: block; width: 100%; overflow-x: hidden; }
     .side {
       position: static;
       height: auto;
-      width: 100vw;
+      width: 100%;
       border-right: 0;
       border-bottom: 1px solid var(--line);
       padding: 16px;
@@ -584,7 +627,7 @@
     }
     .side-section { display: none; }
     .nav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    main { width: 100vw; padding: 18px 14px 32px; }
+    main { width: 100%; padding: 18px 14px 32px; }
     .subtitle { max-width: 100%; overflow-wrap: break-word; }
     main, .side, .toolbar, .metric, .table-shell, tr {
       max-width: 100%;
@@ -623,7 +666,9 @@
       border-bottom: 0;
       padding: 10px 12px;
     }
-    .score-cell, .company-cell, .status, .row-actions { width: 100%; }
+    .company-cell, .role-cell, .evidence-cell, .status, .row-actions { width: 100%; }
+    .evidence-card { grid-template-columns: 1fr; }
+    .evidence-item.wide { grid-column: auto; }
     .row-actions .wrap {
       display: grid;
       grid-template-columns: 1fr;
@@ -648,7 +693,7 @@
     </div>
 
     <nav class="nav" aria-label="Application status filters">
-      <button type="button" class="active" aria-pressed="true" data-filter="queued" onclick="setFilter('queued')"><span>Targets</span><span class="nav-count" id="n-queued">0</span></button>
+      <button type="button" class="active" aria-pressed="true" data-filter="queued" onclick="setFilter('queued')"><span>Ready</span><span class="nav-count" id="n-queued">0</span></button>
       <button type="button" aria-pressed="false" data-filter="viewing" onclick="setFilter('viewing')"><span>Open</span><span class="nav-count" id="n-viewing">0</span></button>
       <button type="button" aria-pressed="false" data-filter="applied" onclick="setFilter('applied')"><span>Applied</span><span class="nav-count" id="n-applied">0</span></button>
       <button type="button" aria-pressed="false" data-filter="interview" onclick="setFilter('interview')"><span>Interview</span><span class="nav-count" id="n-interview">0</span></button>
@@ -671,26 +716,25 @@
     <div class="topbar">
       <div>
         <h1>Company-first targets</h1>
-        <div class="subtitle" id="subtitle">Ranked for autonomy, builder fit, location, and personality.</div>
+        <div class="subtitle" id="subtitle">Ranked by role decision, qualification evidence, posting evidence, and freshness.</div>
       </div>
       <div class="actions">
         <button onclick="reload()">Refresh</button>
         <button onclick="focusQueue()">Focus</button>
         <button onclick="rescan()" class="primary">Rescan</button>
-        <a class="button subtle" href="/install">Fill Button</a>
       </div>
     </div>
 
     <section class="metrics" aria-label="Queue summary">
-      <div class="metric"><div class="num" id="m-targets">0</div><div class="label">target companies</div></div>
-      <div class="metric"><div class="num" id="m-hidden">0</div><div class="label">duplicates hidden</div></div>
+      <div class="metric"><div class="num" id="m-targets">0</div><div class="label">ready companies</div></div>
+      <div class="metric"><div class="num" id="m-hidden">0</div><div class="label">roles to investigate</div></div>
       <div class="metric"><div class="num" id="m-tracked">0</div><div class="label">tracked apps</div></div>
       <div class="metric"><div class="num" id="m-total">0</div><div class="label">roles scanned</div></div>
     </section>
 
     <section class="toolbar" aria-label="Job filters">
       <label class="sr-only" for="search">Search job targets</label>
-      <input id="search" class="search" type="search" placeholder="Search company, role, or signal" oninput="render()">
+      <input id="search" class="search" type="search" placeholder="Search company, role, evidence, or gap" oninput="render()">
       <label class="switch"><input id="all-roles" type="checkbox" aria-label="Show every role" onchange="render()"> Show every role</label>
     </section>
 
@@ -707,10 +751,14 @@
         <label class="sr-only" for="log-status">Application status</label>
         <select id="log-status" name="status">
           <option value="applied">Applied</option>
+          <option value="outreach">Outreach sent</option>
+          <option value="human_reply">Human reply</option>
+          <option value="screen">Screen</option>
           <option value="interview">Interview</option>
+          <option value="offer">Offer</option>
           <option value="rejected">Rejected</option>
-          <option value="submitted">Submitted</option>
-          <option value="abandoned">Abandoned</option>
+          <option value="withdrawn">Withdrawn</option>
+          <option value="no_response">No response (explicit)</option>
         </select>
         <label class="sr-only" for="log-url">Job URL</label>
         <input id="log-url" name="url" placeholder="URL optional">
@@ -723,14 +771,14 @@
 
     <section class="table-shell">
       <table>
-        <caption class="sr-only">Job targets ranked by fit with application actions</caption>
+        <caption class="sr-only">Job targets with evidence, verification, and gated application actions</caption>
         <thead>
           <tr>
-            <th class="score-cell">Fit</th>
-            <th class="company-cell">Company</th>
-            <th>Recommended Role</th>
-            <th class="status">Status</th>
-            <th class="row-actions">Action</th>
+            <th class="company-cell" scope="col">Company</th>
+            <th class="role-cell" scope="col">Role</th>
+            <th scope="col">Evidence</th>
+            <th class="status" scope="col">Status</th>
+            <th class="row-actions" scope="col">Action</th>
           </tr>
         </thead>
         <tbody id="rows">
@@ -750,9 +798,18 @@ let draft = {};
 let applications = { stats: {}, status_counts: {}, recent: [] };
 let filter = 'queued';
 
-function api(path, opts = {}) {
-  return fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts })
-    .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)));
+async function api(path, opts = {}) {
+  const headers = new Headers(opts.headers || {});
+  headers.set('Content-Type', 'application/json');
+  if (remoteToken) headers.set('X-JobPilot-Token', remoteToken);
+  const response = await fetch(path, { ...opts, headers });
+  const payload = await response.json().catch(() => ({}));
+  if (response.ok) return payload;
+  const detail = payload && payload.detail;
+  const message = typeof detail === 'string'
+    ? detail
+    : [detail && detail.message, detail && detail.next_action].filter(Boolean).join(' ');
+  throw new Error(message || `HTTP ${response.status}`);
 }
 
 function escape(s) {
@@ -761,16 +818,103 @@ function escape(s) {
   }[c]));
 }
 
+function safePostingUrl(value) {
+  try {
+    const parsed = new URL(String(value || ''));
+    return parsed.protocol === 'https:' ? parsed.href : '';
+  } catch (_error) {
+    return '';
+  }
+}
+
 function companyKey(job) {
   return String(job.company || '').trim().toLowerCase();
 }
 
-function roleScore(job) {
-  return Number(job.fit_score || 0) + Number(job.psyche_score || 0) * 2;
+const VERIFICATION_TTL_MS = 24 * 60 * 60 * 1000;
+const DECISION_RANK = Object.freeze({ apply_now: 4, stretch: 3, investigate: 2, skip: 1 });
+const LEGITIMACY_RANK = Object.freeze({ recommend: 4, review: 3, hold: 2, block: 1 });
+
+function evidenceNumber(value) {
+  if (value === null || value === undefined || value === '') return -1;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : -1;
+}
+
+function compareEvidence(a, b) {
+  const aRanks = [
+    DECISION_RANK[a.decision] || 0,
+    LEGITIMACY_RANK[a.legitimacy_state] || 0,
+    evidenceNumber(a.qualification_lower_bound),
+    evidenceNumber(a.evidence_coverage),
+    evidenceNumber(a.work_context_match),
+    evidenceNumber(a.fit_score),
+  ];
+  const bRanks = [
+    DECISION_RANK[b.decision] || 0,
+    LEGITIMACY_RANK[b.legitimacy_state] || 0,
+    evidenceNumber(b.qualification_lower_bound),
+    evidenceNumber(b.evidence_coverage),
+    evidenceNumber(b.work_context_match),
+    evidenceNumber(b.fit_score),
+  ];
+  for (let index = 0; index < aRanks.length; index += 1) {
+    if (aRanks[index] !== bRanks[index]) return bRanks[index] - aRanks[index];
+  }
+  return String(a.title || '').localeCompare(String(b.title || ''));
+}
+
+function verifiedTimestamp(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  const hasZone = /(?:z|[+-]\d\d:\d\d)$/i.test(raw);
+  const timestamp = Date.parse(hasZone ? raw : `${raw}Z`);
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function verificationInfo(value) {
+  const timestamp = verifiedTimestamp(value);
+  if (timestamp === null) {
+    return { current: false, exact: '', relative: 'Not verified' };
+  }
+  const age = Date.now() - timestamp;
+  const exact = new Date(timestamp).toLocaleString();
+  if (age < 0) {
+    return { current: false, exact, relative: 'Future timestamp — refresh required' };
+  }
+  let relative;
+  if (age < 60 * 1000) {
+    relative = 'Just now';
+  } else if (age < 60 * 60 * 1000) {
+    const minutes = Math.floor(age / (60 * 1000));
+    relative = `${minutes} ${minutes === 1 ? 'minute' : 'minutes'} ago`;
+  } else if (age < 24 * 60 * 60 * 1000) {
+    const hours = Math.floor(age / (60 * 60 * 1000));
+    relative = `${hours} ${hours === 1 ? 'hour' : 'hours'} ago`;
+  } else {
+    const days = Math.floor(age / (24 * 60 * 60 * 1000));
+    relative = `${days} ${days === 1 ? 'day' : 'days'} ago`;
+  }
+  const current = age <= VERIFICATION_TTL_MS;
+  return {
+    current,
+    exact,
+    relative: current ? relative : `${relative} — refresh required`,
+  };
+}
+
+function isApplyReady(job) {
+  return ['queued', 'viewing'].includes(job.status)
+    && job.assessment_status === 'assessed'
+    && job.decision === 'apply_now'
+    && job.legitimacy_state === 'recommend'
+    && verificationInfo(job.verified_at).current;
 }
 
 function statusJobs(status) {
-  return jobs.filter(j => status === 'all' ? true : j.status === status);
+  if (status === 'all') return jobs;
+  if (status === 'queued') return jobs.filter(isApplyReady);
+  return jobs.filter(j => j.status === status);
 }
 
 function groupedBest(items) {
@@ -781,7 +925,7 @@ function groupedBest(items) {
     groups.get(key).push(job);
   }
   return [...groups.values()].map(group => {
-    group.sort((a, b) => roleScore(b) - roleScore(a) || Number(b.fit_score || 0) - Number(a.fit_score || 0));
+    group.sort(compareEvidence);
     const best = group[0];
     best._alternatives = group.slice(1);
     best._companyRoleCount = jobs.filter(j => companyKey(j) === companyKey(best)).length;
@@ -792,12 +936,19 @@ function groupedBest(items) {
 function visibleJobs() {
   const q = (document.getElementById('search')?.value || '').trim().toLowerCase();
   const showAll = document.getElementById('all-roles')?.checked;
-  let view = statusJobs(filter);
+  let view = filter === 'queued' && showAll
+    ? jobs.filter(j => j.status === 'queued')
+    : statusJobs(filter);
   if (q) {
     view = view.filter(j => [
       j.company,
       j.title,
       j.location,
+      j.decision,
+      j.legitimacy_state,
+      j.evidence_grade,
+      j.biggest_gap,
+      ...(Array.isArray(j.matched_accounts) ? j.matched_accounts : []),
       ...(j.keywords || [])
     ].join(' ').toLowerCase().includes(q));
   }
@@ -805,7 +956,7 @@ function visibleJobs() {
   view.sort((a, b) => {
     const order = { interview: 0, viewing: 1, queued: 2, applied: 3, skipped: 4, rejected: 5 };
     const statusDelta = (order[a.status] ?? 9) - (order[b.status] ?? 9);
-    return statusDelta || roleScore(b) - roleScore(a) || String(a.company).localeCompare(String(b.company));
+    return statusDelta || compareEvidence(a, b) || String(a.company).localeCompare(String(b.company));
   });
   return view;
 }
@@ -814,16 +965,8 @@ function uniqueCompanyCount(status) {
   return new Set(statusJobs(status).map(companyKey).filter(Boolean)).size;
 }
 
-function duplicateCount() {
-  const queued = statusJobs('queued');
-  const unique = new Set(queued.map(companyKey).filter(Boolean)).size;
-  return Math.max(0, queued.length - unique);
-}
-
-function avgPsyche() {
-  const targets = groupedBest(statusJobs('queued'));
-  if (!targets.length) return 0;
-  return Math.round(targets.reduce((sum, j) => sum + Number(j.psyche_score || 0), 0) / targets.length);
+function investigateCount() {
+  return jobs.filter(j => ['queued', 'viewing'].includes(j.status) && !isApplyReady(j)).length;
 }
 
 function updateStats() {
@@ -834,7 +977,7 @@ function updateStats() {
   document.getElementById('n-rejected').textContent = uniqueCompanyCount('rejected');
   document.getElementById('n-skipped').textContent = uniqueCompanyCount('skipped');
   document.getElementById('m-targets').textContent = uniqueCompanyCount('queued');
-  document.getElementById('m-hidden').textContent = duplicateCount();
+  document.getElementById('m-hidden').textContent = investigateCount();
   document.getElementById('m-tracked').textContent = applications.stats?.total || 0;
   document.getElementById('m-total').textContent = jobs.length;
 }
@@ -849,62 +992,122 @@ function setFilter(next) {
   render();
 }
 
-function signalText(job) {
-  const signals = [];
-  if ((job.psyche_score || 0) >= 12) signals.push('personality fit');
-  if (String(job.title || '').toLowerCase().includes('forward deployed')) signals.push('forward deployed');
-  if (String(job.title || '').toLowerCase().includes('founding')) signals.push('founding');
-  if ((job.keywords || []).includes('ai')) signals.push('AI');
-  if ((job.keywords || []).includes('solutions')) signals.push('solutions');
-  if ((job.keywords || []).includes('field')) signals.push('field');
-  return [...new Set(signals.concat((job.keywords || []).slice(0, 3)))].slice(0, 5);
+function readableLabel(value, fallback = 'Unknown') {
+  const normalized = String(value || '').trim().replaceAll('_', ' ');
+  return normalized ? normalized.charAt(0).toUpperCase() + normalized.slice(1) : fallback;
+}
+
+function axisText(value) {
+  const number = evidenceNumber(value);
+  return number < 0 ? 'Unknown' : `${Math.round(number)} / 100`;
+}
+
+function coverageText(value) {
+  const number = evidenceNumber(value);
+  return number < 0 ? 'Unknown' : `${Math.round(number)}%`;
+}
+
+function evidenceCardHtml(job) {
+  const verification = verificationInfo(job.verified_at);
+  const verificationHtml = verification.exact
+    ? `<time datetime="${escape(job.verified_at)}" aria-label="Verified ${escape(verification.relative)}; ${escape(verification.exact)}">${escape(verification.relative)}</time>`
+    : '<span>Not verified</span>';
+  const matchedAccounts = Array.isArray(job.matched_accounts)
+    ? job.matched_accounts.filter(account => String(account || '').trim())
+    : [];
+  const accountsHtml = matchedAccounts.length
+    ? `<ul class="account-list">${matchedAccounts.map(account => `<li>${escape(account)}</li>`).join('')}</ul>`
+    : 'None linked';
+  const investigationReasons = [
+    ...(Array.isArray(job.legitimacy_reasons) ? job.legitimacy_reasons : []),
+    job.suppression_reason || '',
+  ].filter(reason => String(reason || '').trim());
+  const reasonsHtml = investigationReasons.length
+    ? investigationReasons.map(readableLabel).map(escape).join('; ')
+    : 'None recorded';
+  return `
+    <dl class="evidence-card" aria-label="Evidence for ${escape(job.company)} ${escape(job.title)}">
+      <div class="evidence-item">
+        <dt>Decision</dt>
+        <dd><span class="decision-badge">${escape(readableLabel(job.decision))}</span></dd>
+      </div>
+      <div class="evidence-item">
+        <dt>Qualification floor</dt>
+        <dd>${escape(axisText(job.qualification_lower_bound))}</dd>
+      </div>
+      <div class="evidence-item">
+        <dt>Work-context evidence</dt>
+        <dd>${escape(axisText(job.work_context_match))}</dd>
+      </div>
+      <div class="evidence-item">
+        <dt>Evidence coverage</dt>
+        <dd>${escape(coverageText(job.evidence_coverage))}</dd>
+      </div>
+      <div class="evidence-item">
+        <dt>Posting evidence state</dt>
+        <dd>${escape(readableLabel(job.legitimacy_state))}</dd>
+      </div>
+      <div class="evidence-item">
+        <dt>Posting evidence grade</dt>
+        <dd>${escape(String(job.evidence_grade || 'Unknown').toUpperCase())}</dd>
+      </div>
+      <div class="evidence-item wide">
+        <dt>Verification age</dt>
+        <dd>${verificationHtml}</dd>
+      </div>
+      <div class="evidence-item wide">
+        <dt>Matched accounts</dt>
+        <dd>${accountsHtml}</dd>
+      </div>
+      <div class="evidence-item wide">
+        <dt>Biggest gap</dt>
+        <dd>${escape(job.biggest_gap || 'Not recorded')}</dd>
+      </div>
+      <div class="evidence-item wide">
+        <dt>Investigation reason</dt>
+        <dd>${reasonsHtml}</dd>
+      </div>
+    </dl>
+  `;
 }
 
 function actionHtml(job) {
-  const context = `${escape(job.company)} ${escape(job.title)}`;
-  if (job.status === 'applied') {
-    return `<button class="subtle" aria-label="Undo applied status for ${context}" onclick="resetJob('${job.id}')">Undo</button>`;
+  const context = escape(`${job.company || ''} ${job.title || ''}`.trim());
+  const postingUrl = safePostingUrl(job.url);
+  if (!postingUrl) {
+    return '<span class="button" aria-disabled="true">Posting URL unavailable</span>';
+  }
+  if (!isApplyReady(job)) {
+    return `<a class="button" aria-label="Investigate ${context} posting; opens in a new tab" href="${escape(postingUrl)}" target="_blank" rel="noopener noreferrer">Investigate<span class="sr-only"> (opens in a new tab)</span></a>`;
   }
   if (job.status === 'viewing') {
     return `
       <button class="good" aria-label="Mark ${context} applied" onclick="markApplied('${job.id}')">Applied</button>
-      <a class="button subtle" aria-label="Reopen ${context}" href="${escape(job.url)}" target="_blank" rel="noopener" onclick="openJob('${job.id}', false)">Reopen</a>
+      <a class="button subtle" aria-label="Reopen ${context}; opens in a new tab" href="${escape(postingUrl)}" target="_blank" rel="noopener noreferrer">Reopen<span class="sr-only"> (opens in a new tab)</span></a>
       <button class="danger" aria-label="Return ${context} to queue" onclick="resetJob('${job.id}')">Queue</button>
     `;
   }
-  if (job.status === 'skipped' || job.status === 'rejected') {
-    return `<button class="subtle" aria-label="Return ${context} to queue" onclick="resetJob('${job.id}')">Queue</button>`;
-  }
   return `
-    <a class="button primary" aria-label="Open ${context}" href="${escape(job.url)}" target="_blank" rel="noopener" onclick="openJob('${job.id}', true)">Open</a>
+    <a class="button primary" aria-label="Open ${context} to apply; opens in a new tab" href="${escape(postingUrl)}" target="_blank" rel="noopener noreferrer" onclick="openJob('${job.id}', true)">Open to apply<span class="sr-only"> (opens in a new tab)</span></a>
     <button class="good" aria-label="Mark ${context} applied" onclick="markApplied('${job.id}')">Applied</button>
     <button class="danger" aria-label="Skip ${context}" onclick="skipJob('${job.id}')">Skip</button>
   `;
 }
 
 function rowHtml(job) {
-  const signals = signalText(job).map(s => `<span class="signal">${escape(s)}</span>`).join('');
   const altCount = job._alternatives?.length || Math.max(0, Number(job._companyRoleCount || 1) - 1);
   const altText = altCount ? `<div class="alts">${altCount} alternate ${altCount === 1 ? 'role' : 'roles'} hidden</div>` : '';
-  const fit = Math.max(0, Math.min(100, Number(job.fit_score || 0)));
-  const psyche = Math.max(0, Math.min(15, Number(job.psyche_score || 0)));
   return `
     <tr class="${escape(job.status || '')}">
-      <td class="score-cell">
-        <div class="score-stack">
-          <div class="score-line"><span class="score">${fit}</span><span class="meter" role="progressbar" aria-label="Fit score" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${fit}"><span style="width:${fit}%"></span></span></div>
-          <div class="psyche">personality ${psyche}/15</div>
-        </div>
-      </td>
       <td class="company-cell">
         <div class="company">${escape(job.company)}</div>
         <div class="meta">${escape(job.portal || '')} · ${escape(job.location || 'Location unknown')}</div>
       </td>
-      <td>
+      <td class="role-cell">
         <div class="role">${escape(job.title)}</div>
-        <div class="signals">${signals}</div>
         ${altText}
       </td>
+      <td class="evidence-cell">${evidenceCardHtml(job)}</td>
       <td class="status">${escape(job.status || 'queued')}</td>
       <td class="row-actions"><div class="wrap">${actionHtml(job)}</div></td>
     </tr>
@@ -1029,6 +1232,7 @@ async function logExternal(event) {
     status: document.getElementById('log-status').value,
     url: document.getElementById('log-url').value.trim(),
     source: 'dashboard',
+    acquisition_channel: 'unknown',
   };
   if (!payload.company) {
     toast('Company is required', 'error');

@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from datetime import date, datetime
-from typing import Callable, Optional
 
 from rich import box
 from rich.console import Console
@@ -18,9 +18,10 @@ from jobpilot.core.application_tracker import get_application_tracker
 from jobpilot.core.config import DEFAULT_SERVE_PORT
 from jobpilot.core.profile_store import get_profile_store
 from jobpilot.core.queue_builder import QueueJob
-from jobpilot.gigs.core.models import Gig
 from jobpilot.core.work_style import is_contract_friendly, is_schedule_rigid
+from jobpilot.gigs.core.models import Gig
 from jobpilot.gigs.core.scorer import apply_friction
+from jobpilot.ui.center_panes import _outreach_packages
 from jobpilot.ui.hud_actions import (
     copy_text,
     draft_gig_proposal,
@@ -43,9 +44,13 @@ from jobpilot.ui.income_data import (
     pipeline_summary,
     short_url,
 )
-from jobpilot.ui.view_helpers import check_chrome, check_dashboard, materials_ready, score_bar
-from jobpilot.ui.center_panes import _outreach_packages
 from jobpilot.ui.terminal_keys import osc8_link, raw_stdin, read_key
+from jobpilot.ui.view_helpers import (
+    check_chrome,
+    check_dashboard,
+    materials_ready,
+    score_bar,
+)
 
 AUSTIN_ARRIVAL = date(2026, 6, 30)
 KEY_HELP = (
@@ -134,12 +139,63 @@ def _row_heat_style(score: int, *, selected: bool) -> str:
     return base
 
 
+def _evidence_number(value: object) -> int:
+    """Normalize persisted evidence values without promoting missing data."""
+    if value is None or value == "":
+        return -1
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return -1
+
+
+def _readable_label(value: object, fallback: str = "unknown") -> str:
+    normalized = str(value or "").strip().replace("_", " ")
+    return normalized or fallback
+
+
+def _axis_text(value: object, *, compact: bool = False) -> str:
+    number = _evidence_number(value)
+    if number < 0:
+        return "?" if compact else "unknown"
+    return str(number) if compact else f"{number}/100"
+
+
+def _coverage_text(value: object) -> str:
+    number = _evidence_number(value)
+    return "?" if number < 0 else f"{number}%"
+
+
+def _legitimacy_text(job: QueueJob) -> str:
+    grade = str(getattr(job, "evidence_grade", "") or "?").upper()
+    state = _readable_label(getattr(job, "legitimacy_state", ""))
+    return f"{grade}/{state}"
+
+
+def _evidence_note(job: QueueJob, *, compact: bool = False) -> str:
+    gap = str(getattr(job, "biggest_gap", "") or "").strip()
+    if gap:
+        prefix = "gap: " if compact else "Biggest gap: "
+        return f"{prefix}{gap}"
+
+    accounts = getattr(job, "matched_accounts", [])
+    if isinstance(accounts, (list, tuple)):
+        account = next(
+            (str(item).strip() for item in accounts if str(item).strip()), ""
+        )
+        if account:
+            prefix = "match: " if compact else "Matched account: "
+            return f"{prefix}{account}"
+    return "evidence: none" if compact else "Evidence note: none recorded"
+
+
 def _apply_text_filter_gigs(gigs: list[Gig], filt: str) -> list[Gig]:
     q = (filt or "").strip().lower()
     if not q:
         return gigs
     return [
-        g for g in gigs
+        g
+        for g in gigs
         if q in (g.company or "").lower()
         or q in (g.title or "").lower()
         or q in (g.source or "").lower()
@@ -151,7 +207,8 @@ def _apply_text_filter_jobs(jobs: list[QueueJob], filt: str) -> list[QueueJob]:
     if not q:
         return jobs
     return [
-        j for j in jobs
+        j
+        for j in jobs
         if q in j.company.lower()
         or q in j.title.lower()
         or q in (j.location or "").lower()
@@ -167,7 +224,7 @@ def _clamp_index(index: int, length: int) -> int:
 def load_hud_data(
     opts: IncomeViewOptions,
     *,
-    on_progress: Optional[Callable[[str], None]] = None,
+    on_progress: Callable[[str], None] | None = None,
 ) -> HudData:
     gigs, gigs_meta = load_gigs(opts, on_progress=on_progress)
     jobs = load_jobs(opts)
@@ -230,7 +287,7 @@ def _header_panel(
         line2 = (
             f"Viewing [bold]{list_name}[/bold]{watch}  ·  "
             f"[bold]{shown}[/bold] new gigs  ·  "
-            f"[bold]{len(data.jobs)}[/bold] jobs  ·  "
+            f"[bold]{len(data.jobs)}[/bold] apply-ready jobs  ·  "
             f"[bold]{sum(data.pipe_counts.values())}[/bold] in progress{new_bit}{filt}"
         )
         outreach = _outreach_packages()
@@ -254,7 +311,7 @@ def _header_panel(
         line2 = (
             f"[dim]{mode}[/dim]  ·  "
             f"gigs [bold]{shown}[/]/{fresh} fresh{new_bit}  ·  "
-            f"jobs [bold]{len(data.jobs)}[/] queued  ·  "
+            f"jobs [bold]{len(data.jobs)}[/] apply-ready  ·  "
             f"pipeline [bold]{sum(data.pipe_counts.values())}[/] active  ·  "
             f"[dim]floor $30/hr{filt}[/dim]"
         )
@@ -262,7 +319,7 @@ def _header_panel(
 
 
 def _gigs_table(gigs: list[Gig], state: HudState, *, plain: bool = False) -> Table:
-    title = f"Contract gigs ({len(gigs)})" if plain else f"Contract gigs ({len(gigs)})"
+    title = f"Contract gigs ({len(gigs)})"
     t = Table(
         title=title,
         box=box.SIMPLE_HEAD,
@@ -329,7 +386,11 @@ def _gigs_table(gigs: list[Gig], state: HudState, *, plain: bool = False) -> Tab
 
 def _jobs_table(jobs: list[QueueJob], state: HudState, *, plain: bool = False) -> Table:
     t = Table(
-        title=f"Full-time & backup jobs ({len(jobs)})" if plain else f"ATS backup ({len(jobs)})",
+        title=(
+            f"Apply-ready full-time jobs ({len(jobs)})"
+            if plain
+            else f"Apply-ready ATS backup ({len(jobs)})"
+        ),
         box=box.SIMPLE_HEAD,
         expand=True,
         show_lines=False,
@@ -338,58 +399,46 @@ def _jobs_table(jobs: list[QueueJob], state: HudState, *, plain: bool = False) -
     t.add_column("", width=1, no_wrap=True)
     t.add_column("#", width=3, justify="right", style="dim")
     if plain:
-        t.add_column("Match", width=13, no_wrap=True)
-        t.add_column("Company", max_width=12, no_wrap=True)
-        t.add_column("Role", style="green", max_width=22, no_wrap=True)
-        t.add_column("Location", max_width=14, style="magenta", no_wrap=True)
-        t.add_column("Culture", width=7, justify="right")
-        t.add_column("Kit", width=6, justify="center")
+        t.add_column("Company", max_width=10, no_wrap=True)
+        t.add_column("Role", style="green", max_width=18, no_wrap=True)
+        t.add_column("Decision", max_width=9, no_wrap=True)
+        t.add_column("Qual", width=4, justify="right", no_wrap=True)
+        t.add_column("Cover", width=5, justify="right", no_wrap=True)
+        t.add_column("Posting", max_width=12, no_wrap=True)
+        t.add_column("Evidence", max_width=18, style="dim", no_wrap=True)
     else:
-        t.add_column("Fit", width=13, no_wrap=True)
-        t.add_column("Co", max_width=11, no_wrap=True)
-        t.add_column("Title", style="green", max_width=22, no_wrap=True)
-        t.add_column("Loc", max_width=14, style="magenta", no_wrap=True)
-        t.add_column("Psy", width=3, justify="right")
-        t.add_column("Mat", width=3, justify="center")
-        t.add_column("ID", width=8, style="dim", no_wrap=True)
+        t.add_column("Co", max_width=10, no_wrap=True)
+        t.add_column("Title", style="green", max_width=18, no_wrap=True)
+        t.add_column("Dec", max_width=9, no_wrap=True)
+        t.add_column("Q", width=3, justify="right", no_wrap=True)
+        t.add_column("Cov", width=4, justify="right", no_wrap=True)
+        t.add_column("Post", max_width=12, no_wrap=True)
+        t.add_column("Evidence", max_width=18, style="dim", no_wrap=True)
     for i, j in enumerate(jobs):
         selected = state.lane == "job" and i == state.job_index
-        row_style = _row_heat_style(j.fit_score, selected=selected)
+        qualification = max(0, _evidence_number(j.qualification_lower_bound))
+        row_style = _row_heat_style(qualification, selected=selected)
         marker = Text("▶" if selected else " ", style="bold cyan")
-        if plain:
-            kit = "Ready" if materials_ready(j.company) else "—"
-            culture = f"{j.psyche_score}/15"
-            t.add_row(
-                marker,
-                str(i + 1),
-                score_bar(j.fit_score, width=8),
-                j.company[:12],
-                j.title[:22],
-                (j.location or "—")[:14],
-                culture,
-                kit,
-                style=row_style or None,
-            )
-        else:
-            mat = "✓" if materials_ready(j.company) else "·"
-            t.add_row(
-                marker,
-                str(i + 1),
-                score_bar(j.fit_score, width=8),
-                j.company[:11],
-                j.title[:22],
-                (j.location or "—")[:14],
-                str(j.psyche_score),
-                mat,
-                j.id,
-                style=row_style or None,
-            )
+        t.add_row(
+            marker,
+            str(i + 1),
+            j.company[:10],
+            j.title[:18],
+            _readable_label(j.decision),
+            _axis_text(j.qualification_lower_bound, compact=True),
+            _coverage_text(j.evidence_coverage),
+            _legitimacy_text(j),
+            _evidence_note(j, compact=True)[:18],
+            style=row_style or None,
+        )
     return t
 
 
 def _pipeline_table(rows, *, plain: bool = False) -> Table:
     t = Table(
-        title=f"Applications in progress ({len(rows)})" if plain else f"Pipeline ({len(rows)})",
+        title=f"Applications in progress ({len(rows)})"
+        if plain
+        else f"Pipeline ({len(rows)})",
         box=box.SIMPLE_HEAD,
         expand=True,
         show_lines=False,
@@ -431,10 +480,13 @@ def _score_anatomy_gig(gig: Gig) -> str:
 
 def _score_anatomy_job(job: QueueJob) -> str:
     lines = [
-        f"[bold]Fit {job.fit_score}[/bold] · psyche {job.psyche_score}/15 · track {job.track}",
+        f"Decision [bold]{_readable_label(job.decision)}[/bold] · "
+        f"qualification floor {_axis_text(job.qualification_lower_bound)} · "
+        f"coverage {_coverage_text(job.evidence_coverage)}",
+        f"Posting evidence [bold]{_legitimacy_text(job)}[/bold] · "
+        f"context {_axis_text(job.work_context_match)} · track {job.track}",
+        _evidence_note(job),
     ]
-    if job.keywords:
-        lines.append(f"  [dim]keywords:[/dim] {', '.join(job.keywords[:8])}")
     return "\n".join(lines)
 
 
@@ -450,7 +502,11 @@ def _detail_panel(
         idx = _clamp_index(state.gig_index, len(gigs))
         g = gigs[idx]
         url = selected_gig_url(g)
-        link = osc8_link(url, "Open posting" if plain else short_url(url, 64)) if url else "[dim]no link[/dim]"
+        link = (
+            osc8_link(url, "Open posting" if plain else short_url(url, 64))
+            if url
+            else "[dim]no link[/dim]"
+        )
         if plain:
             lines.append(
                 f"[bold green]{g.company}[/bold green] — {g.title}\n"
@@ -468,19 +524,26 @@ def _detail_panel(
         idx = _clamp_index(state.job_index, len(jobs))
         j = jobs[idx]
         if plain:
-            mat = "Application kit ready" if materials_ready(j.company) else "No kit yet"
+            mat = (
+                "Application kit ready" if materials_ready(j.company) else "No kit yet"
+            )
             link = osc8_link(j.url, "Open posting")
             lines.append(
                 f"[bold cyan]{j.company}[/bold cyan] — {j.title}\n"
-                f"  Match {j.fit_score}/100 · {mat} · {j.location}\n"
+                f"  {_score_anatomy_job(j)}\n"
+                f"  {mat} · {j.location}\n"
                 f"  {link}"
             )
         else:
-            mat = "paste sheet ready" if materials_ready(j.company) else "no materials yet"
+            mat = (
+                "paste sheet ready"
+                if materials_ready(j.company)
+                else "no materials yet"
+            )
             link = osc8_link(j.url, short_url(j.url, 64))
             lines.append(
                 f"[bold cyan]J{idx + 1}[/bold cyan] {j.company} — {j.title}\n"
-                f"  {score_bar(j.fit_score, width=8)} · {mat} · {j.location}\n"
+                f"  {mat} · {j.location}\n"
                 f"  [dim]url[/dim] {link}\n"
                 f"{_score_anatomy_job(j)}"
             )
@@ -499,8 +562,9 @@ def _detail_panel(
         link = osc8_link(j.url, short_url(j.url, 64))
         lines.append(
             f"[bold cyan]J1[/bold cyan] {j.company} — {j.title}\n"
-            f"  {score_bar(j.fit_score, width=8)} psyche {j.psyche_score} · {mat}\n"
-            f"  [dim]url[/dim] {link}"
+            f"  {mat} · {j.location}\n"
+            f"  [dim]url[/dim] {link}\n"
+            f"{_score_anatomy_job(j)}"
         )
     else:
         lines.append(
@@ -508,12 +572,16 @@ def _detail_panel(
             if plain
             else "[yellow]No leads — run `jobpilot gigs digest --contract-first`[/yellow]"
         )
-    title = "Selected opportunity" if plain else "Selection · score anatomy"
+    title = "Selected opportunity" if plain else "Selection · evidence"
     return Panel("\n\n".join(lines), title=title, border_style="green", box=box.ROUNDED)
 
 
 def _feed_panel(state: HudState) -> Panel:
-    body = "\n".join(state.feed_lines[-12:]) if state.feed_lines else "[dim]Scan idle[/dim]"
+    body = (
+        "\n".join(state.feed_lines[-12:])
+        if state.feed_lines
+        else "[dim]Scan idle[/dim]"
+    )
     return Panel(body, title="Scan feed", border_style="dim", box=box.ROUNDED)
 
 
@@ -525,14 +593,23 @@ def _url_index_panel(gigs, jobs, *, limit: int = 40) -> Panel:
     for i, j in enumerate(jobs[:limit], 1):
         lines.append(f"[cyan]J{i:02d}[/cyan] [dim]{short_url(j.url, 72)}[/dim]")
     body = "\n".join(lines) if lines else "[dim]No URLs[/dim]"
-    return Panel(body, title="URL index (G=gig · J=job)", border_style="dim", box=box.ROUNDED)
+    return Panel(
+        body, title="URL index (G=gig · J=job)", border_style="dim", box=box.ROUNDED
+    )
 
 
 def _help_panel(*, plain: bool = False) -> Panel:
-    return Panel(PLAIN_KEY_HELP if plain else KEY_HELP, title="Controls", border_style="yellow", box=box.ROUNDED)
+    return Panel(
+        PLAIN_KEY_HELP if plain else KEY_HELP,
+        title="Controls",
+        border_style="yellow",
+        box=box.ROUNDED,
+    )
 
 
-def _footer_panel(port: int = DEFAULT_SERVE_PORT, *, interactive: bool = False, plain: bool = False) -> Panel:
+def _footer_panel(
+    port: int = DEFAULT_SERVE_PORT, *, interactive: bool = False, plain: bool = False
+) -> Panel:
     dash_ok = check_dashboard(port)
     chrome_ok = check_chrome()
     tracker = get_application_tracker()
@@ -554,9 +631,13 @@ def _footer_panel(port: int = DEFAULT_SERVE_PORT, *, interactive: bool = False, 
         dash = "up" if dash_ok else "down"
         chrome = "up" if chrome_ok else "down"
         tr = f"{total} tracked · {submitted} submitted"
-        keys = f"\n{KEY_HELP}" if interactive else (
-            f"\n[dim]Ctrl+C exit ·[/dim] "
-            f"[cyan]jobpilot hud --watch[/cyan] for keyboard control"
+        keys = (
+            f"\n{KEY_HELP}"
+            if interactive
+            else (
+                "\n[dim]Ctrl+C exit ·[/dim] "
+                "[cyan]jobpilot hud --watch[/cyan] for keyboard control"
+            )
         )
         body = (
             f"[dim]dash:{dash}[/dim] :{port}  [dim]chrome:{chrome}[/dim] :9222  ·  {tr}\n"
@@ -567,10 +648,10 @@ def _footer_panel(port: int = DEFAULT_SERVE_PORT, *, interactive: bool = False, 
 
 
 def build_hud_layout(
-    opts: Optional[IncomeViewOptions] = None,
+    opts: IncomeViewOptions | None = None,
     *,
-    state: Optional[HudState] = None,
-    data: Optional[HudData] = None,
+    state: HudState | None = None,
+    data: HudData | None = None,
     verbose: bool = False,
     interactive: bool = False,
     plain: bool = False,
@@ -587,8 +668,16 @@ def build_hud_layout(
 
     main = Layout(name="main")
     main.split_row(
-        Layout(Panel(_gigs_table(gigs, state, plain=plain), border_style="green"), name="gigs", ratio=3),
-        Layout(Panel(_jobs_table(jobs, state, plain=plain), border_style="blue"), name="jobs", ratio=2),
+        Layout(
+            Panel(_gigs_table(gigs, state, plain=plain), border_style="green"),
+            name="gigs",
+            ratio=3,
+        ),
+        Layout(
+            Panel(_jobs_table(jobs, state, plain=plain), border_style="blue"),
+            name="jobs",
+            ratio=2,
+        ),
     )
 
     sections: list[Layout] = [
@@ -603,21 +692,33 @@ def build_hud_layout(
         pipe_h = min(14, max(5, 3 + len(data.pipe_rows)))
         sections.append(
             Layout(
-                Panel(_pipeline_table(data.pipe_rows, plain=plain), border_style="yellow"),
+                Panel(
+                    _pipeline_table(data.pipe_rows, plain=plain), border_style="yellow"
+                ),
                 name="pipe",
                 size=pipe_h,
             )
         )
     if interactive and state.feed_lines and not plain:
-        sections.append(Layout(_feed_panel(state), name="feed", size=min(8, 3 + len(state.feed_lines))))
+        sections.append(
+            Layout(
+                _feed_panel(state), name="feed", size=min(8, 3 + len(state.feed_lines))
+            )
+        )
     if state.show_help:
         sections.append(Layout(_help_panel(plain=plain), name="help", size=4))
-    sections.append(Layout(_detail_panel(gigs, jobs, state, plain=plain), name="detail", size=9))
+    sections.append(
+        Layout(_detail_panel(gigs, jobs, state, plain=plain), name="detail", size=9)
+    )
     if verbose and not plain:
         url_h = min(18, max(6, 2 + len(gigs) + len(jobs)))
         sections.append(Layout(_url_index_panel(gigs, jobs), name="urls", size=url_h))
     sections.append(
-        Layout(_footer_panel(interactive=interactive, plain=plain), name="footer", size=6 if interactive else 5)
+        Layout(
+            _footer_panel(interactive=interactive, plain=plain),
+            name="footer",
+            size=6 if interactive else 5,
+        )
     )
 
     root = Layout(name="root")
@@ -629,13 +730,13 @@ def _flash(state: HudState, message: str, *, seconds: float = 4.0) -> None:
     state.flash(message, until=time.time() + seconds)
 
 
-def _selected_gig(gigs: list[Gig], state: HudState) -> Optional[Gig]:
+def _selected_gig(gigs: list[Gig], state: HudState) -> Gig | None:
     if not gigs:
         return None
     return gigs[_clamp_index(state.gig_index, len(gigs))]
 
 
-def _selected_job(jobs: list[QueueJob], state: HudState) -> Optional[QueueJob]:
+def _selected_job(jobs: list[QueueJob], state: HudState) -> QueueJob | None:
     if not jobs:
         return None
     return jobs[_clamp_index(state.job_index, len(jobs))]
@@ -662,7 +763,7 @@ def _handle_key(
     *,
     gigs: list[Gig],
     jobs: list[QueueJob],
-) -> tuple[bool, Optional[str]]:
+) -> tuple[bool, str | None]:
     """Return (continue_loop, pending_prompt). pending_prompt is 'pass' for job skip."""
     if key in ("q", "esc"):
         return False, None
@@ -753,7 +854,7 @@ def _lock_terminal_for_hud(console: Console) -> None:
 def watch_hud(
     console: Console,
     *,
-    opts: Optional[IncomeViewOptions] = None,
+    opts: IncomeViewOptions | None = None,
     interval: float = 30.0,
     verbose: bool = False,
     plain: bool = False,
@@ -786,7 +887,7 @@ def watch_hud(
                 )
             )
 
-            pending: Optional[str] = None
+            pending: str | None = None
             with raw_stdin():
                 deadline = last_refresh + interval
                 while running and pending is None:
@@ -794,7 +895,12 @@ def watch_hud(
                     key = read_key(timeout=timeout)
                     if key:
                         running, pending = _handle_key(
-                            key, state, data, opts, gigs=gigs, jobs=jobs,
+                            key,
+                            state,
+                            data,
+                            opts,
+                            gigs=gigs,
+                            jobs=jobs,
                         )
                     elif time.time() >= deadline:
                         pending = "refresh"
@@ -830,7 +936,7 @@ def watch_hud(
 def pick_hud(
     console: Console,
     *,
-    opts: Optional[IncomeViewOptions] = None,
+    opts: IncomeViewOptions | None = None,
 ) -> None:
     opts = opts or IncomeViewOptions()
     data = load_hud_data(opts)
@@ -840,7 +946,11 @@ def pick_hud(
         lines.append(f"[G {g.fit_score:3d}] {g.company} — {g.title}")
         urls.append(selected_gig_url(g))
     for j in data.jobs:
-        lines.append(f"[J {j.fit_score:3d}] {j.company} — {j.title}")
+        lines.append(
+            f"[J {_readable_label(j.decision):9} "
+            f"Q{_axis_text(j.qualification_lower_bound, compact=True):>3} "
+            f"C{_coverage_text(j.evidence_coverage):>4}] {j.company} — {j.title}"
+        )
         urls.append(j.url)
     idx = pick_with_fzf(lines)
     if idx is None:
@@ -856,14 +966,14 @@ def pick_hud(
 def render_hud(
     console: Console,
     *,
-    opts: Optional[IncomeViewOptions] = None,
+    opts: IncomeViewOptions | None = None,
     verbose: bool = False,
     plain: bool = False,
 ) -> None:
     console.print(build_hud_layout(opts=opts, verbose=verbose, plain=plain))
 
 
-def export_hud_text(opts: Optional[IncomeViewOptions] = None) -> str:
+def export_hud_text(opts: IncomeViewOptions | None = None) -> str:
     """Plain-text export of all HUD rows (for piping / logs)."""
     opts = opts or IncomeViewOptions()
     data = load_hud_data(opts)
@@ -877,7 +987,10 @@ def export_hud_text(opts: Optional[IncomeViewOptions] = None) -> str:
     lines.append("=== JOBS ===")
     for i, j in enumerate(jobs, 1):
         lines.append(
-            f"{i:02d} | {j.fit_score:3d} | {j.company} | {j.title} | {j.location} | "
-            f"id={j.id} | {j.url}"
+            f"{i:02d} | decision={_readable_label(j.decision)} | "
+            f"qualification_floor={_axis_text(j.qualification_lower_bound)} | "
+            f"coverage={_coverage_text(j.evidence_coverage)} | "
+            f"posting_evidence={_legitimacy_text(j)} | {_evidence_note(j)} | "
+            f"{j.company} | {j.title} | {j.location} | id={j.id} | {j.url}"
         )
     return "\n".join(lines)

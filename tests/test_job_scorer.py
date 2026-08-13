@@ -1,7 +1,7 @@
 """Tests for core/job_scorer.py — pre-apply fit scoring."""
 
-from jobpilot.core.profile_store import UserProfile
 from jobpilot.core.job_scorer import JobScorer
+from jobpilot.core.profile_store import UserProfile
 
 
 class DummyProfileStore:
@@ -69,6 +69,34 @@ def test_score_text_penalizes_clear_gaps():
     assert result.score < 50
     assert result.missing_skills
     assert any("spons" in risk.lower() or "authoriz" in risk.lower() for risk in result.risks)
+
+
+def test_unknown_experience_gets_no_neutral_points_or_zero_year_claim():
+    points, risk = JobScorer._score_experience(
+        None,
+        "This role requires at least 5 years of experience.",
+    )
+
+    assert points == 0
+    assert "unknown" in risk.lower()
+    assert "profile shows 0" not in risk.lower()
+
+
+def test_legacy_fit_score_excludes_preference_and_work_style_points():
+    scorer = JobScorer(
+        profile_store=DummyProfileStore(
+            UserProfile(current_title="Implementation Engineer")
+        ),
+        use_bro=False,
+    )
+
+    result = scorer.score_text(
+        "Implementation Engineer\nResponsibilities\n"
+        "Work autonomously in an async contract role."
+    )
+
+    assert "Work style" not in result.components
+    assert all("autonomous" not in strength.lower() for strength in result.strengths)
 
 
 # ── Policy alignment tests ────────────────────────────────────────

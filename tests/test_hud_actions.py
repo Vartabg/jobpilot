@@ -2,6 +2,8 @@
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from jobpilot.core.queue_builder import QueueJob
 from jobpilot.gigs.core.models import Gig
 from jobpilot.ui import hud_actions
@@ -15,6 +17,28 @@ def test_open_url_calls_mac_open():
 
 def test_open_url_empty():
     assert not hud_actions.open_url("")
+
+
+@pytest.mark.parametrize(
+    "url",
+    ["javascript:alert(1)", "data:text/html,boom", "file:///etc/passwd", "shortcuts://run/x"],
+)
+def test_open_url_rejects_unsafe_schemes_without_subprocess(url):
+    with patch("jobpilot.ui.hud_actions.subprocess.run") as run:
+        assert not hud_actions.open_url(url)
+        run.assert_not_called()
+
+
+def test_selected_gig_url_falls_back_from_unsafe_apply_target():
+    gig = Gig(
+        id="x",
+        source="hn",
+        title="Role",
+        url="https://news.ycombinator.com/item?id=1",
+        apply_url="shortcuts://run/untrusted",
+    )
+
+    assert hud_actions.selected_gig_url(gig) == gig.url
 
 
 def test_copy_text_uses_pbcopy():

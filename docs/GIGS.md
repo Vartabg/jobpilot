@@ -38,6 +38,18 @@ All gigs commands live under `jobpilot gigs`:
 ./jobpilot gigs swipe       # phone-first swipe UI
 ```
 
+The swipe UI is loopback-only unless you explicitly enable authenticated
+Tailscale access:
+
+```bash
+export JOBPILOT_REMOTE_TOKEN="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+JOBPILOT_REMOTE_ACCESS=tailscale ./scripts/boot.sh
+```
+
+Append `?token=` and that token to the swipe URL on first open. The page sends
+it as an authentication header for every queue, decision, undo, and metadata
+request. JobPilot refuses wildcard, LAN, and unauthenticated remote binds.
+
 **Default product mode is on-demand.** Scheduled 8am/5pm pushes are off
 (`gigs schedule off`). You pull when ready:
 
@@ -154,6 +166,7 @@ Upwork is off by default. The gigs lane never logs in to Upwork or scrapes behin
 | `GIGPILOT_UPWORK_LEADS_DIR` | Folder of saved Upwork PDF exports | `upwork-leads/` under the data dir |
 | `GIGPILOT_PYTHON` | Interpreter used by the scheduled scripts | the repo's `.venv` |
 | `GIGPILOT_INTERVAL_SECONDS` | Interval mode for the launchd schedule | unset (8am/5pm calendar mode) |
+| `JOBPILOT_REMOTE_TOKEN` | 32+ character URL-safe random token required for Tailscale serving | unset |
 
 ## Safety boundary
 

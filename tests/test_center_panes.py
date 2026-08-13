@@ -41,6 +41,9 @@ def test_build_status_panel_renders(monkeypatch):
 
     panel = build_status_panel()
     assert panel.title is not None
+    text = str(panel.renderable)
+    assert "read-only job context" in text
+    assert "fills applications" not in text
 
 
 def test_build_activity_panel_renders():

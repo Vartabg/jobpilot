@@ -20,11 +20,11 @@ from urllib.parse import quote
 import requests  # pyright: ignore[reportMissingModuleSource]
 from requests.utils import requote_uri  # pyright: ignore[reportMissingModuleSource]
 
+from jobpilot.gigs.core import pipeline
 from jobpilot.gigs.core.away import save_latest_leads
 from jobpilot.gigs.core.crib import write_crib_sheet
 from jobpilot.gigs.core.logger import get_logger
 from jobpilot.gigs.core.models import Gig
-from jobpilot.gigs.core import pipeline
 from jobpilot.gigs.core.paths import digests_dir
 from jobpilot.gigs.core.proposals import (
     build_revenue_brief,
@@ -33,6 +33,7 @@ from jobpilot.gigs.core.proposals import (
     email_subject,
     followup_message,
 )
+from jobpilot.gigs.core.safe_urls import safe_external_url
 
 log = get_logger(__name__)
 
@@ -67,7 +68,9 @@ def _apply_target(g: Gig) -> str:
     Shortcut, which can attach the resume PDF before opening Mail. See
     docs/IOS_SHORTCUT.md for the one-time setup.
     """
-    base = g.apply_url or g.url
+    base = safe_external_url(g.apply_url, allow_mailto=True) or safe_external_url(g.url)
+    if not base:
+        return ""
     if not base.lower().startswith("mailto:"):
         return base
 
@@ -75,7 +78,7 @@ def _apply_target(g: Gig) -> str:
     if contains_placeholder(raw_body) or contains_placeholder(email_subject(g)):
         # A placeholder leaked despite the resolver — don't ship a tappable
         # mailto with a dead link; send them to the source post to fill manually.
-        return g.url
+        return safe_external_url(g.url)
 
     addr = base[len("mailto:"):].split("?", 1)[0]
     subject = quote(email_subject(g))
@@ -110,9 +113,11 @@ def _header_safe_url(url: str) -> str:
 
 
 def _build_actions(top: Gig) -> str:
-    """Build the ntfy `Actions` header. Single button: Apply (`Click` header)."""
-    target = _header_safe_url(_apply_target(top))
-    return f"view, Apply, {target}, clear=true"
+    """Build a privacy-safe ntfy action pointing only to the public lead."""
+    target = _header_safe_url(safe_external_url(top.url))
+    if not target:
+        return ""
+    return f"view, View role, {target}, clear=true"
 
 
 def write_markdown(
@@ -200,33 +205,34 @@ def push_ntfy(
     today = datetime.now().strftime("%a %b %d")
     top = gigs[0]
     subtitle = f"{top.fit_score}/100 {top.company or top.title[:40]}"
-    top_brief = build_revenue_brief(top)
 
     followup_bit = f" · {followup_count} to follow up" if followup_count else ""
     body_lines = [
-        f"{today}: {len(gigs)} new{followup_bit} - tap Apply for a personalized {top_brief.offer} draft, or open GigPilot/pipeline.md",
+        f"{today}: {len(gigs)} new{followup_bit} - tap View role, then open the local GigPilot draft if relevant",
         "",
     ]
     for g in gigs[:5]:
         pay = _fmt_pay(g)
         co = g.company or g.source
-        offer = build_revenue_brief(g).offer
-        body_lines.append(f"[{g.fit_score}] {co}: {g.title[:50]} - {pay} - {offer}")
+        body_lines.append(f"[{g.fit_score}] {co}: {g.title[:50]} - {pay}")
     if source_warning:
         body_lines.append("")
         body_lines.append(f"⚠ {source_warning}")
 
     try:
+        public_url = safe_external_url(top.url)
+        headers = {
+            "Title": _header_safe(f"Gigpilot: {subtitle}"),
+            "Priority": "default",
+            "Tags": "briefcase,dollar",
+        }
+        if public_url:
+            headers["Click"] = _header_safe_url(public_url)
+            headers["Actions"] = _build_actions(top)
         r = requests.post(
             f"{NTFY_BASE}/{topic}",
             data="\n".join(body_lines).encode("utf-8"),
-            headers={
-                "Title": _header_safe(f"Gigpilot: {subtitle}"),
-                "Priority": "default",
-                "Tags": "briefcase,dollar",
-                "Click": _header_safe_url(_apply_target(top)),
-                "Actions": _build_actions(top),
-            },
+            headers=headers,
             timeout=10,
         )
         r.raise_for_status()

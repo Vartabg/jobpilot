@@ -19,7 +19,10 @@ from jobpilot.gigs.core.models import Gig
 from jobpilot.gigs.core.scrapers.hackernews import scrape_hn_hiring
 from jobpilot.gigs.core.scrapers.himalayas import scrape_himalayas
 from jobpilot.gigs.core.scrapers.remoteok import scrape_remoteok
-from jobpilot.gigs.core.scrapers.weworkremotely import WWR_CATEGORIES, scrape_weworkremotely
+from jobpilot.gigs.core.scrapers.weworkremotely import (
+    WWR_CATEGORIES,
+    scrape_weworkremotely,
+)
 
 runner = CliRunner()
 
@@ -236,6 +239,33 @@ def test_push_ntfy_body_carries_source_warning(monkeypatch) -> None:
     )
     assert pushed is True
     assert "failed: RemoteOK" in calls["data"].decode("utf-8")
+
+
+def test_push_ntfy_never_transmits_personal_draft_or_mailto(monkeypatch) -> None:
+    calls: dict = {}
+
+    def fake_post(url, data=None, headers=None, timeout=None):
+        calls.update(data=data, headers=headers)
+        return _FakeResponse()
+
+    monkeypatch.setattr(dispatcher.requests, "post", fake_post)
+    monkeypatch.setattr(
+        dispatcher,
+        "build_revenue_brief",
+        lambda _gig: type("Brief", (), {
+            "offer": "Secret PII Name 555-000-9999",
+            "draft": "Secret biography and identity",
+        })(),
+    )
+    gig = _gig(url="https://public.example.test/role")
+
+    assert dispatcher.push_ntfy([gig], topic="test-topic") is True
+    transmitted = calls["data"].decode("utf-8") + repr(calls["headers"])
+    assert "Secret PII" not in transmitted
+    assert "555-000-9999" not in transmitted
+    assert "Secret biography" not in transmitted
+    assert "mailto:" not in transmitted
+    assert "https://public.example.test/role" in transmitted
 
 
 # --- Part B: heartbeat staleness ----------------------------------------------

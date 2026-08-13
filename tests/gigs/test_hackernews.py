@@ -85,3 +85,9 @@ def test_apply_url_falls_back_to_plaintext_ats_url() -> None:
 def test_apply_url_blank_when_no_signal() -> None:
     html = "We are hiring. DM me on Twitter for details."
     assert _extract_apply_url(html, _strip_html(html)) == ""
+
+
+def test_apply_url_rejects_untrusted_custom_protocol() -> None:
+    html = '<a href="shortcuts://run-shortcut?name=Untrusted">Apply now</a>'
+
+    assert _extract_apply_url(html, _strip_html(html)) == ""

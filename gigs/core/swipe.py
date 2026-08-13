@@ -2,14 +2,15 @@
 
 Builds a ranked queue of fresh gigs (same scan/score/geo/currency path as the
 digest), renders a phone card per gig with the apply prepped, and records a
-swipe decision (apply -> sent, pass -> passed) back into pipeline.md. The
+swipe decision (apply/open -> drafted, pass -> passed) back into pipeline.md. The
 on-demand model: "give me the jobs", swipe through, apply with one tap.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from contextlib import suppress
 from datetime import datetime
-from typing import Callable, Optional
 from urllib.parse import quote
 
 from jobpilot.gigs.core import pipeline, preferences
@@ -25,6 +26,7 @@ from jobpilot.gigs.core.proposals import (
     email_body,
     email_subject,
 )
+from jobpilot.gigs.core.safe_urls import safe_external_url
 from jobpilot.gigs.core.scorer import _posted_age_days, filter_and_rank
 from jobpilot.gigs.core.scrapers.weworkremotely import enrich_apply_urls
 from jobpilot.gigs.core.store import filter_new, mark_seen, unmark_seen
@@ -32,7 +34,7 @@ from jobpilot.gigs.core.store import filter_new, mark_seen, unmark_seen
 
 def build_queue(
     *, limit: int | None = None, min_score: int | None = None, fresh_only: bool = False,
-    on_progress: Optional[Callable[[str], None]] = None,
+    on_progress: Callable[[str], None] | None = None,
 ) -> list[Gig]:
     """Ranked roles to swipe — same search gate as `gigs now` (prefs.search),
     minus anything already DECIDED in the pipeline.
@@ -77,10 +79,8 @@ def build_queue(
     # Resolve WWR listings to a real apply target (mailto/ATS/careers) so the
     # Apply tap doesn't dead-end on the paywalled aggregator page. Network
     # fetches are capped inside enrich_apply_urls.
-    try:
+    with suppress(Exception):
         enrich_apply_urls(ranked)
-    except Exception:
-        pass
     return ranked
 
 
@@ -88,11 +88,13 @@ def _apply_target(gig: Gig) -> tuple[str, bool]:
     """(target, is_mailto). For mailto leads, a prefilled mailto so tapping
     opens the phone's Mail composer ready to send; otherwise the apply URL.
     Falls back to the source post if a draft placeholder ever leaks."""
-    base = gig.apply_url or gig.url
+    base = safe_external_url(gig.apply_url, allow_mailto=True) or safe_external_url(gig.url)
+    if not base:
+        return "", False
     if base.lower().startswith("mailto:"):
         subj, body = email_subject(gig), email_body(gig)
         if contains_placeholder(subj) or contains_placeholder(body):
-            return gig.url, False
+            return safe_external_url(gig.url), False
         addr = base[len("mailto:"):].split("?", 1)[0]
         return f"mailto:{addr}?subject={quote(subj)}&body={quote(body)}", True
     return base, False
@@ -112,7 +114,7 @@ def criteria_pills() -> list[str]:
         pills.append("Remote OK")
     pills.append(f"Score ≥{search.get('min_score', 60)}")
     if search.get("drop_rigid_schedule"):
-        pills.append("Anti 9–5")
+        pills.append("Anti 9-5")
     if search.get("contract_first"):
         pills.append("Contract first")
     pills.append("Pay not filtered")
@@ -158,7 +160,7 @@ def card(gig: Gig) -> dict:
         "apply_target": target,
         "is_mailto": is_mailto,
         "resume": resume,
-        "source_url": gig.url,
+        "source_url": safe_external_url(gig.url),
         "source": gig.source,
         "posted_age_days": _posted_age_days(gig.posted_at),
         "tags": (gig.tags or [])[:6],
@@ -188,7 +190,10 @@ def _upsert_row(gig: Gig, status: str, note: str = ""):
             company=gig.company or gig.source,
             role=(gig.title or "").split("|")[0].strip()[:80],
             pay=pipeline._fmt_pay_for_pipeline(gig),
-            apply=gig.apply_url or gig.url,
+            apply=(
+                safe_external_url(gig.apply_url, allow_mailto=True)
+                or safe_external_url(gig.url)
+            ),
             last_touched=today,
             notes=note,
             gig_id=gig.id,
@@ -197,11 +202,15 @@ def _upsert_row(gig: Gig, status: str, note: str = ""):
 
 
 def record_decision(gig: Gig, action: str, reason: str = "") -> str:
-    """Record a swipe. apply -> 'sent', pass -> 'passed' (+ optional reason).
+    """Record a swipe. apply/open -> 'drafted'; pass -> 'passed'.
+
+    Opening an email composer or ATS form is not proof that the human sent or
+    submitted anything. The pipeline advances to ``sent`` only after explicit
+    human confirmation outside this open action.
     Only marks the gig seen if the pipeline write actually persisted — a
     refused write must not silently swallow the decision. Returns the stored
     status, or raises RuntimeError if the write was refused."""
-    status = "sent" if action == "apply" else "passed"
+    status = "drafted" if action == "apply" else "passed"
     note = f"pass:{reason}" if (action != "apply" and reason) else ""
     result = _upsert_row(gig, status, note)
     if getattr(result, "refused", False):

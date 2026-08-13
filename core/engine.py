@@ -1,42 +1,26 @@
-"""
-Application Engine — the brain of JobPilot.
+"""Retired application engine compatibility shell and read-only helpers.
 
-Owns field-filling logic, chat/voice dispatch, and application lifecycle
-tracking.  Communicates outward exclusively through an ``EventBus``.
-
-The main watch-loop lives in ``engine_run.py``; standalone helpers live
-in ``engine_helpers.py``.  This file contains the ``ApplicationEngine``
-class itself.
+Live browser monitoring, field mutation, uploads, and navigation are disabled.
+The remaining chat, profile, and evidence helpers support legacy callers while
+the public mutation-shaped methods fail closed at their boundary.
 """
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 from typing import Optional
 
-from jobpilot.core.config import FILL_RETRIES, FILL_RETRY_DELAY_MS
-from jobpilot.core.events import (
-    EventBus,
-    FIELD_FILLED, FIELD_SKIPPED, FIELD_EDITED,
-    INFO,
-)
-from jobpilot.core.linkedin_parser import SemanticType, FieldType
-from jobpilot.core.question_matcher import QuestionMatcher
-from jobpilot.core.profile_store import ProfileStore
+from jobpilot.core import llm_client
 from jobpilot.core.application_tracker import ApplicationTracker
 from jobpilot.core.autonomy import AutonomyConfig, AutonomyMode
-from jobpilot.core.selector_registry import NEXT_BUTTON, FILE_INPUTS
-from jobpilot.core.cover_letter_gen import generate_cover_letter, get_cached_path
-from jobpilot.core.resume_tailor import ResumeTailor
-from jobpilot.core import llm_client
 from jobpilot.core.bro_client import get_health, is_bro_running, query_rag
-from jobpilot.learning.action_recorder import ActionRecorder
 from jobpilot.core.browser_interface import BrowserInterface
+from jobpilot.core.engine_helpers import _build_job_context
+from jobpilot.core.events import INFO, EventBus
 from jobpilot.core.logger import get_logger
-
-from jobpilot.core.engine_helpers import (
-    _human_type, _wait_for_stable, _build_job_context,
-)
+from jobpilot.core.profile_store import ProfileStore
+from jobpilot.core.question_matcher import QuestionMatcher
+from jobpilot.core.resume_tailor import ResumeTailor
+from jobpilot.learning.action_recorder import ActionRecorder
 
 log = get_logger(__name__)
 
@@ -74,70 +58,9 @@ class ApplicationEngine:
     # -- field filling -------------------------------------------------------
 
     async def fill_field(self, field, value: str) -> bool:
-        """Fill a single form field with retry logic."""
-        for attempt in range(1, FILL_RETRIES + 1):
-            try:
-                if not await _wait_for_stable(field.element):
-                    raise RuntimeError("Element not stable")
-
-                if field.field_type in (
-                    FieldType.TEXT, FieldType.EMAIL, FieldType.PHONE,
-                    FieldType.NUMBER, FieldType.TEXTAREA,
-                ):
-                    await field.element.fill("")
-                    await _human_type(field.element, value)
-                elif field.field_type == FieldType.SELECT:
-                    await field.element.select_option(label=value)
-                elif field.field_type == FieldType.RADIO:
-                    parent = await field.element.evaluate_handle(
-                        "el => el.closest('.fb-form-element, "
-                        ".jobs-easy-apply-form-element') || el.parentElement"
-                    )
-                    # Never interpolate form data into a selector — scan the
-                    # labels and compare text in Python instead.
-                    option = None
-                    wanted = " ".join(value.lower().split())
-                    for lbl in await parent.query_selector_all("label"):
-                        try:
-                            text = " ".join(
-                                (await lbl.inner_text()).lower().split()
-                            )
-                        except Exception:
-                            continue
-                        if wanted and wanted in text:
-                            option = lbl
-                            break
-                    if option:
-                        await option.click()
-                    else:
-                        await field.element.click()
-                elif field.field_type == FieldType.CHECKBOX:
-                    should_check = value.lower() in (
-                        "yes", "true", "1", "checked",
-                    )
-                    is_checked = await field.element.is_checked()
-                    if should_check and not is_checked:
-                        await field.element.check()
-                    elif not should_check and is_checked:
-                        await field.element.uncheck()
-                else:
-                    await field.element.fill("")
-                    await _human_type(field.element, value)
-                return True
-
-            except Exception as e:
-                if attempt < FILL_RETRIES:
-                    log.warning(
-                        "Fill attempt %d failed for %s: %s — retrying",
-                        attempt, field.label, e,
-                    )
-                    await asyncio.sleep(FILL_RETRY_DELAY_MS / 1000.0)
-                else:
-                    log.warning(
-                        "Could not fill %s after %d attempts: %s",
-                        field.label, FILL_RETRIES, e,
-                    )
-                    return False
+        """Retired live-form mutation boundary; always fail closed."""
+        del field, value
+        log.warning("Blocked retired live ATS field-fill request")
         return False
 
     # -- file uploads --------------------------------------------------------
@@ -162,88 +85,16 @@ class ApplicationEngine:
         return None, "missing"
 
     async def upload_files(self, app_page, profile, parsed_jd=None) -> None:
-        """Upload resume and cover letter if file inputs are detected."""
-        file_inputs = await FILE_INPUTS.query_all(self.bridge.page)
-
-        if app_page.has_resume_upload and file_inputs:
-            resume_path, source = self._preferred_resume_upload(profile)
-            if resume_path is not None:
-                try:
-                    await file_inputs[0].set_input_files(str(resume_path))
-                    source_suffix = " (tailored)" if source == "tailored" else ""
-                    self.events.emit(
-                        INFO,
-                        message=f"📎 Uploaded resume: {resume_path.name}{source_suffix}",
-                    )
-                    log.info("Uploaded resume [%s]: %s", source, resume_path)
-                except Exception as e:
-                    log.warning("Resume upload failed: %s", e)
-
-        if app_page.has_cover_letter and len(file_inputs) > 1:
-            cl_path = None
-            if profile.cover_letter_path:
-                cl_path = Path(profile.cover_letter_path).expanduser()
-                if not cl_path.exists():
-                    cl_path = None
-
-            if not cl_path and parsed_jd and parsed_jd.raw_text:
-                cached = get_cached_path(parsed_jd.raw_text)
-                if cached:
-                    cl_path = cached
-                else:
-                    letter = generate_cover_letter(
-                        jd_title=parsed_jd.title,
-                        jd_company=parsed_jd.company,
-                        jd_requirements=parsed_jd.requirements,
-                        jd_raw_text=parsed_jd.raw_text,
-                        candidate_name=(
-                            f"{profile.first_name} {profile.last_name}".strip()
-                        ),
-                        candidate_title=profile.current_title,
-                    )
-                    if letter:
-                        cl_path = get_cached_path(parsed_jd.raw_text)
-                        self.events.emit(
-                            INFO, message="📝 Generated tailored cover letter",
-                        )
-
-            if cl_path and cl_path.exists():
-                try:
-                    await file_inputs[1].set_input_files(str(cl_path))
-                    self.events.emit(
-                        INFO,
-                        message=f"📎 Uploaded cover letter: {cl_path.name}",
-                    )
-                except Exception as e:
-                    log.warning("Cover letter upload failed: %s", e)
+        """Retired live ATS upload boundary; always fail closed."""
+        del app_page, profile, parsed_jd
+        log.warning("Blocked retired live ATS file-upload request")
 
     # -- auto-advance --------------------------------------------------------
 
     async def auto_advance(self, app_page) -> None:
-        """Auto-click Next/Continue if autonomy settings allow it."""
-        is_final = "submit" in (app_page.submit_button_text or "").lower()
-        if is_final:
-            self.events.emit(INFO, message="✓ Final submit requires manual click in Chrome")
-            log.info("Auto-advance blocked on final submit button")
-            return
-        if not self.autonomy_config.should_auto_advance(is_final):
-            return
-        
-        # Proactive Intuition: Show countdown in status
-        delay_s = self.autonomy_config.auto_advance_delay_ms / 1000.0
-        for i in range(int(delay_s * 2), 0, -1):
-            if self.overlay:
-                await self.overlay.update_status(f"⏩ Auto-advancing in {i/2:.1f}s...")
-            await asyncio.sleep(0.5)
-
-        try:
-            next_btn = await NEXT_BUTTON.query(self.bridge.page)
-            if next_btn:
-                await next_btn.click()
-                self.events.emit(INFO, message="⏩ Auto-advanced to next step")
-                log.info("Auto-advanced to next step")
-        except Exception as e:
-            log.warning("Auto-advance failed: %s", e)
+        """Retired live-form navigation boundary; always fail closed."""
+        del app_page
+        log.warning("Blocked retired live ATS navigation request")
 
     # -- chat dispatch -------------------------------------------------------
 
@@ -377,25 +228,9 @@ Provide a concise, professional answer suggestion."""
         log.info("Voice command: %s", cmd_name)
 
         if cmd_name in ("approve", "approve_all"):
-            if app_page and app_page.fields:
-                for field in app_page.fields:
-                    value = self.profile_store.get_field_value(
-                        field.semantic_type.value
-                    )
-                    if value:
-                        await self.fill_field(field, value)
-                        self.events.emit(
-                            FIELD_FILLED, label=field.label,
-                        )
-                        self.action_recorder.record_field_approved(
-                            field.label,
-                            field.semantic_type.value,
-                            value,
-                            field.confidence,
-                        )
-                await self.chat.send_message(
-                    "Approved and filled all fields."
-                )
+            await self.chat.send_message(
+                "Live ATS field filling is retired; use the reviewed paste sheet."
+            )
 
         elif cmd_name == "skip":
             if app_page and app_page.fields:
@@ -410,13 +245,9 @@ Provide a concise, professional answer suggestion."""
             await self.chat.send_message("Skipped current field.")
 
         elif cmd_name == "next":
-            try:
-                next_btn = await NEXT_BUTTON.query(self.bridge.page)
-                if next_btn:
-                    await next_btn.click()
-                    await self.chat.send_message("Clicked Next.")
-            except Exception as e:
-                await self.chat.send_message(f"Could not click Next: {e}")
+            await self.chat.send_message(
+                "Automated form navigation is retired; continue in your browser."
+            )
 
         elif cmd_name == "status":
             await self.chat.send_message(
@@ -432,6 +263,8 @@ Provide a concise, professional answer suggestion."""
     # -- main loop -----------------------------------------------------------
 
     async def run(self, *, watch: bool) -> None:
-        """Main watch loop — delegates to engine_run.run_watch_loop."""
-        from jobpilot.core.engine_run import run_watch_loop
-        await run_watch_loop(self, watch=watch)
+        """Fail closed: browser monitoring and live ATS mutation are retired."""
+        del watch
+        raise RuntimeError(
+            "Live ATS monitoring and filling are retired; use the human paste flow."
+        )

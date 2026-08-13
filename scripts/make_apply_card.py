@@ -20,6 +20,7 @@ import html
 import subprocess
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from make_paste_sheet import parse_answers  # noqa: E402
@@ -72,9 +73,28 @@ def _card(label: str, value: str, rows: int, hint: str = "") -> str:
     )
 
 
+def _safe_role_url(value: str) -> str:
+    """Allow only an absolute, credential-free HTTPS posting URL."""
+    value = str(value or "").strip()
+    try:
+        parsed = urlsplit(value)
+        _ = parsed.port
+    except ValueError:
+        return ""
+    if (
+        parsed.scheme.lower() != "https"
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or any(ord(char) < 32 or ord(char) == 127 for char in value)
+    ):
+        return ""
+    return value
+
+
 def build_html(parsed: dict) -> str:
     title = html.escape(parsed["title"] or "Application")
-    url = parsed.get("source") or ""
+    url = _safe_role_url(parsed.get("source") or "")
     open_btn = (
         f'<a class="openform" href="{html.escape(url, quote=True)}" target="_blank" '
         'rel="noopener">Open application form ↗</a>'

@@ -6,11 +6,12 @@ surface likely matches before opening LinkedIn or Easy Apply.
 
 from __future__ import annotations
 
+import html
 import json
 import re
 import urllib.parse
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
@@ -18,6 +19,12 @@ import requests  # pyright: ignore[reportMissingModuleSource]
 
 from jobpilot.core.config import ADZUNA_API_KEY, ADZUNA_APP_ID, DATA_DIR, TIMEOUT_SHORT
 from jobpilot.core.logger import get_logger
+from jobpilot.core.opportunity_models import (
+    SourceObservation,
+    SourceRunResult,
+    utc_now_iso,
+)
+from jobpilot.core.role_identity import canonicalize_role_url, identify_role
 
 log = get_logger(__name__)
 
@@ -25,6 +32,10 @@ REPORTS_DIR = DATA_DIR / "reports"
 DEFAULT_TARGETS_PATH = DATA_DIR / "portals.json"
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
+_HTML_BLOCK_RE = re.compile(
+    r"<\s*/?\s*(?:br|div|p|li|ul|ol|h[1-6]|section|article|table|tr|td|th)\b[^>]*>",
+    re.IGNORECASE,
+)
 _WHITESPACE_RE = re.compile(r"\s+")
 
 
@@ -37,8 +48,13 @@ def _extract_snippet(raw: str) -> str:
     """
     if not raw:
         return ""
-    text = _HTML_TAG_RE.sub(" ", raw)
-    return _WHITESPACE_RE.sub(" ", text).strip()
+    # Requirement parsing depends on section/list boundaries. Preserve those
+    # boundaries instead of collapsing a full Greenhouse JD into one enormous
+    # line (which would make an otherwise complete posting unscorable).
+    text = _HTML_BLOCK_RE.sub("\n", raw)
+    text = html.unescape(_HTML_TAG_RE.sub(" ", text))
+    lines = (_WHITESPACE_RE.sub(" ", line).strip() for line in text.splitlines())
+    return "\n".join(line for line in lines if line)
 
 
 @dataclass
@@ -62,6 +78,58 @@ class PortalJob:
     portal: str = ""
     matched_keywords: list[str] = field(default_factory=lambda: cast(list[str], []))
     description: str = ""
+    provider_tenant: str = ""
+    provider_job_id: str = ""
+    canonical_url: str = ""
+    fetched_at: str = ""
+    listing_state: str = "unknown"
+    posted_at: str = ""
+    expires_at: str = ""
+    compensation: dict[str, Any] = field(default_factory=dict)
+    workplace_type: str = ""
+    source_kind: str = ""
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        identity = identify_role(
+            self.canonical_url or self.url,
+            self.portal,
+            self.provider_tenant,
+            self.provider_job_id,
+        )
+        self.provider_tenant = identity.tenant
+        self.provider_job_id = identity.provider_job_id
+        self.canonical_url = identity.canonical_url
+
+    @property
+    def identity_key(self) -> str:
+        return identify_role(
+            self.canonical_url or self.url,
+            self.portal,
+            self.provider_tenant,
+            self.provider_job_id,
+        ).key
+
+    def to_source_observation(self) -> SourceObservation:
+        """Return the normalized evidence shape used by the opportunity ledger."""
+        return SourceObservation(
+            provider=self.portal,
+            tenant=self.provider_tenant,
+            provider_job_id=self.provider_job_id,
+            canonical_url=self.canonical_url,
+            fetched_at=self.fetched_at,
+            listing_state=self.listing_state,
+            source_kind=self.source_kind,
+            company=self.company,
+            title=self.title,
+            description=self.description,
+            location=self.location,
+            posted_at=self.posted_at,
+            expires_at=self.expires_at,
+            compensation=self.compensation,
+            workplace_type=self.workplace_type,
+            metadata=self.metadata,
+        )
 
 
 class PortalScanner:
@@ -71,48 +139,76 @@ class PortalScanner:
         cleaned = [k.strip().lower() for k in (keywords or []) if k and k.strip()]
         self.keywords = list(dict.fromkeys(cleaned))
         self.timeout = timeout
+        self.last_run_results: list[SourceRunResult] = []
+        self._active_scan_error = ""
 
     def scan_targets(self, targets: list[ScanTarget]) -> list[PortalJob]:
         """Scan multiple targets and return deduplicated matches."""
         results: list[PortalJob] = []
+        self.last_run_results = []
 
         for target in targets:
             if not target.enabled:
+                self.last_run_results.append(SourceRunResult(
+                    target.portal, target.value, "skipped", label=target.label,
+                ))
                 continue
+            self._active_scan_error = ""
             try:
                 portal = target.portal.lower().strip()
                 if portal == "greenhouse":
-                    results.extend(self.scan_greenhouse_board(target.value, label=target.label))
+                    target_jobs = self.scan_greenhouse_board(target.value, label=target.label)
                 elif portal == "lever":
-                    results.extend(self.scan_lever_board(target.value, label=target.label))
+                    target_jobs = self.scan_lever_board(target.value, label=target.label)
                 elif portal == "ashby":
-                    results.extend(self.scan_ashby_board(target.value, label=target.label))
+                    target_jobs = self.scan_ashby_board(target.value, label=target.label)
                 elif portal == "google_jobs":
-                    results.extend(self.scan_google_jobs(target.value, label=target.label))
+                    target_jobs = self.scan_google_jobs(target.value, label=target.label)
                 elif portal == "indeed":
-                    results.extend(self.scan_indeed(target.value, label=target.label))
+                    target_jobs = self.scan_indeed(target.value, label=target.label)
                 elif portal == "adzuna":
-                    results.extend(self.scan_adzuna(target.value, label=target.label))
+                    target_jobs = self.scan_adzuna(target.value, label=target.label)
                 else:
                     log.info("Skipping unsupported portal target: %s", target.portal)
+                    self.last_run_results.append(SourceRunResult(
+                        portal, target.value, "failure", label=target.label,
+                        error_type="UnsupportedPortal", error="scan unavailable",
+                    ))
+                    continue
+                results.extend(target_jobs)
+                failed = bool(self._active_scan_error)
+                self.last_run_results.append(SourceRunResult(
+                    portal,
+                    target.value,
+                    "failure" if failed else ("success" if target_jobs else "zero"),
+                    result_count=len(target_jobs),
+                    label=target.label,
+                    error_type=self._active_scan_error,
+                    error="scan failed" if failed else "",
+                ))
             except Exception as exc:
                 log.warning("Portal scan failed for %s:%s — %s", target.portal, target.value, exc)
+                self.last_run_results.append(SourceRunResult(
+                    target.portal, target.value, "failure", label=target.label,
+                    error_type=exc.__class__.__name__, error="scan failed",
+                ))
 
         deduped: dict[str, PortalJob] = {}
         for job in results:
-            deduped[job.url] = job
+            deduped[job.identity_key] = job
 
         return list(deduped.values())
 
     def scan_greenhouse_board(self, board_token: str, *, label: str = "") -> list[PortalJob]:
         """Read jobs from the public Greenhouse board API."""
         url = f"https://boards-api.greenhouse.io/v1/boards/{board_token}/jobs"
-        response = requests.get(url, timeout=self.timeout)
+        response = requests.get(url, params={"content": "true"}, timeout=self.timeout)
         response.raise_for_status()
         payload: dict[str, Any] = response.json()
 
         jobs: list[PortalJob] = []
         company_name = label or board_token.replace("-", " ").title()
+        fetched_at = utc_now_iso()
         for item in payload.get("jobs", []):
             title = item.get("title", "").strip()
             location = self._coerce_location(item.get("location"))
@@ -138,6 +234,22 @@ class PortalScanner:
                     location=location,
                     portal="greenhouse",
                     matched_keywords=matched,
+                    description=_extract_snippet(str(item.get("content") or "")),
+                    provider_tenant=board_token,
+                    provider_job_id=str(job_id or ""),
+                    canonical_url=direct_url,
+                    fetched_at=fetched_at,
+                    listing_state="listed",
+                    posted_at=str(item.get("published_at") or item.get("updated_at") or ""),
+                    expires_at=str(item.get("expires_at") or ""),
+                    compensation=self._coerce_mapping(
+                        item.get("compensation") or item.get("pay_transparency")
+                    ),
+                    metadata={
+                        "departments": item.get("departments") or [],
+                        "offices": item.get("offices") or [],
+                        "fields": item.get("metadata") or [],
+                    },
                 )
             )
         return jobs
@@ -151,6 +263,7 @@ class PortalScanner:
 
         jobs: list[PortalJob] = []
         company_name = label or site.replace("-", " ").title()
+        fetched_at = utc_now_iso()
         for item in payload:
             title = item.get("text", "").strip()
             categories_raw: object = item.get("categories") or {}
@@ -160,14 +273,41 @@ class PortalScanner:
             if self.keywords and not matched:
                 continue
 
+            description_parts = [
+                str(item.get("descriptionPlain") or _extract_snippet(str(item.get("description") or ""))).strip()
+            ]
+            for section in item.get("lists") or []:
+                if not isinstance(section, dict):
+                    continue
+                heading = str(section.get("text") or "").strip()
+                content = _extract_snippet(str(section.get("content") or ""))
+                description_parts.append("\n".join(filter(None, (heading, content))))
+            description_parts.append(
+                str(item.get("additionalPlain") or _extract_snippet(str(item.get("additional") or ""))).strip()
+            )
+            description = "\n".join(dict.fromkeys(part for part in description_parts if part))
+            job_url = str(item.get("hostedUrl") or item.get("applyUrl") or "").strip()
+            provider_job_id = str(item.get("id") or "").strip()
+
             jobs.append(
                 PortalJob(
                     company=item.get("company") or company_name,
                     title=title,
-                    url=item.get("hostedUrl", "").strip(),
+                    url=job_url,
                     location=location,
                     portal="lever",
                     matched_keywords=matched,
+                    description=description,
+                    provider_tenant=site,
+                    provider_job_id=provider_job_id,
+                    canonical_url=canonicalize_role_url(job_url, "lever"),
+                    fetched_at=fetched_at,
+                    listing_state="listed",
+                    posted_at=self._coerce_timestamp(item.get("createdAt")),
+                    expires_at=self._coerce_timestamp(item.get("expiresAt")),
+                    compensation=self._coerce_mapping(item.get("salaryRange")),
+                    workplace_type=str(item.get("workplaceType") or "").strip(),
+                    metadata={"categories": categories},
                 )
             )
         return jobs
@@ -186,6 +326,7 @@ class PortalScanner:
 
         jobs: list[PortalJob] = []
         company_name = label or org_slug.replace("-", " ").title()
+        fetched_at = utc_now_iso()
         for item in payload.get("jobs", []):
             title = str(item.get("title", "")).strip()
             location = self._coerce_ashby_location(item)
@@ -208,6 +349,24 @@ class PortalScanner:
                     location=location,
                     portal="ashby",
                     matched_keywords=matched,
+                    description=str(
+                        item.get("descriptionPlain")
+                        or _extract_snippet(str(item.get("descriptionHtml") or item.get("description") or ""))
+                    ).strip(),
+                    provider_tenant=org_slug,
+                    provider_job_id=str(item.get("id") or "").strip(),
+                    canonical_url=canonicalize_role_url(href, "ashby"),
+                    fetched_at=fetched_at,
+                    listing_state="listed" if item.get("isListed", True) else "closed",
+                    posted_at=str(item.get("publishedAt") or ""),
+                    expires_at=str(item.get("expiresAt") or ""),
+                    compensation=self._coerce_mapping(item.get("compensation")),
+                    workplace_type=str(item.get("workplaceType") or "").strip(),
+                    metadata={
+                        "department": item.get("department"),
+                        "team": item.get("team"),
+                        "employment_type": item.get("employmentType"),
+                    },
                 )
             )
         return jobs
@@ -229,6 +388,7 @@ class PortalScanner:
         """
         if not ADZUNA_APP_ID or not ADZUNA_API_KEY:
             log.warning("Adzuna scan skipped — ADZUNA_APP_ID / ADZUNA_API_KEY not set")
+            self._active_scan_error = "ConfigurationError"
             return []
 
         # Adzuna location: split "Austin, TX" → what="field service" where="Austin"
@@ -250,16 +410,20 @@ class PortalScanner:
         except requests.HTTPError as exc:
             status = exc.response.status_code if exc.response is not None else "unknown"
             log.warning("Adzuna request failed for %r: HTTP %s", query, status)
+            self._active_scan_error = "HTTPError"
             return []
         except requests.RequestException as exc:
             log.warning("Adzuna request failed for %r: %s", query, exc.__class__.__name__)
+            self._active_scan_error = exc.__class__.__name__
             return []
         except Exception as exc:
             log.warning("Adzuna request failed for %r: unexpected %s", query, exc.__class__.__name__)
+            self._active_scan_error = exc.__class__.__name__
             return []
 
         payload: dict[str, Any] = response.json()
         jobs: list[PortalJob] = []
+        fetched_at = utc_now_iso()
 
         for item in payload.get("results", []):
             title = str(item.get("title", "")).strip()
@@ -279,6 +443,18 @@ class PortalScanner:
                 portal="adzuna",
                 matched_keywords=matched,
                 description=_extract_snippet(str(item.get("description", ""))),
+                provider_job_id=str(item.get("id") or "").strip(),
+                canonical_url=canonicalize_role_url(job_url, "adzuna"),
+                fetched_at=fetched_at,
+                listing_state="listed",
+                posted_at=str(item.get("created") or ""),
+                expires_at=str(item.get("expires_at") or ""),
+                compensation=self._coerce_mapping({
+                    "min": item.get("salary_min"),
+                    "max": item.get("salary_max"),
+                }),
+                source_kind="aggregator",
+                metadata={"category": item.get("category") or {}},
             ))
 
         log.info("Adzuna scan for %r in %r: %d matches", query, where, len(jobs))
@@ -311,6 +487,7 @@ class PortalScanner:
             response.raise_for_status()
         except Exception as exc:
             log.warning("Google Jobs request failed for %r: %s", query, exc)
+            self._active_scan_error = exc.__class__.__name__
             return []
 
         ld_pattern = re.compile(
@@ -318,6 +495,7 @@ class PortalScanner:
             re.DOTALL | re.IGNORECASE,
         )
         jobs: list[PortalJob] = []
+        fetched_at = utc_now_iso()
 
         for m in ld_pattern.finditer(response.text):
             try:
@@ -361,6 +539,15 @@ class PortalScanner:
                     location=location,
                     portal="google_jobs",
                     matched_keywords=matched,
+                    description=_extract_snippet(str(item.get("description") or "")),
+                    canonical_url=canonicalize_role_url(job_url),
+                    fetched_at=fetched_at,
+                    listing_state="listed",
+                    posted_at=str(item.get("datePosted") or ""),
+                    expires_at=str(item.get("validThrough") or ""),
+                    compensation=self._coerce_mapping(item.get("baseSalary")),
+                    source_kind="aggregator",
+                    metadata={"employment_type": item.get("employmentType")},
                 ))
 
         log.info("Google Jobs scan for %r: %d matches", query, len(jobs))
@@ -390,11 +577,13 @@ class PortalScanner:
             response.raise_for_status()
         except Exception as exc:
             log.warning("Indeed request failed for %r: %s", query, exc)
+            self._active_scan_error = exc.__class__.__name__
             return []
 
         # Indeed embeds job data in a window._initialData JSON blob.
         match = re.search(r'window\._initialData\s*=\s*(\{.*?\});\s*</script>', response.text, re.DOTALL)
         jobs: list[PortalJob] = []
+        fetched_at = utc_now_iso()
 
         if match:
             try:
@@ -425,9 +614,16 @@ class PortalScanner:
                         location=loc,
                         portal="indeed",
                         matched_keywords=matched,
+                        provider_job_id=job_key,
+                        canonical_url=canonicalize_role_url(job_url, "indeed"),
+                        fetched_at=fetched_at,
+                        listing_state="listed",
+                        posted_at=str(item.get("datePublished") or item.get("datePosted") or ""),
+                        source_kind="aggregator",
                     ))
             except (json.JSONDecodeError, AttributeError, TypeError) as exc:
                 log.warning("Indeed JSON parse failed: %s", exc)
+                self._active_scan_error = exc.__class__.__name__
 
         # Fallback: extract job cards from HTML anchors when JSON blob is absent.
         if not jobs:
@@ -447,6 +643,11 @@ class PortalScanner:
                     location=location,
                     portal="indeed",
                     matched_keywords=matched,
+                    provider_job_id=jk,
+                    canonical_url=f"https://www.indeed.com/viewjob?jk={jk}",
+                    fetched_at=fetched_at,
+                    listing_state="listed",
+                    source_kind="aggregator",
                 ))
 
         log.info("Indeed scan for %r in %r: %d matches", query, location, len(jobs))
@@ -528,6 +729,23 @@ class PortalScanner:
         if isinstance(value, str):
             return value.strip()
         return ""
+
+    @staticmethod
+    def _coerce_timestamp(value: object) -> str:
+        if isinstance(value, (int, float)):
+            try:
+                return datetime.fromtimestamp(value / 1000, tz=UTC).isoformat()
+            except (OSError, OverflowError, ValueError):
+                return ""
+        return str(value or "").strip()
+
+    @staticmethod
+    def _coerce_mapping(value: object) -> dict[str, Any]:
+        if isinstance(value, dict):
+            return cast(dict[str, Any], value)
+        if value not in (None, ""):
+            return {"summary": str(value)}
+        return {}
 
     @staticmethod
     def _strip_html(text: str) -> str:

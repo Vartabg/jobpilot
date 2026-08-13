@@ -69,7 +69,7 @@ def test_drafts_why_answer_from_true_accounts():
     assert "JobPilot" in draft.answer
     assert "View field service work" in draft.answer
     assert "direct customer contact" not in draft.answer
-    assert draft.source == "fallback"
+    assert draft.source == "account_grounded"
 
 
 @requires_personal_data
@@ -214,6 +214,116 @@ def test_account_tags_drive_selection_and_field_narrative(tmp_path):
     assert "my on-site install work" in draft.answer
 
 
+def test_account_tag_selects_but_never_invents_field_claims(tmp_path):
+    accounts_path = _write_accounts(
+        tmp_path,
+        {"accounts": [
+            {
+                "id": "plain",
+                "title": "Documented project",
+                "summary": "Built a small scheduling tracker.",
+                "tags": ["headline"],
+            },
+            {
+                "id": "tag-only",
+                "title": "Second documented project",
+                "summary": "Recorded equipment inventory.",
+                "tags": ["field-primary"],
+            },
+        ]},
+    )
+
+    draft = ApplicationAnswerer(
+        profile_store=EmptyProfileStore(),
+        accounts_path=accounts_path,
+        use_bro=False,
+    ).draft(
+        "Why are you interested?",
+        jd_text="Customer travel and on-site deployment.",
+        title="Field Technician",
+    )
+
+    assert "customer-site execution" not in draft.answer
+    assert "ownership under pressure" not in draft.answer
+    assert "Recorded equipment inventory" in draft.answer
+
+
+def test_generic_answer_uses_no_unstored_strength_claims(tmp_path):
+    accounts_path = _write_accounts(
+        tmp_path,
+        {"accounts": [{
+            "id": "one",
+            "title": "Documented project",
+            "summary": "Built a small scheduling tracker.",
+        }]},
+    )
+
+    draft = ApplicationAnswerer(
+        profile_store=EmptyProfileStore(),
+        accounts_path=accounts_path,
+        use_bro=False,
+    ).draft("Anything else?")
+
+    for invented in ("practical ownership", "fast learning", "clear delivery"):
+        assert invented not in draft.answer.lower()
+
+
+def test_title_only_account_does_not_become_hands_on_strength_claim(tmp_path):
+    accounts_path = _write_accounts(
+        tmp_path,
+        {"accounts": [{"id": "title-only", "title": "Named account"}]},
+    )
+
+    draft = ApplicationAnswerer(
+        profile_store=EmptyProfileStore(),
+        accounts_path=accounts_path,
+        use_bro=False,
+    ).draft("What strengths do you bring?")
+
+    assert draft.answer == ""
+    assert "hands-on" not in draft.answer.lower()
+
+
+def test_jd_overlap_cannot_make_unrelated_account_evidence_for_skill_question(tmp_path):
+    accounts_path = _write_accounts(
+        tmp_path,
+        {"accounts": [{
+            "id": "clinic-scheduler",
+            "title": "Clinic scheduling work",
+            "summary": "Built a customer scheduling tracker for a community clinic.",
+            "skills": ["customer support", "scheduling", "clinic operations"],
+        }]},
+    )
+    answerer = ApplicationAnswerer(
+        profile_store=EmptyProfileStore(),
+        accounts_path=accounts_path,
+        use_bro=False,
+    )
+
+    draft = answerer.draft(
+        "Describe your Kubernetes production experience.",
+        jd_text=(
+            "Operate Kubernetes clusters while partnering with clinic customers "
+            "on scheduling and support workflows."
+        ),
+        title="Platform Engineer",
+    )
+
+    assert draft.answer == ""
+    assert draft.account_ids == []
+    assert draft.source == "missing_evidence"
+    assert draft.confidence == 0.0
+    assert any("Missing evidence" in warning for warning in draft.warnings)
+    assert answerer.select_accounts(
+        "Describe your Kubernetes production experience.",
+        jd_text=(
+            "Operate Kubernetes clusters while partnering with clinic customers "
+            "on scheduling and support workflows."
+        ),
+        title="Platform Engineer",
+    ) == []
+
+
 def test_module_contains_no_author_identity():
     source = Path(application_answerer.__file__).read_text()
     for fragment in (
@@ -227,3 +337,32 @@ def test_module_contains_no_author_identity():
         "field engineering",
     ):
         assert fragment.lower() not in source.lower(), f"author literal {fragment!r} still in module"
+
+
+def test_ai_hallucination_cannot_enter_external_answer(tmp_path, monkeypatch):
+    accounts_path = _write_accounts(
+        tmp_path,
+        {"accounts": [{
+            "id": "clinic",
+            "title": "Clinic scheduling work",
+            "summary": "Built a scheduling tracker for a community clinic.",
+        }]},
+    )
+    monkeypatch.setattr(
+        "jobpilot.core.llm_client.complete",
+        lambda *_args, **_kwargs: (
+            "I led fifty NASA engineers, earned a Stanford doctorate, and "
+            "improved revenue by 900 percent."
+        ),
+    )
+
+    draft = ApplicationAnswerer(
+        profile_store=EmptyProfileStore(),
+        accounts_path=accounts_path,
+        use_bro=True,
+    ).draft("Tell me about yourself.")
+
+    assert draft.source == "account_grounded"
+    assert "NASA" not in draft.answer
+    assert "Stanford" not in draft.answer
+    assert "900" not in draft.answer

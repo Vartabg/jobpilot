@@ -1,9 +1,15 @@
 """The everyday jobs command must reconcile before emitting recommendations."""
 
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from typer.testing import CliRunner
+
 import jobpilot.cli as cli
+from jobpilot.core.queue_builder import QueueJob
+
+runner = CliRunner()
 
 
 def test_claim_state_is_exposed_without_changing_queue_json(tmp_path):
@@ -75,3 +81,97 @@ def test_json_job_payload_includes_claim_state():
 
     assert payload["claim_state"] == "unvetted"
     assert payload["status"] == "queued"
+
+
+def _queue_job(**overrides) -> QueueJob:
+    values = {
+        "id": "ready",
+        "company": "Acme",
+        "title": "Customer Engineer",
+        "url": "https://jobs.example.test/acme/1",
+        "location": "Austin",
+        "portal": "greenhouse",
+        "track": "both",
+        "fit_score": 80,
+        "keywords": ["customer"],
+        "status": "queued",
+        "decision": "apply_now",
+        "assessment_status": "assessed",
+        "legitimacy_state": "recommend",
+        "evidence_grade": "A",
+        "verified_at": datetime.now(UTC).isoformat(),
+    }
+    values.update(overrides)
+    return QueueJob(**values)
+
+
+def test_cached_json_queue_reconciles_before_emitting(monkeypatch):
+    reconciled: list[bool] = []
+    monkeypatch.setattr("pathlib.Path.exists", lambda _path: True)
+    monkeypatch.setattr(
+        "jobpilot.core.queue_builder.reconcile_queue_with_tracker",
+        lambda: reconciled.append(True) or (0, 1),
+    )
+    monkeypatch.setattr(
+        "jobpilot.core.queue_builder.load_queue",
+        lambda: [_queue_job()],
+    )
+
+    result = runner.invoke(cli.app, ["queue", "--json", "--fresh", "--no-open"])
+
+    assert result.exit_code == 0
+    assert reconciled == [True]
+    assert '"id": "ready"' in result.stdout
+
+
+def test_fresh_json_hides_hold_and_investigate_rows(monkeypatch):
+    monkeypatch.setattr("pathlib.Path.exists", lambda _path: True)
+    monkeypatch.setattr(
+        "jobpilot.core.queue_builder.reconcile_queue_with_tracker",
+        lambda: (0, 2),
+    )
+    monkeypatch.setattr(
+        "jobpilot.core.queue_builder.load_queue",
+        lambda: [
+            _queue_job(),
+            _queue_job(
+                id="hold",
+                title="Unverified Role",
+                decision="investigate",
+                legitimacy_state="hold",
+                verified_at="",
+            ),
+        ],
+    )
+
+    result = runner.invoke(cli.app, ["queue", "--json", "--fresh", "--no-open"])
+
+    assert result.exit_code == 0
+    assert '"id": "ready"' in result.stdout
+    assert '"id": "hold"' not in result.stdout
+
+
+def test_board_help_describes_the_apply_ready_gate():
+    result = runner.invoke(cli.app, ["board", "--help"])
+
+    assert result.exit_code == 0
+    assert "verified apply-ready roles" in result.stdout
+
+
+def test_queue_open_points_to_api_backed_dashboard_not_html_file(monkeypatch):
+    monkeypatch.setattr("pathlib.Path.exists", lambda _path: True)
+    monkeypatch.setattr(
+        "jobpilot.core.queue_builder.reconcile_queue_with_tracker",
+        lambda: (0, 1),
+    )
+    monkeypatch.setattr(
+        "jobpilot.core.queue_builder.load_queue",
+        lambda: [_queue_job()],
+    )
+
+    result = runner.invoke(cli.app, ["queue", "--no-board"])
+
+    assert result.exit_code == 0
+    assert "jobpilot serve" in result.stdout
+    assert "http://127.0.0.1:8767/" in result.stdout
+    assert "dashboard.html" not in result.stdout
