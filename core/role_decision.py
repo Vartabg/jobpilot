@@ -114,6 +114,7 @@ def _first_gap(matches: tuple[RequirementMatch, ...]) -> str:
         ("logistics", EvidenceStatus.CONTRADICTED),
         ("mandatory", EvidenceStatus.UNKNOWN),
         ("logistics", EvidenceStatus.UNKNOWN),
+        ("preferred", EvidenceStatus.CONTRADICTED),
         ("work_context", EvidenceStatus.UNKNOWN),
         ("preferred", EvidenceStatus.UNKNOWN),
     )

@@ -178,6 +178,50 @@ def test_modern_candidate_headings_and_reset_sections_are_classified():
     )
 
 
+def test_perks_and_named_compensation_do_not_become_candidate_gaps():
+    parsed = RequirementMatcher.parse(
+        "Qualifications We Value:\n"
+        "- Technical discovery experience.\n"
+        "Perks & Benefits:\n"
+        "- Remote work setup budget to create a productive home office.\n"
+        "Compensation at Cresta\n"
+        "The posted base salary range reflects location and experience.\n"
+        "Base Salary Range: $180,000-$205,000."
+    )
+
+    assert parsed.preferred == ("Technical discovery experience.",)
+    assert not any(
+        any(term in item for term in ("work setup", "salary", "$180,000"))
+        for item in (
+            *parsed.mandatory,
+            *parsed.preferred,
+            *parsed.responsibilities,
+            *parsed.work_context,
+            *parsed.logistics,
+        )
+    )
+
+
+def test_contradicted_preference_is_clearer_than_generic_context_gap():
+    result = RoleDecisionEngine().assess(
+        title="Solutions Engineer",
+        jd_text=(
+            "Responsibilities\n"
+            "- Lead technical discovery.\n"
+            "- Build customer solutions.\n"
+            "- Troubleshoot production systems.\n"
+            "Work environment\n"
+            "- Thrive as a self-starter in a collaborative environment.\n"
+            "Preferred qualifications\n"
+            "- 4+ years of sales experience.\n"
+            "- AWS architecture experience."
+        ),
+        profile=UserProfile(domain_experience={"sales": 2}),
+    )
+
+    assert result.biggest_gap == "4+ years of sales experience."
+
+
 def test_partial_skill_overlap_does_not_prove_a_composite_responsibility():
     parsed = RequirementMatcher.parse(
         "About the role\n"

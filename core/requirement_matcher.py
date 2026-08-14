@@ -108,8 +108,9 @@ _HEADERS = (
 _RESET_HEADER = _header(
     r"about (?:us|the company|our company|the team|our team)|"
     r"(?:company|team) (?:overview|description)|meet (?:the|our) team|"
-    r"benefits?(?: and perks?|\s*&\s*perks?)?|perks?|what we offer|total rewards?|"
-    r"compensation|salary|pay range|our values|"
+    r"benefits?(?: and perks?|\s*&\s*perks?)?|"
+    r"perks?(?: and benefits?|\s*&\s*benefits?)?|what we offer|total rewards?|"
+    r"compensation(?: at [^:]+)?|(?:base )?salary(?: range)?|pay range|our values|"
     r"conclusion|(?:security|recruiting|fraud|scam) notice|"
     r"(?:equal employment|equal opportunity|eeo|diversity|inclusion|privacy|"
     r"accommodation|legal|disclaimer)(?: statement| notice| policy)?|"
