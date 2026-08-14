@@ -8,13 +8,13 @@ to produce CSV exports and Rich terminal reports.
 import csv
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional
 
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
 from jobpilot.core.application_tracker import get_application_tracker
+from jobpilot.core.config import DATA_DIR as JOBPILOT_DATA_DIR
 from jobpilot.core.logger import get_logger
 from jobpilot.core.opportunity_ledger import OpportunityLedger
 from jobpilot.core.outcome_metrics import summarize_outcomes
@@ -23,7 +23,7 @@ from jobpilot.learning.action_recorder import get_action_recorder
 log = get_logger(__name__)
 console = Console()
 
-DATA_DIR = Path(__file__).parent.parent / "data" / "reports"
+DATA_DIR = JOBPILOT_DATA_DIR / "reports"
 
 
 def _calibration_note(*, decided: int, review_eligible: bool) -> str:
@@ -41,7 +41,7 @@ def _calibration_note(*, decided: int, review_eligible: bool) -> str:
     )
 
 
-def export_csv(days: int = 30, output_path: Optional[Path] = None) -> Path:
+def export_csv(days: int = 30, output_path: Path | None = None) -> Path:
     """Export application history to CSV.
 
     Returns the path to the written CSV file.

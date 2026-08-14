@@ -5,8 +5,14 @@ Every tunable value lives here.  Modules import from this file
 instead of defining their own magic numbers.
 """
 
+import json
 import os
+import sys
+from collections.abc import Mapping
+from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
+from urllib.parse import unquote, urlsplit
+from urllib.request import url2pathname
 
 # Load .env if python-dotenv is available (dev convenience).
 try:
@@ -18,7 +24,61 @@ except ImportError:
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
-DATA_DIR = Path(__file__).parent.parent / "data"
+
+
+def _editable_project_root() -> Path | None:
+    """Return the source checkout recorded by an editable installation."""
+    try:
+        direct_url = distribution("jobpilot").read_text("direct_url.json")
+        payload = json.loads(direct_url or "{}")
+    except (PackageNotFoundError, json.JSONDecodeError, OSError, TypeError):
+        return None
+    if not payload.get("dir_info", {}).get("editable"):
+        return None
+    try:
+        parsed = urlsplit(str(payload.get("url", "")))
+        if parsed.scheme != "file":
+            return None
+        root = Path(url2pathname(unquote(parsed.path)))
+    except (TypeError, ValueError):
+        return None
+    return root if (root / "pyproject.toml").is_file() else None
+
+
+def _data_dir_from_locations(
+    *,
+    package_root: Path,
+    editable_root: Path | None,
+    environ: Mapping[str, str],
+    home: Path,
+    platform_name: str,
+) -> Path:
+    """Choose a stable, writable state directory for the current runtime."""
+    explicit = environ.get("JOBPILOT_DATA_DIR", "").strip()
+    if explicit:
+        configured = Path(explicit).expanduser()
+        return configured if configured.is_absolute() else Path.cwd() / configured
+
+    if (package_root / "pyproject.toml").is_file():
+        return package_root / "data"
+    if editable_root is not None:
+        return editable_root / "data"
+
+    if platform_name == "darwin":
+        return home / "Library" / "Application Support" / "JobPilot"
+    if os.name == "nt" and environ.get("LOCALAPPDATA"):
+        return Path(environ["LOCALAPPDATA"]) / "JobPilot"
+    xdg_data_home = environ.get("XDG_DATA_HOME", "").strip()
+    return (Path(xdg_data_home).expanduser() if xdg_data_home else home / ".local" / "share") / "jobpilot"
+
+
+DATA_DIR = _data_dir_from_locations(
+    package_root=Path(__file__).resolve().parent.parent,
+    editable_root=_editable_project_root(),
+    environ=os.environ,
+    home=Path.home(),
+    platform_name=sys.platform,
+)
 SESSION_FILE = DATA_DIR / "session.json"
 SETTINGS_FILE = DATA_DIR / "settings.json"
 

@@ -63,10 +63,12 @@ def test_built_wheel_installs_and_runs_cli_outside_repository(tmp_path: Path) ->
         (
             "import jobpilot; "
             "from jobpilot import cli; "
+            "from jobpilot.core.config import DATA_DIR; "
             "from jobpilot.core.server import DASHBOARD_PATH; "
             "from jobpilot.gigs.server import _PAGE; "
             "assert cli.app and DASHBOARD_PATH.is_file() and _PAGE.is_file(); "
-            "print(jobpilot.__file__)"
+            "assert 'site-packages' not in DATA_DIR.parts; "
+            "print(jobpilot.__file__, DATA_DIR)"
         ),
         cwd=tmp_path,
     )

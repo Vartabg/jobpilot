@@ -3,17 +3,17 @@ Logger — structured logging for JobPilot.
 
 Provides a configured logger with:
   - Rich console handler for pretty terminal output
-  - Rotating file handler to data/jobpilot.log (max 5MB × 3 backups)
+  - Rotating file handler to data/jobpilot.log (max 5MB x 3 backups)
   - Module-scoped getLogger() for use across the codebase
 """
 
 import logging
 from logging.handlers import RotatingFileHandler
-from pathlib import Path
 
 from rich.logging import RichHandler
 
-DATA_DIR = Path(__file__).parent.parent / "data"
+from jobpilot.core.config import DATA_DIR
+
 LOG_FILE = DATA_DIR / "jobpilot.log"
 
 _configured = False

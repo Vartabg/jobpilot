@@ -6,11 +6,12 @@ import hashlib
 from datetime import datetime
 from pathlib import Path
 
+from jobpilot.core.config import DATA_DIR as JOBPILOT_DATA_DIR
 from jobpilot.core.logger import get_logger
 
 log = get_logger(__name__)
 
-DATA_DIR = Path(__file__).parent.parent / "data" / "cover_letters"
+DATA_DIR = JOBPILOT_DATA_DIR / "cover_letters"
 
 
 def _jd_hash(jd_text: str) -> str:
