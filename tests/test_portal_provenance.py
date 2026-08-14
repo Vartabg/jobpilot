@@ -3,6 +3,7 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+import requests
 
 from jobpilot.core.portal_scanner import PortalScanner, ScanTarget
 
@@ -42,11 +43,11 @@ def test_greenhouse_html_keeps_sections_scoreable(mock_get: MagicMock) -> None:
         "title": "Implementation Engineer",
         "location": {"name": "Austin, TX"},
         "content": """
-            <h2>Responsibilities</h2>
+            <h2><strong>Responsibilities</strong></h2>
             <ul><li>Lead customer discovery workshops.</li></ul>
-            <h2>Required qualifications</h2>
+            <h2><strong>Required qualifications</strong></h2>
             <ul><li>Systems troubleshooting experience.</li></ul>
-            <h2>Preferred qualifications</h2>
+            <h2><strong>Preferred qualifications</strong></h2>
             <ul><li>Python automation experience.</li></ul>
         """,
     }]})
@@ -55,7 +56,40 @@ def test_greenhouse_html_keeps_sections_scoreable(mock_get: MagicMock) -> None:
 
     from jobpilot.core.requirement_matcher import RequirementMatcher
 
-    assert RequirementMatcher.parse(job.description).is_sufficient
+    requirements = RequirementMatcher.parse(job.description)
+    assert requirements.is_sufficient
+    assert "<" not in job.description
+    assert "<" not in requirements.raw_text
+
+
+@patch("jobpilot.core.portal_scanner.requests.get")
+def test_lever_prefers_full_html_over_incomplete_plain_variant(mock_get: MagicMock) -> None:
+    mock_get.return_value = _response([{
+        "id": "lever-full-jd",
+        "text": "Implementation Engineer",
+        "hostedUrl": "https://jobs.lever.co/acme/lever-full-jd",
+        "descriptionPlain": "Short introduction.",
+        "description": (
+            "<p>Short introduction.</p>"
+            "<p>Partner with customers throughout complex deployments.</p>"
+        ),
+        "lists": [{
+            "text": "<strong>Required qualifications</strong>",
+            "content": (
+                "<ul><li>Systems troubleshooting experience.</li>"
+                "<li>Clear technical communication.</li></ul>"
+            ),
+        }],
+        "additional": "<p>Travel to customer sites as needed.</p>",
+    }])
+
+    job = PortalScanner().scan_lever_board("acme")[0]
+
+    assert "Partner with customers throughout complex deployments." in job.description
+    assert "Systems troubleshooting experience." in job.description
+    assert "Travel to customer sites as needed." in job.description
+    assert "<strong>" not in job.description
+    assert "<li>" not in job.description
 
 
 @patch("jobpilot.core.portal_scanner.requests.get")
@@ -141,6 +175,30 @@ def test_ashby_keeps_listed_state_description_and_compensation(mock_get: MagicMo
 
 
 @patch("jobpilot.core.portal_scanner.requests.get")
+def test_ashby_prefers_full_html_over_incomplete_plain_variant(mock_get: MagicMock) -> None:
+    mock_get.return_value = _response({"jobs": [{
+        "id": "ashby-full-jd",
+        "title": "Customer Engineer",
+        "jobUrl": "https://jobs.ashbyhq.com/acme/ashby-full-jd",
+        "descriptionPlain": "Short introduction.",
+        "descriptionHtml": (
+            "<p>Short introduction.</p>"
+            "<p><strong>Responsibilities</strong></p>"
+            "<ul><li>Lead technical discovery with customers.</li>"
+            "<li>Own complex product deployments.</li></ul>"
+        ),
+    }]})
+
+    job = PortalScanner().scan_ashby_board("acme")[0]
+
+    assert "Responsibilities" in job.description
+    assert "Lead technical discovery with customers." in job.description
+    assert "Own complex product deployments." in job.description
+    assert "<strong>" not in job.description
+    assert "<li>" not in job.description
+
+
+@patch("jobpilot.core.portal_scanner.requests.get")
 def test_target_runs_record_success_zero_and_failure(mock_get: MagicMock) -> None:
     mock_get.side_effect = [
         _response({"jobs": [{"id": 1, "title": "Engineer"}]}),
@@ -160,6 +218,25 @@ def test_target_runs_record_success_zero_and_failure(mock_get: MagicMock) -> Non
     assert [run.result_count for run in scanner.last_run_results] == [1, 0, 0]
     assert scanner.last_run_results[-1].error_type == "RuntimeError"
     assert "service unavailable" not in scanner.last_run_results[-1].error
+
+
+@patch("jobpilot.core.portal_scanner.requests.get")
+def test_http_failures_retain_status_for_actionable_source_health(
+    mock_get: MagicMock,
+) -> None:
+    response = requests.Response()
+    response.status_code = 404
+    failure = requests.HTTPError("unavailable", response=response)
+    mock_get.return_value = MagicMock(
+        raise_for_status=MagicMock(side_effect=failure),
+    )
+
+    scanner = PortalScanner()
+    assert scanner.scan_targets([ScanTarget("greenhouse", "retired-board")]) == []
+
+    assert scanner.last_run_results[0].status == "failure"
+    assert scanner.last_run_results[0].error_type == "HTTP404"
+    assert scanner.last_run_results[0].error == "scan failed"
 
 
 @pytest.mark.parametrize("portal", ["greenhouse", "lever", "ashby"])

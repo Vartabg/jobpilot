@@ -20,8 +20,12 @@ _GREENHOUSE_HOST_ALIASES = frozenset({
 
 
 def infer_provider(url: str) -> str:
-    parsed = urlsplit(url.strip())
-    host = (parsed.hostname or "").lower()
+    try:
+        parsed = urlsplit(url.strip())
+        host = (parsed.hostname or "").lower()
+        parsed.port
+    except ValueError:
+        return ""
     query = dict(parse_qsl(parsed.query, keep_blank_values=True))
     if "greenhouse.io" in host or "gh_jid" in query:
         return "greenhouse"
@@ -41,18 +45,26 @@ def canonicalize_role_url(url: str, provider: str = "") -> str:
     raw = url.strip()
     if not raw:
         return ""
-    parsed = urlsplit(raw)
-    if not parsed.netloc:
+    try:
+        parsed = urlsplit(raw)
+        host = (parsed.hostname or "").lower()
+        port = parsed.port
+    except ValueError:
+        return ""
+    if not parsed.netloc or not host:
         return ""
     normalized_provider = provider.strip().lower() or infer_provider(raw)
-    host = (parsed.hostname or "").lower()
     if normalized_provider == "greenhouse" and host in _GREENHOUSE_HOST_ALIASES:
         # Greenhouse serves the same board roles from both hostnames. Keeping a
         # single canonical host prevents a host migration from creating a new
         # role in application history.
         host = "boards.greenhouse.io"
-    port = parsed.port
-    netloc = host if not port or port in {80, 443} else f"{host}:{port}"
+    display_host = f"[{host}]" if ":" in host else host
+    netloc = (
+        display_host
+        if not port or port in {80, 443}
+        else f"{display_host}:{port}"
+    )
     path = re.sub(r"/{2,}", "/", parsed.path).rstrip("/") or "/"
     pairs = parse_qsl(parsed.query, keep_blank_values=True)
     if normalized_provider == "indeed":
@@ -74,8 +86,21 @@ def canonicalize_role_url(url: str, provider: str = "") -> str:
 
 def is_safe_public_role_url(url: str) -> bool:
     """Only absolute HTTPS URLs may be exposed as posting links."""
-    parsed = urlsplit((url or "").strip())
-    return parsed.scheme.lower() == "https" and bool(parsed.hostname)
+    raw = (url or "").strip()
+    if any(ord(character) < 32 or ord(character) == 127 for character in raw):
+        return False
+    try:
+        parsed = urlsplit(raw)
+        host = parsed.hostname
+        parsed.port
+    except ValueError:
+        return False
+    return (
+        parsed.scheme.lower() == "https"
+        and bool(host)
+        and parsed.username is None
+        and parsed.password is None
+    )
 
 
 @dataclass(frozen=True)

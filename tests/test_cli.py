@@ -192,21 +192,23 @@ def test_resume_output_uses_raw_jd_evidence_not_legacy_fit(tmp_path: Path):
     tailor.generate_from_text.return_value = draft
 
     with (
-        patch.object(cli, "ResumeTailor", return_value=tailor),
+        patch.object(cli, "ResumeTailor", return_value=tailor) as tailor_class,
         patch.object(
             cli,
             "_assess_score_text",
             return_value=_decision_for_materials(),
         ) as assess,
     ):
-        result = runner.invoke(app, ["resume", FULL_SCORE_JD, "--no-bro"])
+        result = runner.invoke(app, ["resume", FULL_SCORE_JD])
 
     assert result.exit_code == 0
+    tailor_class.assert_called_once_with(use_bro=False)
     assess.assert_called_once_with(
         title="Implementation Engineer",
         jd_text=FULL_SCORE_JD,
     )
-    assert "Decision: stretch" in result.stdout
+    assert "Role-fit decision: stretch" in result.stdout
+    assert "not Apply-ready" in result.stdout
     assert "Qualification floor: 62/100" in result.stdout
     assert "Evidence coverage: 71%" in result.stdout
     assert "Biggest gap:" in result.stdout
@@ -249,7 +251,8 @@ def test_prep_output_uses_raw_jd_evidence_not_legacy_fit(tmp_path: Path):
         title="Implementation Engineer",
         jd_text=FULL_SCORE_JD,
     )
-    assert "Decision: stretch" in result.stdout
+    assert "Role-fit decision: stretch" in result.stdout
+    assert "not Apply-ready" in result.stdout
     assert "Qualification floor: 62/100" in result.stdout
     assert "Evidence coverage: 71%" in result.stdout
     assert "Biggest gap:" in result.stdout
@@ -273,7 +276,8 @@ def test_score_inline_renders_evidence_decision_not_legacy_fit(
 
     assert result.exit_code == 0
     assert "Status: assessed" in result.stdout
-    assert "Decision: apply now" in result.stdout
+    assert "Role-fit decision: apply now" in result.stdout
+    assert "not Apply-ready" in result.stdout
     assert "Qualification lower bound" in result.stdout
     assert "Work-context evidence" in result.stdout
     assert "Evidence coverage" in result.stdout
@@ -306,7 +310,7 @@ def test_score_missing_jd_is_explicitly_unscorable(monkeypatch, tmp_path: Path):
 
     assert result.exit_code == 0
     assert "Status: unscorable" in result.stdout
-    assert "Decision: investigate" in result.stdout
+    assert "Role-fit decision: investigate" in result.stdout
     assert "Qualification lower bound" in result.stdout
     assert "unknown" in result.stdout
     assert "full job description is required" in result.stdout.lower()
@@ -347,7 +351,8 @@ def test_score_active_page_uses_role_decision_engine(monkeypatch, tmp_path: Path
 
     assert result.exit_code == 0
     assert "Status: assessed" in result.stdout
-    assert "Decision: apply now" in result.stdout
+    assert "Role-fit decision: apply now" in result.stdout
+    assert "not Apply-ready" in result.stdout
     assert "Work-context evidence" in result.stdout
     assert "linkedin.com/jobs/view/123" in result.stdout
     bridge.disconnect.assert_awaited_once()
@@ -383,7 +388,7 @@ def test_score_active_page_without_jd_fails_closed(monkeypatch, tmp_path: Path):
 
     assert result.exit_code == 0
     assert "Status: unscorable" in result.stdout
-    assert "Decision: investigate" in result.stdout
+    assert "Role-fit decision: investigate" in result.stdout
     assert "full job description is required" in result.stdout.lower()
 
 

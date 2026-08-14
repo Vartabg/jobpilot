@@ -6,7 +6,6 @@ surface likely matches before opening LinkedIn or Easy Apply.
 
 from __future__ import annotations
 
-import html
 import json
 import re
 import urllib.parse
@@ -18,6 +17,10 @@ from typing import Any, cast
 import requests  # pyright: ignore[reportMissingModuleSource]
 
 from jobpilot.core.config import ADZUNA_API_KEY, ADZUNA_APP_ID, DATA_DIR, TIMEOUT_SHORT
+from jobpilot.core.job_description import (
+    normalize_job_description,
+    richest_job_description,
+)
 from jobpilot.core.logger import get_logger
 from jobpilot.core.opportunity_models import (
     SourceObservation,
@@ -31,13 +34,10 @@ log = get_logger(__name__)
 REPORTS_DIR = DATA_DIR / "reports"
 DEFAULT_TARGETS_PATH = DATA_DIR / "portals.json"
 
-_HTML_TAG_RE = re.compile(r"<[^>]+>")
-_HTML_BLOCK_RE = re.compile(
-    r"<\s*/?\s*(?:br|div|p|li|ul|ol|h[1-6]|section|article|table|tr|td|th)\b[^>]*>",
-    re.IGNORECASE,
-)
-_WHITESPACE_RE = re.compile(r"\s+")
 
+def _http_error_type(exc: requests.HTTPError) -> str:
+    status = exc.response.status_code if exc.response is not None else None
+    return f"HTTP{status}" if status is not None else "HTTPError"
 
 def _extract_snippet(raw: str) -> str:
     """Return a clean plain-text version of a raw (possibly HTML) job description.
@@ -46,15 +46,7 @@ def _extract_snippet(raw: str) -> str:
     full text is stored so that downstream consumers (LLM rewrite, display) can
     decide how much to use.
     """
-    if not raw:
-        return ""
-    # Requirement parsing depends on section/list boundaries. Preserve those
-    # boundaries instead of collapsing a full Greenhouse JD into one enormous
-    # line (which would make an otherwise complete posting unscorable).
-    text = _HTML_BLOCK_RE.sub("\n", raw)
-    text = html.unescape(_HTML_TAG_RE.sub(" ", text))
-    lines = (_WHITESPACE_RE.sub(" ", line).strip() for line in text.splitlines())
-    return "\n".join(line for line in lines if line)
+    return normalize_job_description(raw)
 
 
 @dataclass
@@ -91,6 +83,7 @@ class PortalJob:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        self.description = normalize_job_description(self.description)
         identity = identify_role(
             self.canonical_url or self.url,
             self.portal,
@@ -186,6 +179,31 @@ class PortalScanner:
                     error_type=self._active_scan_error,
                     error="scan failed" if failed else "",
                 ))
+            except requests.HTTPError as exc:
+                error_type = _http_error_type(exc)
+                log.info("Portal target unavailable: %s (%s)", target.portal, error_type)
+                self.last_run_results.append(SourceRunResult(
+                    target.portal,
+                    target.value,
+                    "failure",
+                    label=target.label,
+                    error_type=error_type,
+                    error="scan failed",
+                ))
+            except requests.RequestException as exc:
+                log.info(
+                    "Portal request failed: %s (%s)",
+                    target.portal,
+                    exc.__class__.__name__,
+                )
+                self.last_run_results.append(SourceRunResult(
+                    target.portal,
+                    target.value,
+                    "failure",
+                    label=target.label,
+                    error_type=exc.__class__.__name__,
+                    error="scan failed",
+                ))
             except Exception as exc:
                 log.warning("Portal scan failed for %s:%s — %s", target.portal, target.value, exc)
                 self.last_run_results.append(SourceRunResult(
@@ -273,18 +291,20 @@ class PortalScanner:
             if self.keywords and not matched:
                 continue
 
-            description_parts = [
-                str(item.get("descriptionPlain") or _extract_snippet(str(item.get("description") or ""))).strip()
-            ]
+            description_parts = [richest_job_description(
+                item.get("descriptionPlain"),
+                item.get("description"),
+            )]
             for section in item.get("lists") or []:
                 if not isinstance(section, dict):
                     continue
-                heading = str(section.get("text") or "").strip()
-                content = _extract_snippet(str(section.get("content") or ""))
+                heading = normalize_job_description(section.get("text"))
+                content = normalize_job_description(section.get("content"))
                 description_parts.append("\n".join(filter(None, (heading, content))))
-            description_parts.append(
-                str(item.get("additionalPlain") or _extract_snippet(str(item.get("additional") or ""))).strip()
-            )
+            description_parts.append(richest_job_description(
+                item.get("additionalPlain"),
+                item.get("additional"),
+            ))
             description = "\n".join(dict.fromkeys(part for part in description_parts if part))
             job_url = str(item.get("hostedUrl") or item.get("applyUrl") or "").strip()
             provider_job_id = str(item.get("id") or "").strip()
@@ -349,10 +369,11 @@ class PortalScanner:
                     location=location,
                     portal="ashby",
                     matched_keywords=matched,
-                    description=str(
-                        item.get("descriptionPlain")
-                        or _extract_snippet(str(item.get("descriptionHtml") or item.get("description") or ""))
-                    ).strip(),
+                    description=richest_job_description(
+                        item.get("descriptionPlain"),
+                        item.get("descriptionHtml"),
+                        item.get("description"),
+                    ),
                     provider_tenant=org_slug,
                     provider_job_id=str(item.get("id") or "").strip(),
                     canonical_url=canonicalize_role_url(href, "ashby"),
@@ -410,7 +431,7 @@ class PortalScanner:
         except requests.HTTPError as exc:
             status = exc.response.status_code if exc.response is not None else "unknown"
             log.warning("Adzuna request failed for %r: HTTP %s", query, status)
-            self._active_scan_error = "HTTPError"
+            self._active_scan_error = _http_error_type(exc)
             return []
         except requests.RequestException as exc:
             log.warning("Adzuna request failed for %r: %s", query, exc.__class__.__name__)
@@ -485,6 +506,14 @@ class PortalScanner:
         try:
             response = requests.get(url, headers=headers, timeout=self.timeout)
             response.raise_for_status()
+        except requests.HTTPError as exc:
+            self._active_scan_error = _http_error_type(exc)
+            log.info("Google Jobs discovery unavailable (%s)", self._active_scan_error)
+            return []
+        except requests.RequestException as exc:
+            self._active_scan_error = exc.__class__.__name__
+            log.info("Google Jobs discovery unavailable (%s)", self._active_scan_error)
+            return []
         except Exception as exc:
             log.warning("Google Jobs request failed for %r: %s", query, exc)
             self._active_scan_error = exc.__class__.__name__
@@ -575,6 +604,14 @@ class PortalScanner:
         try:
             response = requests.get(url, headers=headers, timeout=self.timeout)
             response.raise_for_status()
+        except requests.HTTPError as exc:
+            self._active_scan_error = _http_error_type(exc)
+            log.info("Indeed discovery unavailable (%s)", self._active_scan_error)
+            return []
+        except requests.RequestException as exc:
+            self._active_scan_error = exc.__class__.__name__
+            log.info("Indeed discovery unavailable (%s)", self._active_scan_error)
+            return []
         except Exception as exc:
             log.warning("Indeed request failed for %r: %s", query, exc)
             self._active_scan_error = exc.__class__.__name__

@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from jobpilot.core.job_description import normalize_job_description
 from jobpilot.core.profile_store import UserProfile
 from jobpilot.core.requirement_matcher import EvidenceStatus, RequirementMatcher
 from jobpilot.core.role_decision import RoleDecisionEngine
@@ -178,6 +179,79 @@ def test_missing_jd_is_unscorable_not_neutral():
     assert result.decision == "investigate"
     assert result.qualification_lower_bound is None
     assert result.work_context_match is None
+
+
+def test_html_requirements_never_escape_into_biggest_gap():
+    jd = """
+        <h2><strong>Responsibilities</strong></h2>
+        <ul>
+          <li>Lead customer discovery workshops and product demonstrations.</li>
+          <li>Troubleshoot customer hardware and software integrations.</li>
+        </ul>
+        <h2><strong>Required qualifications</strong></h2>
+        <ul>
+          <li>Kubernetes administration experience.</li>
+          <li>Systems troubleshooting experience.</li>
+        </ul>
+        <h2><strong>Preferred qualifications</strong></h2>
+        <ul><li>Python automation experience.</li></ul>
+    """
+
+    result = RoleDecisionEngine().assess(
+        title="Implementation Engineer",
+        jd_text=jd,
+        profile=UserProfile(skills=["Python", "systems troubleshooting"]),
+    )
+
+    assert result.decision == "investigate"
+    assert result.biggest_gap == "Kubernetes administration experience."
+    assert "<" not in result.biggest_gap
+    assert all("<" not in match.text for match in result.matches)
+
+
+def test_orphaned_legacy_html_tokens_never_escape_into_biggest_gap():
+    jd = """
+        Responsibilities
+        li>Lead customer discovery workshops./li>
+        li>Troubleshoot customer integrations./li>
+        Required qualifications
+        li class="legacy">Kubernetes administration experience./li>
+        li>Systems troubleshooting experience./li>
+        Preferred qualifications
+        li>Python automation experience./li>
+    """
+
+    result = RoleDecisionEngine().assess(
+        title="Implementation Engineer",
+        jd_text=jd,
+        profile=UserProfile(skills=["systems troubleshooting", "Python"]),
+    )
+
+    assert result.decision == "investigate"
+    assert result.biggest_gap == "Kubernetes administration experience."
+    assert all("li>" not in match.text and "/li>" not in match.text for match in result.matches)
+
+
+def test_orphaned_adjacent_tag_tokens_normalize_to_plain_text():
+    assert normalize_job_description(
+        'li class="legacy">Kubernetes experience./li>'
+    ) == "Kubernetes experience."
+
+
+def test_short_html_description_remains_fail_closed():
+    result = RoleDecisionEngine().assess(
+        title="Implementation Engineer",
+        jd_text=(
+            "<p><strong>Required qualifications</strong></p>"
+            "<ul><li>Kubernetes administration experience.</li></ul>"
+        ),
+        profile=UserProfile(skills=["Kubernetes"]),
+    )
+
+    assert result.status == "unscorable"
+    assert result.decision == "investigate"
+    assert result.qualification_lower_bound is None
+    assert result.biggest_gap == "A full job description is required."
 
 
 def test_unknown_logistics_is_surfaced_before_soft_preference_gaps():

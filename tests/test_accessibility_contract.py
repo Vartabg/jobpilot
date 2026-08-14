@@ -59,7 +59,10 @@ def test_dashboard_explains_evidence_without_claiming_personality() -> None:
     assert "Qualification floor" in source
     assert "Work-context evidence" in source
     assert "Evidence coverage" in source
-    assert "Posting evidence state" in source
+    assert "Posting-source state" in source
+    assert "Posting-source grade" in source
+    assert "Company legitimacy" in source
+    assert "does not verify the employer or guarantee the role" in source
     assert "Investigation reason" in source
     assert "Biggest gap" in source
     assert "matched_accounts" in source
@@ -71,3 +74,17 @@ def test_dashboard_explains_evidence_without_claiming_personality() -> None:
     assert "roles to investigate" in source
     assert "if (status === 'queued') return jobs.filter(isApplyReady);" in source
     assert "width: 100vw" not in source
+
+
+def test_dashboard_normalizes_legacy_html_before_rendering_evidence_text() -> None:
+    source, _parser = parse("ui/dashboard.html")
+
+    assert "function evidencePlainText" in source
+    assert "new DOMParser().parseFromString(source, 'text/html')" in source
+    assert "parsed.querySelectorAll('script, style, template, noscript')" in source
+    assert "node.after(parsed.createTextNode(' '))" in source
+    assert "/(?:li|p|div|strong|em|span|ul|ol|br|h[1-6])" in source
+    assert "(?:\\s+[^>\\n]*)?>" in source
+    assert "escape(evidencePlainText(job.biggest_gap, 'Not recorded'))" in source
+    assert "evidencePlainText(readableLabel(reason))" in source
+    assert "escape(job.biggest_gap || 'Not recorded')" not in source

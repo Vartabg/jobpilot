@@ -269,6 +269,17 @@ def test_missing_resume_never_invents_target_lane_experience(tmp_path: Path):
     assert "shipping production software" not in content
 
 
+def test_resume_tailor_ignores_retired_ai_compatibility_flag(tmp_path: Path):
+    tailor = ResumeTailor(
+        profile_store=ProfileStore(data_dir=tmp_path),
+        output_dir=tmp_path / "output",
+        use_bro=True,
+    )
+
+    assert tailor.use_bro is False
+    assert tailor.scorer.use_bro is False
+
+
 def test_target_title_is_not_used_as_candidate_headline(tmp_path: Path):
     store = ProfileStore(data_dir=tmp_path)
     profile = store.load()

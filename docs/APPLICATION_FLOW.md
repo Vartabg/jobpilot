@@ -28,7 +28,7 @@ ATS anti-spam systems detect automated browsers. The signals that tripped it:
 
 ## The flow
 
-1. **Source / assess** the role with JobPilot (`queue --refresh`, `score`). A role reaches `apply_now` only when a current direct ATS listing passes the posting-evidence gate and the full description has enough evidence to assess.
+1. **Source / assess** the role with JobPilot (`queue --refresh`, `score`). Standalone `score` may return a role-fit decision of `apply_now`, but that is not action readiness. A queue role becomes Apply-ready only when a current direct ATS listing passes the posting-evidence gate, the full description has enough evidence to assess, every configured fail-closed application-history source is current, and the evidence ledger corroborates the same role. Stale external history still permits search, but all positive recommendations become `Investigate`.
 2. **Draft answers** into `data/answers/<company>/<role>.md` — verified evidence only, no inflation.
    Apply only the explicit policy and truth boundaries configured for this candidate.
 3. **Tailor the resume** and regenerate the PDF (`scripts/render_resume_html.py` for HTML, then the
@@ -73,6 +73,10 @@ The decision axes stay separate so a strong work context cannot hide a missing m
 - `evidence_coverage`: how much of the posting has direct, adjacent, or contradicted evidence; unknown is not neutral.
 
 Posting evidence uses deterministic grades and gates, not a confidence percentage or a claim about the employer's full corporate identity. Current direct ATS proof may be `recommend`; aggregator/recruiter-only evidence is `review`; stale or unavailable proof is `hold`; and closed, expired, conflicting, or scam-pattern evidence is `block`. Investigate the company separately before sharing sensitive information.
+
+## External Gmail history
+
+JobPilot does not authenticate to Gmail. If `data/policy.json` configures a Gmail application cache, create a fresh full-history JSON export with a separate read-only Gmail source and run `jobpilot gmail-sync <export.json>`. Records accept only company, title, status, an HTTPS role URL, one ISO event date/timestamp, and an optional opaque message ID; subjects, bodies, snippets, attachments, and arbitrary extra fields are rejected. The importer also rejects malformed, stale, future-dated, older, unsafe-URL, or partial-history exports and atomically replaces only the local cache. It never changes the source export or mailbox.
 
 ## Answers file format
 

@@ -121,12 +121,13 @@ class ResumeTailor:
         profile_store: ProfileStore | None = None,
         *,
         output_dir: Path | None = None,
-        use_bro: bool = True,
+        use_bro: bool = False,
         resume_lanes: dict[str, str] | None = None,
     ) -> None:
+        del use_bro  # Retained only for compatibility; resume generation is model-free.
         self.profile_store = profile_store or get_profile_store()
         self.output_dir = output_dir or OUTPUT_DIR
-        self.use_bro = use_bro
+        self.use_bro = False
         # Lane→stem mapping. Explicit arg wins (used by tests); otherwise load
         # from the profile store's own data dir so it stays co-located with the
         # user's private config and test runs stay hermetic.
@@ -134,7 +135,7 @@ class ResumeTailor:
             self.resume_lanes = resume_lanes
         else:
             self.resume_lanes = _load_resume_lanes(getattr(self.profile_store, "data_dir", None))
-        self.scorer = JobScorer(profile_store=self.profile_store, use_bro=use_bro)
+        self.scorer = JobScorer(profile_store=self.profile_store, use_bro=False)
 
     def generate_from_text(
         self,

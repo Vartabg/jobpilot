@@ -36,22 +36,13 @@ If anything goes wrong, the script will print a clear message about what to fix.
 
 ---
 
-## Step 3 — Get a free AI API key (for resume tailoring)
+## Step 3 — AI is optional
 
-The resume tailoring feature uses an AI key for its best results. Google Gemini is free:
-
-1. Go to [aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey)
-2. Sign in with a Google account
-3. Click "Create API key"
-4. Copy the key
-
-Then paste this in Terminal, replacing `YOUR_KEY_HERE` with the real key:
-
-```bash
-echo 'export GEMINI_API_KEY=YOUR_KEY_HERE' >> ~/.zshrc && source ~/.zshrc
-```
-
-If you skip this step, everything still works — resume drafts just fall back to built-in templates instead of AI-written summary bullets. `jobpilot doctor` will remind them with a warning, not an error.
+No AI key is needed for job search, evidence scoring, resume drafts, or
+application answers. Those paths stay deterministic and evidence-only. A user
+may separately configure an AI provider for explicitly invoked interview or
+advice features after reviewing that provider's privacy terms; it is not part
+of the core setup.
 
 ---
 

@@ -8,6 +8,10 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+from jobpilot.core.gmail_application_cache import (
+    GmailCacheError,
+    load_gmail_application_cache,
+)
 from jobpilot.core.role_identity import (
     canonicalize_role_url,
     explicit_role_identity_key,
@@ -17,6 +21,13 @@ from jobpilot.core.role_identity import (
 
 class EvidenceSourceError(RuntimeError):
     """Raised when a configured application-evidence source is unavailable."""
+
+
+def _gmail_error_with_guidance(exc: GmailCacheError) -> str:
+    return (
+        f"{exc}. Import a fresh full-history read-only export with "
+        "`jobpilot gmail-sync /path/to/gmail-export.json`."
+    )
 
 
 @dataclass(frozen=True)
@@ -152,38 +163,15 @@ class ApplicationEvidenceIndex:
         records: list[EvidenceRecord],
         errors: list[str],
         max_age_hours: int,
+        now: datetime | None = None,
     ) -> None:
-        if not path.is_file():
-            errors.append(f"Gmail application cache is unavailable: {path}")
-            return
         try:
-            payload = json.loads(path.read_text())
-            if max_age_hours > 0:
-                generated_at = str(payload.get("generated_at", "")).strip()
-                if not generated_at:
-                    errors.append(
-                        "Gmail application cache has no generated_at timestamp: "
-                        f"{path}"
-                    )
-                    return
-                generated = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
-                now = datetime.now().astimezone()
-                if generated.tzinfo is None:
-                    generated = generated.astimezone()
-                age_hours = (now - generated).total_seconds() / 3600
-                if age_hours > max_age_hours:
-                    errors.append(
-                        f"Gmail application cache is {age_hours:.1f} hours old; "
-                        f"refresh it before recommending jobs: {path}"
-                    )
-                    return
-            for item in payload.get("records", []):
-                if (
-                    not isinstance(item, dict)
-                    or not item.get("company")
-                    or not item.get("title")
-                ):
-                    continue
+            snapshot = load_gmail_application_cache(
+                path,
+                max_age_hours=max_age_hours,
+                now=now,
+            )
+            for item in snapshot.records:
                 records.append(EvidenceRecord(
                     company=str(item["company"]),
                     title=str(item["title"]),
@@ -194,15 +182,13 @@ class ApplicationEvidenceIndex:
                         item.get("occurred_at") or item.get("date")
                         or item.get("applied_at") or item.get("received_at") or ""
                     ),
-                    provenance={
-                        str(key): str(value)
-                        for key, value in item.items()
-                        if key not in {"company", "title", "url", "status"}
-                        and value is not None
-                    },
+                    provenance=(
+                        {"message_id": str(item["message_id"])}
+                        if item.get("message_id") else {}
+                    ),
                 ))
-        except Exception as exc:
-            errors.append(f"Gmail application cache could not be read ({exc})")
+        except GmailCacheError as exc:
+            errors.append(_gmail_error_with_guidance(exc))
 
     def ensure_usable(self) -> None:
         if self.errors:
@@ -210,7 +196,7 @@ class ApplicationEvidenceIndex:
             raise EvidenceSourceError(
                 "application evidence is incomplete, so JobPilot stopped before "
                 "recommending jobs. Restore or update the configured source, then "
-                f"run `jobpilot jobs` again: {detail}"
+                f"run `jobpilot queue --refresh` again: {detail}"
             )
 
     def match(self, company: str, title: str, url: str) -> EvidenceRecord | None:
@@ -291,3 +277,30 @@ class ApplicationEvidenceIndex:
                 }, sort_keys=True),
             )
         return ledger.table_count("events") - before
+
+
+def configured_external_evidence_errors(
+    *,
+    employment_dir: Path | None = None,
+    gmail_cache_path: Path | None = None,
+    gmail_cache_max_age_hours: int = 0,
+    now: datetime | None = None,
+) -> tuple[str, ...]:
+    """Check configured external evidence without opening tracker or ledger state."""
+    records: list[EvidenceRecord] = []
+    errors: list[str] = []
+    if employment_dir is not None:
+        ApplicationEvidenceIndex._add_employment_records(
+            Path(employment_dir),
+            records,
+            errors,
+        )
+    if gmail_cache_path is not None:
+        ApplicationEvidenceIndex._add_gmail_records(
+            Path(gmail_cache_path),
+            records,
+            errors,
+            gmail_cache_max_age_hours,
+            now,
+        )
+    return tuple(errors)

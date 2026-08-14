@@ -3,10 +3,12 @@ import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
+from datetime import UTC, datetime
 from pathlib import Path
 
 import jobpilot.core.queue_builder as qb
 from jobpilot.core.application_tracker import ApplicationTracker
+from jobpilot.core.policy_config import policy_from_dict, set_policy
 from jobpilot.core.queue_builder import QueueJob
 
 
@@ -106,6 +108,47 @@ def test_get_job_reconciles_external_application_before_action(
     assert current is not None
     assert current.status == "applied"
     assert qb.is_apply_ready(current) is False
+
+
+def test_reconcile_downgrades_cached_recommendation_when_history_is_incomplete(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    tracker = ApplicationTracker(data_dir=tmp_path)
+
+    class _IncompleteEvidence:
+        errors = ("Gmail cache is stale",)
+
+        @staticmethod
+        def match(_company: str, _title: str, _url: str):
+            return None
+
+    monkeypatch.setattr(qb, "QUEUE_PATH", tmp_path / "queue.json")
+    monkeypatch.setattr(qb, "get_application_tracker", lambda: tracker)
+    monkeypatch.setattr(
+        qb,
+        "get_application_evidence_index",
+        lambda _tracker=None: _IncompleteEvidence(),
+    )
+    ready = _job("ready")
+    ready.decision = "apply_now"
+    ready.assessment_status = "assessed"
+    ready.legitimacy_state = "recommend"
+    ready.verified_at = datetime.now(UTC).isoformat()
+    qb.save_queue([ready])
+    set_policy(policy_from_dict({
+        "application_evidence": {"fail_closed": True},
+    }))
+
+    try:
+        changed, total = qb.reconcile_queue_with_tracker()
+        current = qb.load_queue()[0]
+    finally:
+        set_policy(None)
+
+    assert (changed, total) == (1, 1)
+    assert current.decision == "investigate"
+    assert "Application history is incomplete" in current.suppression_reason
 
 
 def test_refresh_and_status_update_are_one_serialized_transaction(

@@ -48,6 +48,7 @@ kill it and stops with an error instead of claiming JobPilot is ready.
 ```bash
 ./scripts/boot.sh              # Chrome + dashboard
 jobpilot queue --refresh       # rebuild the verified company slate
+jobpilot gmail-sync FILE.json  # import a fresh read-only history export, if configured
 jobpilot doctor --no-bro       # verify health
 ./scripts/stop.sh                # stop dashboard only
 ```
@@ -71,6 +72,7 @@ jp                         # one window: boot + HUD + logs (reuses if open)
 | Wrong service on 8767 | EYE owns **8766** only — JobPilot must use **8767** |
 | `jobpilot: command not found` | `source .venv/bin/activate` or re-run boot.sh |
 | Doctor WARN `skipped` status | cosmetic DB quirk — does not block apply flow |
+| Queue says application history is incomplete | Generate a fresh full-history export with the configured read-only Gmail source, run `jobpilot gmail-sync FILE.json`, then refresh the queue |
 | Remote server refuses to start | Set a URL-safe `JOBPILOT_REMOTE_TOKEN` of at least 32 random characters |
 | Remote page says authentication required | Reopen it with `?token=$JOBPILOT_REMOTE_TOKEN` appended |
 

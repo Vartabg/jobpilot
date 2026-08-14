@@ -7,6 +7,7 @@ from enum import StrEnum
 from pathlib import Path
 
 from jobpilot.core.candidate_evidence import CandidateEvidence, normalize, tokens
+from jobpilot.core.job_description import normalize_job_description
 from jobpilot.core.profile_store import UserProfile
 
 
@@ -164,12 +165,13 @@ class RequirementMatcher:
 
     @staticmethod
     def parse(raw_text: str) -> RequirementSet:
+        normalized_text = normalize_job_description(raw_text)
         buckets: dict[str, list[str]] = {name: [] for name in (
             "mandatory", "preferred", "responsibilities", "work_context", "logistics",
         )}
         current: str | None = None
         one_shot = False
-        for raw_line in re.split(r"\n+", raw_text or ""):
+        for raw_line in re.split(r"\n+", normalized_text):
             item = re.sub(r"^[^\w]+", "", raw_line).strip()
             if not item:
                 continue
@@ -212,7 +214,7 @@ class RequirementMatcher:
             if one_shot:
                 current = None
                 one_shot = False
-        return RequirementSet(raw_text=raw_text or "", **{
+        return RequirementSet(raw_text=normalized_text, **{
             key: tuple(dict.fromkeys(value)) for key, value in buckets.items()
         })
 

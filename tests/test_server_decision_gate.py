@@ -259,11 +259,77 @@ def test_queue_get_is_read_only(monkeypatch) -> None:
     monkeypatch.setattr(server, "load_queue", lambda: [_job()])
     reconcile = pytest.fail
     monkeypatch.setattr(server, "reconcile_queue_with_tracker", reconcile)
+    monkeypatch.setattr(
+        server,
+        "restrict_queue_for_incomplete_history",
+        lambda _jobs: 0,
+    )
+    monkeypatch.setattr(
+        server,
+        "restrict_queue_for_action_provenance",
+        lambda _jobs: 0,
+    )
 
     response = TestClient(server.app).get("/api/queue")
 
     assert response.status_code == 200
     assert response.json()[0]["id"] == "role-1"
+
+
+def test_queue_get_hides_cached_apply_action_when_history_is_incomplete(
+    monkeypatch,
+) -> None:
+    job = _job()
+    job.decision = "apply_now"
+    job.assessment_status = "assessed"
+    job.legitimacy_state = "recommend"
+    monkeypatch.setattr(server, "load_queue", lambda: [job])
+
+    def restrict(jobs):
+        jobs[0].decision = "investigate"
+        jobs[0].suppression_reason = "Application history is incomplete."
+        return 1
+
+    monkeypatch.setattr(server, "restrict_queue_for_incomplete_history", restrict)
+
+    response = TestClient(server.app).get("/api/queue")
+
+    assert response.status_code == 200
+    assert response.json()[0]["decision"] == "investigate"
+    assert "history is incomplete" in response.json()[0]["suppression_reason"]
+
+
+def test_queue_get_hides_cached_apply_action_without_ledger_provenance(
+    monkeypatch,
+) -> None:
+    job = _job()
+    job.decision = "apply_now"
+    job.assessment_status = "assessed"
+    job.legitimacy_state = "recommend"
+    job.verified_at = datetime.now(UTC).isoformat()
+    monkeypatch.setattr(server, "load_queue", lambda: [job])
+    monkeypatch.setattr(
+        server,
+        "restrict_queue_for_incomplete_history",
+        lambda _jobs: 0,
+    )
+
+    def restrict(jobs):
+        jobs[0].decision = "investigate"
+        jobs[0].suppression_reason = "Current ledger corroboration is unavailable."
+        return 1
+
+    monkeypatch.setattr(
+        server,
+        "restrict_queue_for_action_provenance",
+        restrict,
+    )
+
+    response = TestClient(server.app).get("/api/queue")
+
+    assert response.status_code == 200
+    assert response.json()[0]["decision"] == "investigate"
+    assert "ledger corroboration" in response.json()[0]["suppression_reason"]
 
 
 def test_remote_server_disables_access_logging(monkeypatch, capsys) -> None:

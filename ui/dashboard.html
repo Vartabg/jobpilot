@@ -492,6 +492,15 @@ const remoteToken = consumeRemoteToken();
     grid-column: 1 / -1;
   }
 
+  .evidence-item.evidence-boundary {
+    border-top: 1px solid var(--line);
+    padding-top: 9px;
+  }
+
+  .evidence-item.evidence-boundary dd {
+    color: var(--muted);
+  }
+
   .evidence-item dt {
     color: var(--quiet);
     font-size: 10px;
@@ -716,7 +725,7 @@ const remoteToken = consumeRemoteToken();
     <div class="topbar">
       <div>
         <h1>Company-first targets</h1>
-        <div class="subtitle" id="subtitle">Ranked by role decision, qualification evidence, posting evidence, and freshness.</div>
+        <div class="subtitle" id="subtitle">Ranked by role decision, qualification evidence, posting-source evidence, and freshness. Posting-source evidence checks the listing, not the company.</div>
       </div>
       <div class="actions">
         <button onclick="reload()">Refresh</button>
@@ -816,6 +825,25 @@ function escape(s) {
   return String(s || '').replace(/[&<>"']/g, c => ({
     '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'
   }[c]));
+}
+
+function evidencePlainText(value, fallback = '') {
+  const source = String(value ?? '').trim();
+  if (!source) return fallback;
+  const parsed = new DOMParser().parseFromString(source, 'text/html');
+  parsed.querySelectorAll('script, style, template, noscript').forEach(node => node.remove());
+  parsed.querySelectorAll(
+    'br, hr, p, div, li, dt, dd, h1, h2, h3, h4, h5, h6, tr, td, th, section, article'
+  ).forEach(node => node.after(parsed.createTextNode(' ')));
+  const text = String(parsed.body?.textContent || '')
+    .replace(/\/(?:li|p|div|strong|em|span|ul|ol|br|h[1-6])\s*>/gi, ' ')
+    .replace(
+      /(^|[^A-Za-z0-9])(?:li|p|div|strong|em|span|ul|ol|br|h[1-6])(?:\s+[^>\n]*)?>/gi,
+      '$1 '
+    )
+    .replace(/\s+/g, ' ')
+    .trim();
+  return text || fallback;
 }
 
 function safePostingUrl(value) {
@@ -947,7 +975,7 @@ function visibleJobs() {
       j.decision,
       j.legitimacy_state,
       j.evidence_grade,
-      j.biggest_gap,
+      evidencePlainText(j.biggest_gap),
       ...(Array.isArray(j.matched_accounts) ? j.matched_accounts : []),
       ...(j.keywords || [])
     ].join(' ').toLowerCase().includes(q));
@@ -1013,7 +1041,9 @@ function evidenceCardHtml(job) {
     ? `<time datetime="${escape(job.verified_at)}" aria-label="Verified ${escape(verification.relative)}; ${escape(verification.exact)}">${escape(verification.relative)}</time>`
     : '<span>Not verified</span>';
   const matchedAccounts = Array.isArray(job.matched_accounts)
-    ? job.matched_accounts.filter(account => String(account || '').trim())
+    ? job.matched_accounts
+      .map(account => evidencePlainText(account))
+      .filter(Boolean)
     : [];
   const accountsHtml = matchedAccounts.length
     ? `<ul class="account-list">${matchedAccounts.map(account => `<li>${escape(account)}</li>`).join('')}</ul>`
@@ -1021,9 +1051,11 @@ function evidenceCardHtml(job) {
   const investigationReasons = [
     ...(Array.isArray(job.legitimacy_reasons) ? job.legitimacy_reasons : []),
     job.suppression_reason || '',
-  ].filter(reason => String(reason || '').trim());
+  ]
+    .map(reason => evidencePlainText(readableLabel(reason)))
+    .filter(Boolean);
   const reasonsHtml = investigationReasons.length
-    ? investigationReasons.map(readableLabel).map(escape).join('; ')
+    ? investigationReasons.map(escape).join('; ')
     : 'None recorded';
   return `
     <dl class="evidence-card" aria-label="Evidence for ${escape(job.company)} ${escape(job.title)}">
@@ -1044,12 +1076,16 @@ function evidenceCardHtml(job) {
         <dd>${escape(coverageText(job.evidence_coverage))}</dd>
       </div>
       <div class="evidence-item">
-        <dt>Posting evidence state</dt>
+        <dt>Posting-source state</dt>
         <dd>${escape(readableLabel(job.legitimacy_state))}</dd>
       </div>
       <div class="evidence-item">
-        <dt>Posting evidence grade</dt>
+        <dt>Posting-source grade</dt>
         <dd>${escape(String(job.evidence_grade || 'Unknown').toUpperCase())}</dd>
+      </div>
+      <div class="evidence-item wide evidence-boundary">
+        <dt>Company legitimacy</dt>
+        <dd>Not determined here. Posting-source evidence covers only the listing source, freshness, and observed status; it does not verify the employer or guarantee the role. Investigate the company independently.</dd>
       </div>
       <div class="evidence-item wide">
         <dt>Verification age</dt>
@@ -1061,7 +1097,7 @@ function evidenceCardHtml(job) {
       </div>
       <div class="evidence-item wide">
         <dt>Biggest gap</dt>
-        <dd>${escape(job.biggest_gap || 'Not recorded')}</dd>
+        <dd>${escape(evidencePlainText(job.biggest_gap, 'Not recorded'))}</dd>
       </div>
       <div class="evidence-item wide">
         <dt>Investigation reason</dt>

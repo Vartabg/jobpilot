@@ -41,6 +41,7 @@ from jobpilot.core.profile_store import get_profile_store
 from jobpilot.core.question_matcher import get_question_matcher
 from jobpilot.core.resume_tailor import ResumeTailor
 from jobpilot.core.role_decision import RoleDecision, RoleDecisionEngine
+from jobpilot.core.source_health import summarize_source_runs
 from jobpilot.learning.action_recorder import get_action_recorder
 
 # Named `logger`, not `log`: the `log` CLI command below would shadow it and
@@ -344,7 +345,8 @@ def _render_score_result(
             f"[bold cyan]{title}[/bold cyan]\n"
             f"[white]{company}[/white]\n"
             f"Status: [bold]{status}[/bold]  •  "
-            f"Decision: [bold {decision_style}]{decision}[/bold {decision_style}]\n"
+            f"Role-fit decision: "
+            f"[bold {decision_style}]{decision}[/bold {decision_style}]\n"
             f"[dim]{source_label}[/dim]",
             border_style=decision_style,
             title="Evidence-linked role decision",
@@ -367,6 +369,11 @@ def _render_score_result(
     table.add_row("Matched accounts", matched_accounts)
     table.add_row("Biggest gap", result.biggest_gap or "none recorded")
     console.print(table)
+    console.print(
+        "[yellow]Fit only — not Apply-ready.[/yellow] Current posting-source, "
+        "application-history, and ledger checks still must pass in "
+        "[cyan]jobpilot queue --refresh[/cyan]."
+    )
 
     if result.status == "unscorable":
         console.print(
@@ -478,7 +485,7 @@ def _render_resume_result(result, source_label: str) -> None:
     console.print(Panel.fit(
         f"[bold cyan]ATS Resume Draft Ready[/bold cyan]\n"
         f"[white]{parsed.title or 'Target role'} @ {parsed.company or 'Target company'}[/white]\n"
-        f"Decision: [bold]{decision_label}[/bold]\n"
+        f"Role-fit decision: [bold]{decision_label}[/bold]\n"
         f"Qualification floor: {qualification_floor}  •  "
         f"Evidence coverage: {decision.evidence_coverage}%\n"
         f"[dim]{source_label}\n" + "\n".join(saved_paths) + "[/dim]",
@@ -487,6 +494,10 @@ def _render_resume_result(result, source_label: str) -> None:
 
     if decision.biggest_gap:
         console.print(f"[yellow]Biggest gap:[/yellow] {decision.biggest_gap}")
+    console.print(
+        "[yellow]Fit only — not Apply-ready.[/yellow] Refresh the queue to verify "
+        "the posting source, application history, and ledger evidence."
+    )
 
     if result.keywords:
         console.print(f"[green]Keywords:[/green] {', '.join(result.keywords[:10])}")
@@ -900,8 +911,12 @@ def scan(
 
     scanner = PortalScanner(keywords=keyword)
     jobs = scanner.scan_targets(targets)
+    source_health = summarize_source_runs(scanner.last_run_results)
     jobs.sort(key=lambda item: (item.company.lower(), item.title.lower()))
     _render_scan_results(jobs, limit=limit, describe=describe)
+    console.print(f"[dim]{source_health.summary_line}[/dim]")
+    for notice in source_health.notices:
+        console.print(f"[yellow]Source attention:[/yellow] {notice}")
 
     if save:
         report_path = scanner.save_report(jobs)
@@ -939,15 +954,24 @@ def resume(
     output: Optional[Path] = typer.Option(None, "--output", "-o", help="Optional markdown output path for the resume draft"),
     html: bool = typer.Option(True, "--html/--no-html", help="Also write a styled HTML version next to the markdown draft"),
     pdf: bool = typer.Option(False, "--pdf", help="Also export a PDF version using Playwright/Chromium"),
-    bro: bool = typer.Option(True, "--bro/--no-bro", help="Use the AI backend (local Bro or Gemini) for more personalized tailoring when available"),
+    bro: bool = typer.Option(
+        False,
+        "--bro/--no-bro",
+        help="Retired compatibility flag; resume generation remains model-free.",
+    ),
 ):
     """Generate an ATS-friendly resume draft tailored to a target role."""
+    if bro:
+        console.print(
+            "[yellow]Resume AI is retired.[/yellow] The draft will remain "
+            "deterministic and evidence-only."
+        )
     if active or not source:
         if not asyncio.run(
             _resume_active_page(
                 port,
                 output=output,
-                use_bro=bro,
+                use_bro=False,
                 export_html=html,
                 export_pdf=pdf,
             )
@@ -960,7 +984,7 @@ def resume(
         raise typer.Exit(1)
 
     text, label = _load_score_source(source)
-    tailor = ResumeTailor(use_bro=bro)
+    tailor = ResumeTailor(use_bro=False)
     result = tailor.generate_from_text(
         text,
         output_path=output,
@@ -983,7 +1007,7 @@ def _render_prep_result(result, source_label: str) -> None:
     console.print(Panel.fit(
         f"[bold cyan]Interview Brief Ready[/bold cyan]\n"
         f"[white]{parsed.title or 'Target role'} @ {parsed.company or 'Target company'}[/white]\n"
-        f"Decision: [bold]{decision_label}[/bold]\n"
+        f"Role-fit decision: [bold]{decision_label}[/bold]\n"
         f"Qualification floor: {qualification_floor}  •  "
         f"Evidence coverage: {decision.evidence_coverage}%\n"
         f"[dim]{source_label}\nHTML: {result.output_path}[/dim]",
@@ -991,6 +1015,10 @@ def _render_prep_result(result, source_label: str) -> None:
     ))
     if decision.biggest_gap:
         console.print(f"[yellow]Biggest gap:[/yellow] {decision.biggest_gap}")
+    console.print(
+        "[yellow]Fit only — not Apply-ready.[/yellow] Refresh the queue to verify "
+        "the posting source, application history, and ledger evidence."
+    )
     if result.likely_questions:
         console.print("[green]Likely questions:[/green]")
         for q in result.likely_questions[:3]:
@@ -1250,7 +1278,7 @@ def serve(
         help="Port (default: 8767 — EYE uses 8766)",
     ),
 ):
-    """Start the remote dashboard (access from phone via Tailscale).
+    """Start the local dashboard, with optional authenticated Tailscale access.
 
     Binds to loopback (127.0.0.1) by default. To reach it from your phone over
     Tailscale, pass your machine's Tailscale IP explicitly with --host.
@@ -1266,7 +1294,7 @@ def serve(
         raise typer.Exit(code=2) from exc
 
     console.print(Panel.fit(
-        "[bold cyan]🚀 JobPilot Remote Dashboard[/bold cyan]\n"
+        "[bold cyan]🚀 JobPilot Dashboard[/bold cyan]\n"
         + f"[bold]{'Tailscale' if remote else 'Local'}:[/bold]  http://{host}:{serve_port}/\n"
         + (
             "[yellow]Authentication required. Append "
@@ -1275,7 +1303,7 @@ def serve(
         )
         + "[dim]Keep this terminal open. Ctrl+C to stop.[/dim]",
         border_style="cyan",
-        title="Mobile Access",
+        title="Dashboard Access",
     ))
 
     run_server(host=host, port=serve_port)
@@ -1465,41 +1493,142 @@ def board(
 
 
 @app.command()
+def gmail_sync(
+    source: Path = typer.Argument(
+        ...,
+        help=(
+            "Fresh full-history JSON export produced by a read-only Gmail source. "
+            "The source must use JobPilot's generated_at + records cache schema."
+        ),
+    ),
+):
+    """Validate and atomically import application history without mutating Gmail."""
+    from jobpilot.core.gmail_application_cache import (
+        GmailCacheError,
+        sync_gmail_application_cache,
+    )
+    from jobpilot.core.policy_config import get_policy
+
+    evidence_policy = get_policy().application_evidence
+    configured = evidence_policy.gmail_cache_path.strip()
+    if not configured:
+        console.print(
+            "[red]Gmail cache sync is not configured.[/red]\n"
+            "Set application_evidence.gmail_cache_path in data/policy.json, then retry."
+        )
+        raise typer.Exit(2)
+    destination = Path(configured).expanduser()
+    if not destination.is_absolute():
+        destination = Path(__file__).resolve().parent / destination
+
+    try:
+        result = sync_gmail_application_cache(
+            source,
+            destination,
+            max_age_hours=evidence_policy.gmail_cache_max_age_hours,
+        )
+    except GmailCacheError as exc:
+        console.print(f"[red]Gmail cache was not changed:[/red] {exc}")
+        raise typer.Exit(2) from exc
+
+    console.print(
+        f"[green]✓ Gmail application cache refreshed[/green] — "
+        f"{result.record_count} records, generated {result.generated_at}\n"
+        f"[dim]{result.destination}[/dim]\n"
+        "Gmail was read by the external source only; JobPilot did not modify the mailbox."
+    )
+
+
+@app.command()
 def queue(
     refresh: bool = typer.Option(False, "--refresh", "-r", help="Re-scan all portals and rebuild queue"),
     limit: int = typer.Option(50, "--limit", "-n", help="Max jobs to queue"),
     open_dashboard: bool = typer.Option(True, "--open/--no-open", help="Show how to open the local dashboard server"),
-    fresh: bool = typer.Option(False, "--fresh", help="Show only roles you haven't applied to / been rejected from (dedup vs applications.db)"),
+    fresh: bool = typer.Option(
+        False,
+        "--fresh",
+        help="Show only roles passing current posting, fit, history, and ledger gates.",
+    ),
     as_json: bool = typer.Option(False, "--json", help="Emit the queue (filtered) as JSON to stdout. Suppresses dashboard + console table. For piping into other tools/agents."),
     no_board: bool = typer.Option(False, "--no-board", help="Skip the terminal board after queue build/load"),
 ):
     """Scan ATS boards, assess roles, and show the evidence-led slate."""
-    from dataclasses import asdict
-
+    from jobpilot.core.application_evidence import configured_external_evidence_errors
+    from jobpilot.core.policy_config import get_policy
     from jobpilot.core.queue_builder import (
         is_apply_ready,
         load_queue,
         reconcile_queue_with_tracker,
         refresh_queue,
+        restrict_queue_for_action_provenance,
     )
     from jobpilot.ui.terminal_board import BoardFilters, render_board
+
+    def configured_path(value: str) -> Path | None:
+        if not value:
+            return None
+        path = Path(value).expanduser()
+        return path if path.is_absolute() else Path(__file__).resolve().parent / path
+
+    evidence_policy = get_policy().application_evidence
+    history_errors = (
+        configured_external_evidence_errors(
+            employment_dir=configured_path(evidence_policy.employment_dir),
+            gmail_cache_path=configured_path(evidence_policy.gmail_cache_path),
+            gmail_cache_max_age_hours=evidence_policy.gmail_cache_max_age_hours,
+        )
+        if evidence_policy.fail_closed
+        else ()
+    )
+
+    def show_history_warning(*, machine_output: bool) -> None:
+        if not history_errors:
+            return
+        message = (
+            "APPLICATION HISTORY INCOMPLETE: search can continue, but every "
+            "otherwise-ready role is restricted to Investigate until the "
+            "configured source is refreshed. " + "; ".join(history_errors)
+        )
+        if machine_output:
+            typer.echo(message, err=True)
+        else:
+            console.print(
+                Panel.fit(
+                    message,
+                    title="Application safety gate",
+                    border_style="yellow",
+                )
+            )
+
+    def refresh_with_clear_evidence_error():
+        from jobpilot.core.application_evidence import EvidenceSourceError
+
+        try:
+            return refresh_queue(limit=limit)
+        except EvidenceSourceError as exc:
+            typer.echo("Queue refresh stopped: application history is incomplete.", err=True)
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(2) from exc
 
     # JSON mode: emit raw queue (respecting --fresh and --limit) and exit.
     # Designed for cross-agent / scripting use without dashboard/UI side effects.
     if as_json:
         if refresh or not (Path(__file__).parent / "data" / "queue.json").exists():
-            jobs = refresh_queue(limit=limit)
+            jobs = refresh_with_clear_evidence_error()
         else:
             reconcile_queue_with_tracker()
             jobs = load_queue()
+        restrict_queue_for_action_provenance(jobs)
+        show_history_warning(machine_output=True)
         view = [j for j in jobs if is_apply_ready(j)] if fresh else jobs
         view = view[:limit]
-        console.print_json(data=[asdict(j) for j in view])
+        console.print_json(data=[_job_output_payload(j) for j in view])
         return
 
     if not refresh and (Path(__file__).parent / "data" / "queue.json").exists():
         reconcile_queue_with_tracker()
         jobs = load_queue()
+        restrict_queue_for_action_provenance(jobs)
         ready = [j for j in jobs if is_apply_ready(j)]
         console.print(
             f"[cyan]Loaded existing queue: {len(ready)} verified roles ready to apply[/cyan]"
@@ -1508,17 +1637,19 @@ def queue(
             console.print("[dim]Run with --refresh to re-scan portals[/dim]")
     else:
         console.print("[cyan]Scanning ATS boards (this takes ~30 seconds)...[/cyan]")
-        jobs = refresh_queue(limit=limit)
+        jobs = refresh_with_clear_evidence_error()
         if not jobs:
             console.print("[yellow]No jobs found. Check data/portals.json and your internet connection.[/yellow]")
             raise typer.Exit(1)
         console.print(f"[green]✓ Built queue: {len(jobs)} jobs across tech + field ops[/green]")
 
+    show_history_warning(machine_output=False)
+
     if not no_board:
         render_board(
             console,
             filters=BoardFilters(
-                fresh=True,
+                fresh=fresh,
                 limit=min(limit, 20),
             ),
         )

@@ -17,12 +17,15 @@ import tempfile
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from jobpilot.core.application_evidence import ApplicationEvidenceIndex
+from jobpilot.core.application_evidence import (
+    ApplicationEvidenceIndex,
+    configured_external_evidence_errors,
+)
 from jobpilot.core.application_tracker import get_application_tracker
 from jobpilot.core.config import DATA_DIR
 from jobpilot.core.legitimacy import assess_legitimacy
@@ -34,6 +37,7 @@ from jobpilot.core.portal_scanner import PortalJob, PortalScanner, ScanTarget
 from jobpilot.core.profile_store import get_profile_store
 from jobpilot.core.role_decision import RoleDecisionEngine
 from jobpilot.core.role_identity import identify_role, is_safe_public_role_url
+from jobpilot.core.source_health import summarize_source_runs
 from jobpilot.core.work_style import title_seniority_penalty
 
 log = get_logger(__name__)
@@ -259,6 +263,12 @@ def has_current_action_provenance(
     keeps action-time behavior closed even when queue.json says ``apply_now``.
     """
     instant = (now or datetime.now(UTC)).astimezone(UTC)
+    if configured_application_history_errors(now=instant):
+        log.warning(
+            "Action provenance check failed closed because configured "
+            "application history is incomplete."
+        )
+        return False
     expected = _evidence_identity(job.url, job.portal, provider_job_id=job.provider_job_id)
     if expected is None or not expected.canonical_url:
         return False
@@ -544,6 +554,60 @@ def get_application_evidence_index(tracker=None) -> ApplicationEvidenceIndex:
     )
 
 
+def configured_application_history_errors(
+    *,
+    now: datetime | None = None,
+) -> tuple[str, ...]:
+    """Check external history freshness without touching tracker or ledger state."""
+    policy = get_policy().application_evidence
+    if not policy.fail_closed:
+        return ()
+    return configured_external_evidence_errors(
+        employment_dir=_evidence_path(policy.employment_dir),
+        gmail_cache_path=_evidence_path(policy.gmail_cache_path),
+        gmail_cache_max_age_hours=policy.gmail_cache_max_age_hours,
+        now=now,
+    )
+
+
+def restrict_queue_for_incomplete_history(
+    jobs: list[QueueJob],
+    *,
+    now: datetime | None = None,
+) -> int:
+    """Downgrade positive cached decisions for a read-only presentation."""
+    if not configured_application_history_errors(now=now):
+        return 0
+    changed = 0
+    for job in jobs:
+        if (
+            job.status in {"queued", "viewing"}
+            and job.decision in {"apply_now", "stretch"}
+        ):
+            job.decision = "investigate"
+            job.suppression_reason = _INCOMPLETE_HISTORY_REASON
+            changed += 1
+    return changed
+
+
+def restrict_queue_for_action_provenance(
+    jobs: list[QueueJob],
+    *,
+    now: datetime | None = None,
+) -> int:
+    """Hide cached recommendations that the live action gate would reject."""
+    changed = 0
+    for job in jobs:
+        if is_apply_ready(job, now=now) and not has_current_action_provenance(
+            job,
+            now=now,
+        ):
+            job.decision = "investigate"
+            job.suppression_reason = _MISSING_ACTION_PROVENANCE_REASON
+            changed += 1
+    return changed
+
+
 def policy_block_reason(company: str, title: str) -> str | None:
     """Return the personal-policy reason a role must not enter the active queue."""
     policy = get_policy()
@@ -682,6 +746,27 @@ def _assessment_payload(decision) -> dict[str, Any]:
     }
 
 
+_INCOMPLETE_HISTORY_REASON = (
+    "Application history is incomplete. Refresh the configured history source "
+    "before applying."
+)
+_MISSING_ACTION_PROVENANCE_REASON = (
+    "Current ledger corroboration is unavailable. Refresh the queue before "
+    "treating this role as ready to apply."
+)
+
+
+def _gate_decision_for_incomplete_history(decision, *, incomplete: bool):
+    """Restrict positive recommendations when deduplication evidence is incomplete."""
+    if not incomplete or decision.decision not in {"apply_now", "stretch"}:
+        return decision
+    return replace(
+        decision,
+        decision="investigate",
+        rationale=f"{decision.rationale} {_INCOMPLETE_HISTORY_REASON}",
+    )
+
+
 def _queue_job_from_evidence(
     job: PortalJob,
     *,
@@ -689,6 +774,7 @@ def _queue_job_from_evidence(
     status: str,
     decision,
     legitimacy,
+    application_history_incomplete: bool = False,
 ) -> QueueJob:
     title_l = job.title.lower()
     policy = get_policy().queue
@@ -725,6 +811,8 @@ def _queue_job_from_evidence(
     elif queue_decision == "skip" and status in {"queued", "viewing"}:
         effective_status = "skipped"
         suppression_reason = decision.biggest_gap or "role evidence did not pass"
+    elif application_history_incomplete and status in {"queued", "viewing"}:
+        suppression_reason = _INCOMPLETE_HISTORY_REASON
     return QueueJob(
         id=hashlib.md5(job.identity_key.encode()).hexdigest()[:8],
         company=job.company,
@@ -777,6 +865,10 @@ def build_queue(
     scanner = PortalScanner(keywords=_discovery_keywords(profile))
     raw_jobs = scanner.scan_targets(targets)
     log.info("Found %d raw matches across all portals", len(raw_jobs))
+    source_health = summarize_source_runs(scanner.last_run_results)
+    log.info(source_health.summary_line)
+    for notice in source_health.notices:
+        log.warning("Source attention: %s", notice)
 
     # Load prior queue to preserve applied/skipped status
     prior = {j.id: j for j in load_queue()}
@@ -787,8 +879,16 @@ def build_queue(
     evidence = get_application_evidence_index(tracker)
     decision_engine = RoleDecisionEngine()
     accounts_path = TRUE_ACCOUNTS_PATH if TRUE_ACCOUNTS_PATH.is_file() else None
-    if get_policy().application_evidence.fail_closed:
-        evidence.ensure_usable()
+    application_history_incomplete = bool(
+        get_policy().application_evidence.fail_closed
+        and getattr(evidence, "errors", ())
+    )
+    if application_history_incomplete:
+        log.warning(
+            "Application history is incomplete. Search will continue, but every "
+            "otherwise-ready role is restricted to Investigate. Refresh the "
+            "configured history source before applying."
+        )
     ledger = OpportunityLedger()
 
     # Fold the existing tracker/Gmail/application-packet history into the
@@ -829,6 +929,10 @@ def build_queue(
                 jd_text=job.description,
                 profile=profile,
                 accounts_path=accounts_path,
+            )
+            decision = _gate_decision_for_incomplete_history(
+                decision,
+                incomplete=application_history_incomplete,
             )
             job_id = hashlib.md5(job.identity_key.encode()).hexdigest()[:8]
             prior_job = prior.get(job_id) or prior_by_url.get(
@@ -919,6 +1023,7 @@ def build_queue(
                 status=status,
                 decision=decision,
                 legitimacy=legitimacy,
+                application_history_incomplete=application_history_incomplete,
             ))
     finally:
         ledger.close()
@@ -1155,7 +1260,9 @@ def refresh_queue(
 def load_current_slate() -> list[QueueJob]:
     """Reconcile tracker evidence and freshness before any recommendation view."""
     reconcile_queue_with_tracker()
-    return load_queue()
+    jobs = load_queue()
+    restrict_queue_for_action_provenance(jobs)
+    return jobs
 
 
 def update_job_status(job_id: str, status: str) -> bool:
@@ -1178,10 +1285,20 @@ def reconcile_queue_with_tracker() -> tuple[int, int]:
             return 0, 0
         tracker = get_application_tracker()
         evidence = get_application_evidence_index(tracker)
-        if get_policy().application_evidence.fail_closed:
-            evidence.ensure_usable()
+        application_history_incomplete = bool(
+            get_policy().application_evidence.fail_closed
+            and getattr(evidence, "errors", ())
+        )
         changed = expire_stale_recommendations(queue)
         for job in queue:
+            if (
+                application_history_incomplete
+                and job.status in {"queued", "viewing"}
+                and job.decision in {"apply_now", "stretch"}
+            ):
+                job.decision = "investigate"
+                job.suppression_reason = _INCOMPLETE_HISTORY_REASON
+                changed += 1
             block_reason = policy_block_reason(job.company, job.title)
             if block_reason and job.status in {"queued", "viewing"}:
                 job.status = "skipped"

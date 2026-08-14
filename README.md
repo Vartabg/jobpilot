@@ -77,18 +77,20 @@ It will ask for contact details, experience, skills, target role titles, and the
 **Step 2 — Find jobs at companies you care about**
 
 ```bash
-# Replace "amazon" with any company that uses Greenhouse, Lever, or Ashby
+# Use the matching flag for the company's ATS: --greenhouse, --lever, or --ashby
 jobpilot scan --greenhouse amazon -k "operations manager"
 ```
 
 **Step 3 — Assess a job before you spend time applying**
 
 ```bash
-# Paste a job description into a text file, or point to a URL
+# Paste a job description or save it in a text file
 jobpilot score ~/Downloads/job-description.txt
 ```
 
 You'll see a qualification lower bound, work-context evidence, coverage, and the biggest unknown or gap. Unknown evidence stays unknown; it does not receive neutral points.
+This is a role-fit assessment, not permission to apply: only the refreshed queue
+can establish current posting, history, and ledger readiness.
 
 **Step 4 — Build a company slate**
 
@@ -97,6 +99,18 @@ jobpilot queue --refresh
 ```
 
 JobPilot fetches full descriptions from supported ATS boards, verifies that each role is current, assigns a posting-evidence grade and action state, and keeps one best active role per company. This verifies the listing—not the employer's entire corporate identity—so you still investigate the company before sharing sensitive information. Other roles remain in history as labeled alternatives. Only a current direct-source role with an assessed `apply_now` decision is shown by `jobpilot queue --fresh --json`.
+
+If you configured an external Gmail application-history cache and it becomes stale, search still completes but every positive recommendation is restricted to `Investigate`. JobPilot does not connect to Gmail itself. Generate a fresh full-history JSON export with your read-only Gmail tool, then validate and import it without changing the mailbox:
+
+```bash
+jobpilot gmail-sync ~/Downloads/gmail-applications.json
+jobpilot queue --refresh
+```
+
+The export is deliberately narrow: each record may contain `company`, `title`,
+`status`, an HTTPS `url`, one ISO date/timestamp field (`occurred_at`, `date`,
+`applied_at`, or `received_at`), and an optional opaque `message_id`. Subjects,
+message bodies, snippets, attachments, and arbitrary extra fields are rejected.
 
 For the web evidence cards, run `jobpilot serve` and open `http://127.0.0.1:8767/`. The HTML dashboard depends on that local API server; opening the file directly is intentionally unsupported.
 
@@ -118,7 +132,7 @@ If someone is setting this up for you, send them the [**Setup Guide for Helpers*
 
 ---
 
-## All commands
+## Core commands
 
 ```
 jobpilot profile          Set up or update your profile (name, resume, experience)
@@ -130,6 +144,7 @@ jobpilot doctor           Check that everything is working correctly
 jobpilot history          See your application history
 jobpilot stats            See your application stats
 jobpilot queue            Build a verified, evidence-linked company slate
+jobpilot gmail-sync       Validate and import a read-only Gmail history export
 jobpilot log              Mark a manual application so it's tracked alongside JobPilot-assisted ones
 jobpilot answer           Save and reuse the answers you write for application questions
 ```
@@ -147,6 +162,7 @@ JobPilot also has a **gigs lane** — a second track for freelance and contract 
 - **macOS only right now.** Windows and Linux support is on the roadmap.
 - **AI is optional and limited to advisory features you invoke explicitly.** Interview preparation and advice can use a configured Gemini or local Bro backend. Role decisions, resumes, cover-letter drafts, and application answers remain deterministic so model prose cannot become an unsupported external claim.
 - **The scan works on public ATS boards.** If a company uses a private hiring system or doesn't use Greenhouse/Lever/Ashby, the scan won't find those roles.
+- **Gmail history is an optional external export, not an inbox integration.** JobPilot validates and atomically imports the configured cache; it never signs into or modifies Gmail. Missing or stale fail-closed history restricts recommendations to `Investigate` until refreshed.
 - **You paste and submit by hand.** JobPilot never fills or submits the live ATS form.
 - **Posting evidence is a grade, not a company-trust probability.** `A/B recommend` requires a current direct ATS listing; `review` needs human verification; `hold` needs a refresh; `block` means closed, conflicting, expired, or scam-pattern evidence. Investigate the employer separately.
 - **Work context is observed, not a personality diagnosis.** Customer interaction, autonomy, field work, presentations, ambiguity, and similar signals are shown only when the job description and your evidence support them.

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import sqlite3
 from collections.abc import Mapping
@@ -56,6 +57,12 @@ class OpportunityLedger:
         root = Path(data_dir or Path(__file__).parent.parent / "data")
         self.db_path = Path(db_path) if db_path else root / "opportunities.db"
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        flags = os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
+        database_fd = os.open(self.db_path, flags, 0o600)
+        try:
+            os.fchmod(database_fd, 0o600)
+        finally:
+            os.close(database_fd)
         self.connection = sqlite3.connect(str(self.db_path))
         self.connection.row_factory = sqlite3.Row
         self.connection.execute("PRAGMA foreign_keys = ON")

@@ -46,6 +46,8 @@ from jobpilot.core.queue_builder import (
     load_queue,
     reconcile_queue_with_tracker,
     refresh_queue,
+    restrict_queue_for_action_provenance,
+    restrict_queue_for_incomplete_history,
     update_job_status,
 )
 
@@ -274,6 +276,8 @@ async def install_page() -> None:
 @app.get("/api/queue")
 async def api_queue() -> JSONResponse:
     jobs = load_queue()
+    restrict_queue_for_incomplete_history(jobs)
+    restrict_queue_for_action_provenance(jobs)
     return JSONResponse([asdict(j) for j in jobs])
 
 
