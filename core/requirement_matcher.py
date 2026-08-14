@@ -110,6 +110,7 @@ _RESET_HEADER = _header(
     r"(?:company|team) (?:overview|description)|meet (?:the|our) team|"
     r"benefits?(?: and perks?|\s*&\s*perks?)?|perks?|what we offer|total rewards?|"
     r"compensation|salary|pay range|our values|"
+    r"conclusion|(?:security|recruiting|fraud|scam) notice|"
     r"(?:equal employment|equal opportunity|eeo|diversity|inclusion|privacy|"
     r"accommodation|legal|disclaimer)(?: statement| notice| policy)?|"
     r"(?:application|hiring|interview) process|how to apply|"
@@ -121,7 +122,8 @@ _SCALAR_LOGISTICS = re.compile(
 )
 _CONTEXT = re.compile(
     r"\b(customer|client|discovery|demo(?:nstration)?s?|workshops?|training|"
-    r"cross-functional|communicat|present|independent|autonom|ambigu|stakeholder|field)\w*\b"
+    r"cross-functional|communicat|present|independent|autonom|ambigu|stakeholder|field|"
+    r"sales(?:person)?|relationship)\w*\b"
 )
 _LOGISTICS = re.compile(
     r"\b(remote|hybrid|on[ -]?site|travel|relocat|sponsor|authoriz|driver'?s license|"
@@ -204,6 +206,8 @@ _CONCEPTS = {
         "ambiguity",
         "ambiguous",
     },
+    "sales": {"sales", "salesperson", "selling", "prospecting", "outbound"},
+    "relationship": {"relationship", "relationships", "rapport"},
 }
 
 
@@ -361,6 +365,7 @@ class RequirementMatcher:
         item: str,
         *,
         include_skills: bool = True,
+        min_concepts: int = 2,
     ) -> tuple[str, ...]:
         req_tokens = tokens(item)
         req_concepts = _concepts(item)
@@ -372,7 +377,7 @@ class RequirementMatcher:
             claim_text = " ".join(claims)
             overlap = req_tokens & tokens(claim_text)
             concept_overlap = req_concepts & _concepts(claim_text)
-            if len(overlap) >= 2 or len(concept_overlap) >= 2:
+            if len(overlap) >= 2 or len(concept_overlap) >= min_concepts:
                 found.append(account.account_id)
         return tuple(found)
 
@@ -433,7 +438,11 @@ class RequirementMatcher:
         if category == "logistics":
             return EvidenceStatus.UNKNOWN, (), ()
         if category == "work_context":
-            accounts = self._adjacent_accounts(item, include_skills=False)
+            accounts = self._adjacent_accounts(
+                item,
+                include_skills=False,
+                min_concepts=1,
+            )
             if accounts:
                 return EvidenceStatus.ADJACENT, accounts, ("related account evidence",)
             return EvidenceStatus.UNKNOWN, (), ()
@@ -491,7 +500,7 @@ class RequirementMatcher:
                 direct_accounts.append(account.account_id)
                 direct_support.append(f"account: {account.title}")
         if direct_support:
-            if category == "mandatory" and self._has_unsupported_conjunct(item):
+            if self._has_unsupported_conjunct(item):
                 return EvidenceStatus.UNKNOWN, (), ()
             return (
                 EvidenceStatus.DIRECT,

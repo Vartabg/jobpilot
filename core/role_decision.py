@@ -104,6 +104,11 @@ def _axis(matches: list[RequirementMatch]) -> int | None:
 
 
 def _first_gap(matches: tuple[RequirementMatch, ...]) -> str:
+    supported_text = {
+        item.text
+        for item in matches
+        if item.status in {EvidenceStatus.DIRECT, EvidenceStatus.ADJACENT}
+    }
     priorities = (
         ("mandatory", EvidenceStatus.CONTRADICTED),
         ("logistics", EvidenceStatus.CONTRADICTED),
@@ -117,7 +122,9 @@ def _first_gap(matches: tuple[RequirementMatch, ...]) -> str:
             (
                 item
                 for item in matches
-                if item.category == category and item.status is status
+                if item.category == category
+                and item.status is status
+                and item.text not in supported_text
             ),
             None,
         )

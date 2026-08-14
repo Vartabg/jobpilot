@@ -149,6 +149,9 @@ def test_modern_candidate_headings_and_reset_sections_are_classified():
         "- Python automation experience.\n"
         "Qualifications we value\n"
         "- Enterprise SaaS experience.\n"
+        "Conclusion:\n"
+        "- Compensation depends on experience and location.\n"
+        "- Recruiting impersonation and fraud notice.\n"
         "Benefits and perks\n"
         "- Remote wellness coaching and family travel assistance.\n"
         "- Customer discounts."
@@ -163,13 +166,35 @@ def test_modern_candidate_headings_and_reset_sections_are_classified():
         "Enterprise SaaS experience.",
     )
     assert not any(
-        "wellness" in item or "discounts" in item
+        any(
+            term in item
+            for term in ("Compensation", "impersonation", "wellness", "discounts")
+        )
         for item in (
             *parsed.responsibilities,
             *parsed.work_context,
             *parsed.logistics,
         )
     )
+
+
+def test_partial_skill_overlap_does_not_prove_a_composite_responsibility():
+    parsed = RequirementMatcher.parse(
+        "About the role\n"
+        "- Build customer integrations.\n"
+        "- Troubleshoot production systems.\n"
+        "Responsibilities\n"
+        "- Hands-on experience in Go, Python, and JavaScript.\n"
+        "Required qualifications\n"
+        "- Python automation experience."
+    )
+    matches = RequirementMatcher.from_profile(
+        UserProfile(skills=["Python", "JavaScript"])
+    ).match(parsed)
+
+    composite = next(match for match in matches if "Hands-on" in match.text)
+
+    assert composite.status is EvidenceStatus.UNKNOWN
 
 
 def test_classifies_direct_adjacent_unknown_and_contradicted(account_path: Path):
@@ -225,6 +250,91 @@ def test_truth_boundary_only_contradicts_its_negative_claim(tmp_path: Path):
     matches = matcher.match(parsed)
 
     assert all(match.status is not EvidenceStatus.CONTRADICTED for match in matches)
+
+
+def test_sales_account_supports_salesperson_work_context_without_proving_tenure(
+    tmp_path: Path,
+):
+    accounts = tmp_path / "accounts.json"
+    accounts.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "accounts": [
+                    {
+                        "id": "sales-business-development",
+                        "title": "Sales and business development",
+                        "summary": "Built relationships through outbound sales and prospecting.",
+                        "details": ["Presented to executives and closed direct sales."],
+                        "skills": ["sales", "business development"],
+                        "truth_boundaries": [
+                            "Do not claim formal sales engineering or pre-sales tenure."
+                        ],
+                    }
+                ],
+            }
+        )
+    )
+    matcher = RequirementMatcher.from_profile(UserProfile(), accounts)
+    parsed = RequirementMatcher.parse(
+        "Responsibilities\n"
+        "- Build customer relationships.\n"
+        "Qualifications we value\n"
+        "- Operates with the enthusiasm of a salesperson.\n"
+        "Required qualifications\n"
+        "- 4+ years of sales engineering experience."
+    )
+
+    matches = matcher.match(parsed)
+    salesperson = next(
+        match
+        for match in matches
+        if "salesperson" in match.text and match.category == "work_context"
+    )
+    tenure = next(match for match in matches if "4+ years" in match.text)
+
+    assert salesperson.category == "work_context"
+    assert salesperson.status is EvidenceStatus.ADJACENT
+    assert salesperson.account_ids == ("sales-business-development",)
+    assert tenure.status is EvidenceStatus.UNKNOWN
+
+
+def test_biggest_gap_skips_a_work_context_claim_supported_on_its_context_axis(
+    tmp_path: Path,
+):
+    accounts = tmp_path / "accounts.json"
+    accounts.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "accounts": [
+                    {
+                        "id": "sales-account",
+                        "title": "Sales and business development",
+                        "summary": "Built relationships through outbound sales.",
+                        "details": ["Presented to executives."],
+                        "skills": ["sales"],
+                    }
+                ],
+            }
+        )
+    )
+    result = RoleDecisionEngine().assess(
+        title="Customer Engineer",
+        jd_text=(
+            "Responsibilities\n"
+            "- Build software integrations.\n"
+            "- Troubleshoot production systems.\n"
+            "- Maintain stable APIs.\n"
+            "Qualifications we value\n"
+            "- Operates with the enthusiasm of a salesperson.\n"
+            "- Experience with AWS and Git."
+        ),
+        profile=UserProfile(skills=["Git"]),
+        accounts_path=accounts,
+    )
+
+    assert result.biggest_gap == "Experience with AWS and Git."
 
 
 @pytest.mark.parametrize(
