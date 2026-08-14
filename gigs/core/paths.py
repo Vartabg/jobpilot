@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from jobpilot.core.config import DATA_DIR
+
 
 def icloud_root() -> Path:
     default = Path.home() / "Library/Mobile Documents/com~apple~CloudDocs"
@@ -27,5 +29,5 @@ def data_dir() -> Path:
     """Repo-local state dir (jobpilot's gitignored data/gigs). Overridable so
     smoke tests / sandboxed runs can't touch real state (seen.json, hygiene
     marker, latest_leads.json, ...)."""
-    default = Path(__file__).parent.parent.parent / "data" / "gigs"
+    default = DATA_DIR / "gigs"
     return Path(os.environ.get("GIGPILOT_DATA_DIR", default))

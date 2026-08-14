@@ -74,3 +74,15 @@ def test_built_wheel_installs_and_runs_cli_outside_repository(tmp_path: Path) ->
     )
     assert str(venv_dir) in probe.stdout
     assert str(REPO_ROOT) not in probe.stdout
+
+    logging_probe = _run(
+        str(python),
+        "-c",
+        (
+            "from jobpilot.core.logger import get_logger; "
+            "get_logger('release-smoke').info('diagnostic-only')"
+        ),
+        cwd=tmp_path,
+    )
+    assert "diagnostic-only" not in logging_probe.stdout
+    assert "diagnostic-only" in logging_probe.stderr

@@ -79,6 +79,19 @@ DATA_DIR = _data_dir_from_locations(
     home=Path.home(),
     platform_name=sys.platform,
 )
+
+
+def resolve_data_path(value: str | Path) -> Path:
+    """Resolve a user-configured path against the stable JobPilot data root."""
+    path = Path(value).expanduser()
+    if path.is_absolute():
+        return path
+    parts = path.parts
+    if parts and parts[0].casefold() == "data":
+        return DATA_DIR.joinpath(*parts[1:])
+    return DATA_DIR / path
+
+
 SESSION_FILE = DATA_DIR / "session.json"
 SETTINGS_FILE = DATA_DIR / "settings.json"
 

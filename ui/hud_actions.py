@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import subprocess
 from datetime import datetime
-from pathlib import Path
 from typing import Optional
 
+from jobpilot.core.config import DATA_DIR
 from jobpilot.core.queue_builder import QueueJob, update_job_status
 from jobpilot.gigs.core.models import Gig
 from jobpilot.gigs.core.safe_urls import safe_external_url
@@ -91,7 +91,7 @@ def draft_gig_proposal(gig: Gig) -> str:
     from jobpilot.gigs.core.proposals import build_revenue_brief
 
     brief = build_revenue_brief(gig)
-    out_dir = Path(__file__).resolve().parent.parent / "data" / "gigs" / "drafts"
+    out_dir = DATA_DIR / "gigs" / "drafts"
     out_dir.mkdir(parents=True, exist_ok=True)
     slug = "".join(c if c.isalnum() else "-" for c in (gig.company or "gig")).strip("-").lower()[:40]
     path = out_dir / f"{slug or 'gig'}_{gig.id[:8]}.txt"

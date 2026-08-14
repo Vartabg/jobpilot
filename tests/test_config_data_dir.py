@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+import jobpilot.core.config as config
 from jobpilot.core.config import _data_dir_from_locations
 
 
@@ -51,3 +52,16 @@ def test_wheel_install_uses_writable_user_data_not_site_packages(tmp_path: Path)
     selected = _resolve(tmp_path)
     assert selected == tmp_path / "home" / "Library" / "Application Support" / "JobPilot"
     assert "site-packages" not in selected.parts
+
+
+def test_relative_policy_paths_resolve_inside_data_root(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "JobPilot")
+    assert config.resolve_data_path("data/gmail_applications.json") == (
+        tmp_path / "JobPilot" / "gmail_applications.json"
+    )
+    assert config.resolve_data_path("exports/history.json") == (
+        tmp_path / "JobPilot" / "exports" / "history.json"
+    )

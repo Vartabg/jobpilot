@@ -10,6 +10,7 @@ Provides a configured logger with:
 import logging
 from logging.handlers import RotatingFileHandler
 
+from rich.console import Console
 from rich.logging import RichHandler
 
 from jobpilot.core.config import DATA_DIR
@@ -33,6 +34,7 @@ def setup_logging(level: int = logging.INFO) -> None:
 
     # Rich console handler — short format for interactive use
     console_handler = RichHandler(
+        console=Console(stderr=True),
         show_time=True,
         show_path=False,
         markup=True,

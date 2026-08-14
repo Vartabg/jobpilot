@@ -27,7 +27,7 @@ from jobpilot.core.application_evidence import (
     configured_external_evidence_errors,
 )
 from jobpilot.core.application_tracker import get_application_tracker
-from jobpilot.core.config import DATA_DIR
+from jobpilot.core.config import DATA_DIR, resolve_data_path
 from jobpilot.core.legitimacy import assess_legitimacy
 from jobpilot.core.logger import get_logger
 from jobpilot.core.opportunity_ledger import OpportunityLedger
@@ -538,9 +538,7 @@ def _is_allowed_location(title: str, company: str, location: str | None) -> bool
 def _evidence_path(value: str) -> Path | None:
     if not value:
         return None
-    path = Path(value).expanduser()
-    repo_root = Path(__file__).resolve().parent.parent
-    return path if path.is_absolute() else repo_root / path
+    return resolve_data_path(value)
 
 
 def get_application_evidence_index(tracker=None) -> ApplicationEvidenceIndex:

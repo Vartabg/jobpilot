@@ -15,6 +15,7 @@ from pathlib import Path
 from rich.console import Console
 from rich.table import Table
 
+from jobpilot.core.config import DATA_DIR
 from jobpilot.core.logger import get_logger
 from jobpilot.core.role_identity import (
     canonicalize_role_url,
@@ -24,7 +25,7 @@ from jobpilot.core.role_identity import (
 console = Console()
 log = get_logger(__name__)
 
-DB_DIR = Path(__file__).parent.parent / "data"
+DB_DIR = DATA_DIR
 VALID_STATUSES = {
     "started",
     "submitted",

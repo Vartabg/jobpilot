@@ -17,13 +17,14 @@ from html import escape
 from pathlib import Path
 from typing import cast
 
+from jobpilot.core.config import DATA_DIR
 from jobpilot.core.job_scorer import JobFitResult, JobScorer
 from jobpilot.core.logger import get_logger
 from jobpilot.core.profile_store import ProfileStore, UserProfile, get_profile_store
 
 log = get_logger(__name__)
 
-OUTPUT_DIR = Path(__file__).parent.parent / "data" / "resumes"
+OUTPUT_DIR = DATA_DIR / "resumes"
 RESUME_SOURCE_DIR = OUTPUT_DIR
 LATEST_DRAFT_FILENAME = "latest_draft.json"
 SETTINGS_FILENAME = "settings.json"

@@ -31,6 +31,7 @@ from jobpilot.core.application_answerer import TRUE_ACCOUNTS_PATH, ApplicationAn
 from jobpilot.core.application_tracker import get_application_tracker
 from jobpilot.core.bro_client import get_health
 from jobpilot.core.cdp_bridge import connect_to_chrome
+from jobpilot.core.config import DATA_DIR, resolve_data_path
 from jobpilot.core.doctor import run_doctor
 from jobpilot.core.interview_prep import InterviewPrepGenerator
 from jobpilot.core.jd_parser import JDParser
@@ -54,7 +55,7 @@ app = typer.Typer(
 )
 console = Console()
 
-CLAUDE_VETTED_TARGETS_DIR = Path(__file__).parent / "data" / "reports"
+CLAUDE_VETTED_TARGETS_DIR = DATA_DIR / "reports"
 CLAUDE_VETTED_TARGETS_GLOB = "claude-vetted-targets-*.json"
 # Explicit override (tests patch this). When None, the newest matching report
 # in CLAUDE_VETTED_TARGETS_DIR is used. When no file exists at all, the
@@ -1517,9 +1518,7 @@ def gmail_sync(
             "Set application_evidence.gmail_cache_path in data/policy.json, then retry."
         )
         raise typer.Exit(2)
-    destination = Path(configured).expanduser()
-    if not destination.is_absolute():
-        destination = Path(__file__).resolve().parent / destination
+    destination = resolve_data_path(configured)
 
     try:
         result = sync_gmail_application_cache(
@@ -1556,6 +1555,7 @@ def queue(
     from jobpilot.core.application_evidence import configured_external_evidence_errors
     from jobpilot.core.policy_config import get_policy
     from jobpilot.core.queue_builder import (
+        QUEUE_PATH,
         is_apply_ready,
         load_queue,
         reconcile_queue_with_tracker,
@@ -1567,8 +1567,7 @@ def queue(
     def configured_path(value: str) -> Path | None:
         if not value:
             return None
-        path = Path(value).expanduser()
-        return path if path.is_absolute() else Path(__file__).resolve().parent / path
+        return resolve_data_path(value)
 
     evidence_policy = get_policy().application_evidence
     history_errors = (
@@ -1613,7 +1612,7 @@ def queue(
     # JSON mode: emit raw queue (respecting --fresh and --limit) and exit.
     # Designed for cross-agent / scripting use without dashboard/UI side effects.
     if as_json:
-        if refresh or not (Path(__file__).parent / "data" / "queue.json").exists():
+        if refresh or not QUEUE_PATH.exists():
             jobs = refresh_with_clear_evidence_error()
         else:
             reconcile_queue_with_tracker()
@@ -1625,7 +1624,7 @@ def queue(
         console.print_json(data=[_job_output_payload(j) for j in view])
         return
 
-    if not refresh and (Path(__file__).parent / "data" / "queue.json").exists():
+    if not refresh and QUEUE_PATH.exists():
         reconcile_queue_with_tracker()
         jobs = load_queue()
         restrict_queue_for_action_provenance(jobs)

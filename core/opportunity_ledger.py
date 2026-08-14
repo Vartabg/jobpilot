@@ -13,6 +13,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from jobpilot.core.config import DATA_DIR
+
 EVENT_TYPES = frozenset({"discovered", "verified", "applied", "outreach", "human_reply", "screen",
                          "interview", "offer", "rejected", "withdrawn", "no_response"})
 _POSITIVE_OUTCOMES = {"human_reply", "screen", "interview", "offer"}
@@ -54,7 +56,7 @@ class OpportunityLedger:
     """Canonical opportunity evidence with immutable, deduplicated events."""
 
     def __init__(self, data_dir: Path | None = None, db_path: Path | None = None):
-        root = Path(data_dir or Path(__file__).parent.parent / "data")
+        root = Path(data_dir or DATA_DIR)
         self.db_path = Path(db_path) if db_path else root / "opportunities.db"
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         flags = os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
@@ -75,7 +77,7 @@ class OpportunityLedger:
         db_path: Path | None = None,
     ) -> OpportunityLedger:
         """Open an existing ledger without creating or repairing anything."""
-        root = Path(data_dir or Path(__file__).parent.parent / "data")
+        root = Path(data_dir or DATA_DIR)
         path = Path(db_path) if db_path else root / "opportunities.db"
         if not path.is_file():
             raise FileNotFoundError(path)
