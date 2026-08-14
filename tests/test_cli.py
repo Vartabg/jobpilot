@@ -593,7 +593,15 @@ def test_log_records_explicit_outcome_in_ledger(monkeypatch, tmp_path: Path):
     ledger_path = tmp_path / "opportunities.db"
     monkeypatch.setattr(cli, "get_application_tracker", lambda: tracker)
     monkeypatch.setattr(
-        "jobpilot.core.opportunity_ledger.OpportunityLedger",
+        "jobpilot.core.outcome_service.get_application_tracker",
+        lambda: tracker,
+    )
+    monkeypatch.setattr(
+        "jobpilot.core.outcome_service.reconcile_queue_with_tracker",
+        lambda: (0, 0),
+    )
+    monkeypatch.setattr(
+        "jobpilot.core.outcome_service.OpportunityLedger",
         lambda: OpportunityLedger(db_path=ledger_path),
     )
 

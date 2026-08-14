@@ -34,21 +34,20 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
+from jobpilot.core.agent_api import get_service
+from jobpilot.core.agent_api import router as agent_router
+from jobpilot.core.agent_contract import AgentServiceError
 from jobpilot.core.application_tracker import get_application_tracker
-from jobpilot.core.dashboard_metrics import collect_dashboard_metrics
 from jobpilot.core.logger import get_logger
 from jobpilot.core.opportunity_ledger import EVENT_TYPES, OpportunityLedger
+from jobpilot.core.outcome_service import OutcomeInput
 from jobpilot.core.profile_store import get_profile_store
 from jobpilot.core.queue_builder import (
     focus_queue_company_first,
     get_job,
     has_current_action_provenance,
     is_apply_ready,
-    load_queue,
     reconcile_queue_with_tracker,
-    refresh_queue,
-    restrict_queue_for_action_provenance,
-    restrict_queue_for_incomplete_history,
     update_job_status,
 )
 
@@ -58,6 +57,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 DASHBOARD_PATH = PROJECT_ROOT / "ui" / "dashboard.html"
 
 app = FastAPI(title="JobPilot Remote", version="0.3.0")
+app.include_router(agent_router)
 # Importing ``app`` directly (for example, ``uvicorn ...:app``) must not expose
 # the dashboard. ``configure_server_access`` is the only path that can opt into
 # loopback access or install a valid token for a Tailscale bind.
@@ -275,30 +275,30 @@ async def install_page() -> None:
 # ---------------------------------------------------------------------------
 
 @app.get("/api/queue")
-async def api_queue() -> JSONResponse:
-    jobs = load_queue()
-    restrict_queue_for_incomplete_history(jobs)
-    restrict_queue_for_action_provenance(jobs)
-    return JSONResponse([asdict(j) for j in jobs])
+def api_queue() -> JSONResponse:
+    result = get_service().list_opportunities().to_dict()
+    return JSONResponse(result["data"]["items"])
 
 
 @app.get("/api/dashboard")
-async def api_dashboard_metrics() -> JSONResponse:
-    jobs = load_queue()
-    restrict_queue_for_incomplete_history(jobs)
-    restrict_queue_for_action_provenance(jobs)
-    tracker = get_application_tracker()
-    return JSONResponse(
-        collect_dashboard_metrics(jobs, tracker_stats=tracker.get_stats())
-    )
+def api_dashboard_metrics() -> JSONResponse:
+    result = get_service().dashboard().to_dict()
+    return JSONResponse(result["data"])
 
 
 @app.post("/api/queue/refresh")
 async def api_queue_refresh() -> JSONResponse:
-    def _run() -> int:
-        return len(refresh_queue(limit=100))
-
-    count = await asyncio.to_thread(_run)
+    try:
+        result = await asyncio.to_thread(
+            get_service().refresh_opportunities,
+            limit=100,
+        )
+    except AgentServiceError as exc:
+        raise HTTPException(
+            exc.status_code,
+            detail=exc.to_dict()["error"],
+        ) from exc
+    count = result.data["count"]
     return JSONResponse({"ok": True, "count": count})
 
 
@@ -336,34 +336,28 @@ async def api_applications(limit: int = 40) -> JSONResponse:
 
 
 @app.post("/api/applications/log")
-async def api_log_application(payload: ApplicationLogPayload) -> JSONResponse:
-    tracker = get_application_tracker()
+def api_log_application(payload: ApplicationLogPayload) -> JSONResponse:
     try:
-        app_row = tracker.log_application(
-            company=payload.company,
-            title=payload.title,
-            url=payload.url,
-            status=payload.status,
-            applied_at=payload.applied_at,
-            source=payload.source or "dashboard",
+        result = get_service().record_outcome(
+            OutcomeInput(
+                company=payload.company,
+                title=payload.title,
+                url=payload.url,
+                status=payload.status,
+                occurred_at=payload.applied_at,
+                human_confirmed=True,
+                source=payload.source or "dashboard",
+                acquisition_channel=payload.acquisition_channel,
+            )
         )
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
-    _record_funnel_event(
-        company=app_row.company,
-        title=app_row.job_title,
-        url=app_row.job_url,
-        status=app_row.status,
-        source=app_row.source,
-        occurred_at=app_row.applied_at,
-        acquisition_channel=payload.acquisition_channel,
-    )
-    changed, total = reconcile_queue_with_tracker()
+    except AgentServiceError as exc:
+        raise HTTPException(exc.status_code, detail=exc.to_dict()["error"]) from exc
+    data = result.data
     return JSONResponse({
         "ok": True,
-        "application": asdict(app_row),
-        "queue_changed": changed,
-        "queue_total": total,
+        "application": data["application"],
+        "queue_changed": data["queue_changed"],
+        "queue_total": data["queue_total"],
     })
 
 

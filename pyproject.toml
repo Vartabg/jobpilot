@@ -59,6 +59,7 @@ only-packages = true
 [tool.hatch.build.targets.wheel.force-include]
 "__init__.py" = "jobpilot/__init__.py"
 "cli.py" = "jobpilot/cli.py"
+"cli_agent.py" = "jobpilot/cli_agent.py"
 "core" = "jobpilot/core"
 "gigs" = "jobpilot/gigs"
 "learning" = "jobpilot/learning"
@@ -69,6 +70,7 @@ only-packages = true
 include = [
     "/__init__.py",
     "/cli.py",
+    "/cli_agent.py",
     "/core/*.py",
     "/gigs/**/*.py",
     "/gigs/**/*.html",

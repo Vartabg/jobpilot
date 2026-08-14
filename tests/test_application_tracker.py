@@ -17,6 +17,37 @@ def tracker(tmp_path: Path) -> ApplicationTracker:
     return ApplicationTracker(data_dir=tmp_path)
 
 
+def test_readonly_open_does_not_create_a_missing_database(tmp_path: Path) -> None:
+    database = tmp_path / "applications.db"
+
+    with pytest.raises(FileNotFoundError):
+        ApplicationTracker.open_readonly(data_dir=tmp_path)
+
+    assert not database.exists()
+
+
+def test_readonly_open_can_query_existing_history(tmp_path: Path) -> None:
+    writer = ApplicationTracker(data_dir=tmp_path)
+    writer.log_application(
+        company="Acme",
+        title="Customer Engineer",
+        url="https://jobs.example.test/acme/1",
+        status="applied",
+    )
+    writer.close()
+
+    reader = ApplicationTracker.open_readonly(data_dir=tmp_path)
+    try:
+        assert reader.role_status(
+            "Acme",
+            "Customer Engineer",
+            "https://jobs.example.test/acme/1",
+        ) == "applied"
+        assert reader.get_stats()["total"] == 1
+    finally:
+        reader.close()
+
+
 class TestMarkAndQuery:
 
     def test_mark_started(self, tracker: ApplicationTracker):

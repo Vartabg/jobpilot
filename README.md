@@ -114,6 +114,8 @@ message bodies, snippets, attachments, and arbitrary extra fields are rejected.
 
 For the full control-center dashboard, run `jobpilot serve` and open `http://127.0.0.1:8767/`. The dashboard shows apply readiness, relocation-supported leads, current direct-role coverage, source health, the 30-day application funnel, explicit-outcome sample size, and every role's evidence card. Its Relocation view sorts confirmed support before conditional support and shows the exact posting statement plus destination; “must relocate” never counts as company support. The dashboard depends on the local API server, so opening the HTML file directly is intentionally unsupported.
 
+**For AI agents:** use `jobpilot agent capabilities` to discover the versioned, model-neutral contract. `jobpilot agent opportunities`, `assess`, `preflight`, `dashboard`, and `outcome` expose the same service through JSON; versioned HTTP and Python access are also available. Agents can search, assess, prepare evidence, and record only human-confirmed outcomes, but they cannot fill or submit a live ATS form. See [docs/AGENT_API.md](docs/AGENT_API.md).
+
 **Step 5 — Get a tailored resume draft**
 
 ```bash

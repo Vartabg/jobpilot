@@ -10,6 +10,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
+import jobpilot.core.jobpilot_service as service_module
 import jobpilot.core.server as server
 from jobpilot.core.queue_builder import QueueJob
 
@@ -120,7 +121,7 @@ def test_orphaned_cached_recommendation_cannot_enter_application_flow(
 def test_queue_refresh_uses_serialized_refresh_operation(monkeypatch) -> None:
     calls: list[int] = []
     monkeypatch.setattr(
-        server,
+        service_module.queue_builder,
         "refresh_queue",
         lambda *, limit: calls.append(limit) or [_job(), _job(id="role-2")],
     )
@@ -132,23 +133,38 @@ def test_queue_refresh_uses_serialized_refresh_operation(monkeypatch) -> None:
     assert calls == [100]
 
 
+def test_queue_refresh_returns_actionable_history_error(monkeypatch) -> None:
+    from jobpilot.core.application_evidence import EvidenceSourceError
+
+    def fail(*, limit):
+        raise EvidenceSourceError("History export is stale.")
+
+    monkeypatch.setattr(service_module.queue_builder, "refresh_queue", fail)
+
+    response = TestClient(server.app).post("/api/queue/refresh")
+
+    assert response.status_code == 409
+    assert "application history" in response.json()["detail"]["message"].lower()
+    assert "gmail-sync" in response.json()["detail"]["action"]
+
+
 def test_dashboard_metrics_endpoint_is_read_only_and_privacy_safe(monkeypatch) -> None:
     job = _job(relocation_state="offered")
-    monkeypatch.setattr(server, "load_queue", lambda: [job])
+    monkeypatch.setattr(service_module.queue_builder, "load_queue", lambda: [job])
     monkeypatch.setattr(
-        server,
+        service_module.queue_builder,
         "restrict_queue_for_incomplete_history",
         lambda _jobs: 0,
     )
     monkeypatch.setattr(
-        server,
+        service_module.queue_builder,
         "restrict_queue_for_action_provenance",
         lambda _jobs: 0,
     )
     monkeypatch.setattr(
-        server,
-        "get_application_tracker",
-        lambda: SimpleNamespace(get_stats=lambda: {"total": 7}),
+        service_module,
+        "read_tracker_stats",
+        lambda: {"total": 7},
     )
     calls = []
 
@@ -162,7 +178,7 @@ def test_dashboard_metrics_endpoint_is_read_only_and_privacy_safe(monkeypatch) -
             "tracker": tracker_stats,
         }
 
-    monkeypatch.setattr(server, "collect_dashboard_metrics", collect)
+    monkeypatch.setattr(service_module, "collect_dashboard_metrics", collect)
 
     response = TestClient(server.app).get("/api/dashboard")
 
@@ -279,7 +295,7 @@ def test_loopback_rejects_cross_site_fetch_metadata_without_origin(monkeypatch) 
         called = True
         return []
 
-    monkeypatch.setattr(server, "load_queue", load)
+    monkeypatch.setattr(service_module.queue_builder, "load_queue", load)
     client = TestClient(server.app, base_url="http://127.0.0.1:8767")
 
     response = client.get(
@@ -296,16 +312,16 @@ def test_loopback_rejects_cross_site_fetch_metadata_without_origin(monkeypatch) 
 
 
 def test_queue_get_is_read_only(monkeypatch) -> None:
-    monkeypatch.setattr(server, "load_queue", lambda: [_job()])
+    monkeypatch.setattr(service_module.queue_builder, "load_queue", lambda: [_job()])
     reconcile = pytest.fail
     monkeypatch.setattr(server, "reconcile_queue_with_tracker", reconcile)
     monkeypatch.setattr(
-        server,
+        service_module.queue_builder,
         "restrict_queue_for_incomplete_history",
         lambda _jobs: 0,
     )
     monkeypatch.setattr(
-        server,
+        service_module.queue_builder,
         "restrict_queue_for_action_provenance",
         lambda _jobs: 0,
     )
@@ -323,14 +339,18 @@ def test_queue_get_hides_cached_apply_action_when_history_is_incomplete(
     job.decision = "apply_now"
     job.assessment_status = "assessed"
     job.legitimacy_state = "recommend"
-    monkeypatch.setattr(server, "load_queue", lambda: [job])
+    monkeypatch.setattr(service_module.queue_builder, "load_queue", lambda: [job])
 
     def restrict(jobs):
         jobs[0].decision = "investigate"
         jobs[0].suppression_reason = "Application history is incomplete."
         return 1
 
-    monkeypatch.setattr(server, "restrict_queue_for_incomplete_history", restrict)
+    monkeypatch.setattr(
+        service_module.queue_builder,
+        "restrict_queue_for_incomplete_history",
+        restrict,
+    )
 
     response = TestClient(server.app).get("/api/queue")
 
@@ -347,9 +367,9 @@ def test_queue_get_hides_cached_apply_action_without_ledger_provenance(
     job.assessment_status = "assessed"
     job.legitimacy_state = "recommend"
     job.verified_at = datetime.now(UTC).isoformat()
-    monkeypatch.setattr(server, "load_queue", lambda: [job])
+    monkeypatch.setattr(service_module.queue_builder, "load_queue", lambda: [job])
     monkeypatch.setattr(
-        server,
+        service_module.queue_builder,
         "restrict_queue_for_incomplete_history",
         lambda _jobs: 0,
     )
@@ -360,7 +380,7 @@ def test_queue_get_hides_cached_apply_action_without_ledger_provenance(
         return 1
 
     monkeypatch.setattr(
-        server,
+        service_module.queue_builder,
         "restrict_queue_for_action_provenance",
         restrict,
     )

@@ -26,6 +26,7 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 
+from jobpilot.cli_agent import agent_app as agent_contract_app
 from jobpilot.core import llm_client
 from jobpilot.core.application_answerer import TRUE_ACCOUNTS_PATH, ApplicationAnswerer
 from jobpilot.core.application_tracker import get_application_tracker
@@ -54,28 +55,23 @@ app = typer.Typer(
     help="Evidence-led job search and application preparation assistant",
 )
 console = Console()
+app.add_typer(agent_contract_app, name="agent")
 
+# Legacy aliases remain patchable for integrations that predate the neutral
+# target-review contract. New reports use agent-reviewed-targets-*.json.
 CLAUDE_VETTED_TARGETS_DIR = DATA_DIR / "reports"
 CLAUDE_VETTED_TARGETS_GLOB = "claude-vetted-targets-*.json"
-# Explicit override (tests patch this). When None, the newest matching report
-# in CLAUDE_VETTED_TARGETS_DIR is used. When no file exists at all, the
-# claim-lock gate is considered not configured and is skipped.
 CLAUDE_VETTED_TARGETS_PATH: Optional[Path] = None
 
 
 def _resolve_claim_lock_path() -> Optional[Path]:
-    """Return the newest claude-vetted-targets report, or None if not configured."""
-    if CLAUDE_VETTED_TARGETS_PATH is not None:
-        path = Path(CLAUDE_VETTED_TARGETS_PATH)
-        return path if path.exists() else None
-    candidates = [
-        path
-        for path in CLAUDE_VETTED_TARGETS_DIR.glob(CLAUDE_VETTED_TARGETS_GLOB)
-        if path.is_file()
-    ]
-    if not candidates:
-        return None
-    return max(candidates, key=lambda path: path.stat().st_mtime)
+    """Return the newest model-neutral target-review report, if configured."""
+    from jobpilot.core.target_review import resolve_target_review_path
+
+    return resolve_target_review_path(
+        directory=CLAUDE_VETTED_TARGETS_DIR,
+        override=CLAUDE_VETTED_TARGETS_PATH,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -212,68 +208,46 @@ def _parse_optional_yes_no(raw: str) -> Optional[bool]:
 
 
 def _norm_claim_text(value: object) -> str:
-    return " ".join(str(value or "").strip().lower().split())
+    from jobpilot.core.target_review import normalize_review_text
+
+    return normalize_review_text(value)
 
 
 def _load_claim_targets(lock_path: Path) -> list[dict]:
-    try:
-        data = json.loads(lock_path.read_text())
-    except Exception as exc:
-        raise RuntimeError(f"Could not read claim-lock file: {exc}") from exc
-    targets = data.get("targets", [])
-    return targets if isinstance(targets, list) else []
+    from jobpilot.core.target_review import load_review_targets
+
+    return load_review_targets(lock_path)
 
 
 def _find_claim_target(job, lock_path: Path) -> Optional[dict]:
-    job_company = _norm_claim_text(getattr(job, "company", ""))
-    job_title = _norm_claim_text(getattr(job, "title", ""))
-    job_url = _norm_claim_text(getattr(job, "url", ""))
+    from jobpilot.core.target_review import find_review_target
 
-    company_matches: list[dict] = []
-    for target in _load_claim_targets(lock_path):
-        target_url = _norm_claim_text(target.get("url"))
-        if target_url and target_url == job_url:
-            return target
-        if _norm_claim_text(target.get("company")) == job_company:
-            company_matches.append(target)
-
-    for target in company_matches:
-        target_title = _norm_claim_text(target.get("title"))
-        if target_title and target_title == job_title:
-            return target
-    titleless_matches = [target for target in company_matches if not _norm_claim_text(target.get("title"))]
-    if len(titleless_matches) == 1:
-        return titleless_matches[0]
-    return None
+    return find_review_target(job, lock_path)
 
 
 def _claim_state_for_job(job) -> str:
     """Expose claim-lock readiness without copying it into queue.json."""
-    lock_path = _resolve_claim_lock_path()
-    if lock_path is None:
-        return "unconfigured"
-    try:
-        target = _find_claim_target(job, lock_path)
-    except RuntimeError:
-        return "blocked"
-    if target is None:
-        return "unvetted"
-    decision = _norm_claim_text(target.get("decision"))
-    materials_status = _norm_claim_text(target.get("materials_status"))
-    if decision in {"kill", "closed"}:
-        return "closed"
-    if decision != "keep":
-        return "blocked"
-    return "ready" if materials_status == "ready" else "not_ready"
+    from jobpilot.core.target_review import review_state_for_job
+
+    review_path = _resolve_claim_lock_path()
+    return (
+        review_state_for_job(job, review_path=review_path)
+        if review_path is not None
+        else "unconfigured"
+    )
 
 
 def _job_output_payload(job) -> dict:
     """Build an everyday jobs payload with live claim-lock state."""
-    from dataclasses import asdict, is_dataclass
+    from jobpilot.core.agent_contract import opportunity_payload
+    from jobpilot.core.queue_builder import QueueJob, is_apply_ready
 
-    payload = asdict(job) if is_dataclass(job) else dict(vars(job))
-    payload["claim_state"] = _claim_state_for_job(job)
-    return payload
+    ready = is_apply_ready(job) if isinstance(job, QueueJob) else False
+    return opportunity_payload(
+        job,
+        ready=ready,
+        review_state=_claim_state_for_job(job),
+    )
 
 
 def _enforce_claim_lock(job, *, claim_approved: bool) -> None:
@@ -293,7 +267,7 @@ def _enforce_claim_lock(job, *, claim_approved: bool) -> None:
             "[red]Claim-lock blocked staging:[/red] "
             f"{job.company} is not present in {lock_path}."
         )
-        console.print("[dim]Claude must vet it and set materials_status to 'ready' before JobPilot prepares it.[/dim]")
+        console.print("[dim]An authorized agent must review it and set materials_status to 'ready' before JobPilot prepares it.[/dim]")
         raise typer.Exit(1)
 
     decision = _norm_claim_text(target.get("decision"))
@@ -312,7 +286,7 @@ def _enforce_claim_lock(job, *, claim_approved: bool) -> None:
         raise typer.Exit(1)
     if not claim_approved:
         approved = typer.confirm(
-            f"Claude materials are ready for {job.company}. Approve staging this target now?",
+            f"Reviewed materials are ready for {job.company}. Approve staging this target now?",
             default=False,
         )
         if not approved:
@@ -1627,16 +1601,28 @@ def queue(
     # JSON mode: emit raw queue (respecting --fresh and --limit) and exit.
     # Designed for cross-agent / scripting use without dashboard/UI side effects.
     if as_json:
+        from jobpilot.core.agent_contract import AgentServiceError
+        from jobpilot.core.jobpilot_service import JobPilotService
+
+        service = JobPilotService(review_resolver=_claim_state_for_job)
         if refresh or not QUEUE_PATH.exists():
-            jobs = refresh_with_clear_evidence_error()
+            try:
+                result = service.refresh_opportunities(
+                    ready_only=fresh,
+                    limit=limit,
+                )
+            except AgentServiceError as exc:
+                typer.echo(exc.message, err=True)
+                typer.echo(exc.action, err=True)
+                raise typer.Exit(2) from exc
         else:
             reconcile_queue_with_tracker()
-            jobs = load_queue()
-        restrict_queue_for_action_provenance(jobs)
+            result = service.list_opportunities(
+                ready_only=fresh,
+                limit=limit,
+            )
         show_history_warning(machine_output=True)
-        view = [j for j in jobs if is_apply_ready(j)] if fresh else jobs
-        view = view[:limit]
-        console.print_json(data=[_job_output_payload(j) for j in view])
+        console.print_json(data=result.data["items"])
         return
 
     if not refresh and QUEUE_PATH.exists():
@@ -1680,7 +1666,7 @@ def queue(
 def apply(
     job_id: str = typer.Argument(..., help="Job ID from the queue (shown in dashboard or 'jobpilot queue')"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show the preparation gate without changing anything"),
-    claim_approved: bool = typer.Option(False, "--claim-approved", help="Use only if you've already approved staging this Claude-ready target"),
+    claim_approved: bool = typer.Option(False, "--claim-approved", help="Use only if you've already approved staging this reviewed target"),
 ):
     """Prepare a verified role for the human paste-and-submit flow."""
     from jobpilot.core.queue_builder import (
@@ -2155,53 +2141,33 @@ def log(
     don't auto-write to applications.db, so subsequent `queue --fresh` runs
     correctly dedup them. Idempotent on URL.
     """
-    tracker = get_application_tracker()
-    try:
-        app_row = tracker.log_application(
-            company=company,
-            title=title,
-            url=url,
-            status=status,
-            applied_at=date,
-            source="manual-log",
-        )
-    except ValueError as exc:
-        console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(1)
-    stats = tracker.get_stats()
-    from jobpilot.core.opportunity_ledger import EVENT_TYPES, OpportunityLedger
+    from jobpilot.core.agent_contract import AgentServiceError
+    from jobpilot.core.jobpilot_service import JobPilotService
+    from jobpilot.core.outcome_service import OutcomeInput
 
-    event_type = {
-        "started": "discovered",
-        "submitted": "applied",
-        "abandoned": "withdrawn",
-    }.get(app_row.status, app_row.status)
-    if event_type in EVENT_TYPES:
-        ledger = OpportunityLedger()
-        try:
-            opportunity_id = ledger.upsert_opportunity(
-                app_row.company,
-                app_row.job_title,
-                canonical_url=app_row.job_url,
+    try:
+        result = JobPilotService().record_outcome(
+            OutcomeInput(
+                company=company,
+                title=title,
+                url=url,
+                status=status,
+                occurred_at=date,
+                human_confirmed=True,
+                acquisition_channel=channel,
+                source="manual-log",
             )
-            ledger.append_event(
-                opportunity_id,
-                event_type,
-                app_row.applied_at,
-                "manual-log",
-                {
-                    "acquisition_channel": channel.strip().lower() or "unknown",
-                    "original_status": app_row.status,
-                },
-            )
-        finally:
-            ledger.close()
+        )
+    except AgentServiceError as exc:
+        console.print(f"[red]{exc.message}[/red]\n[yellow]{exc.action}[/yellow]")
+        raise typer.Exit(1) from exc
+    application = result.data["application"]
     console.print(
-        f"[green]✓ Tracked: {app_row.company} — {app_row.job_title or '(role)'} "
-        f"[{app_row.status}][/green]"
+        f"[green]✓ Tracked: {application['company']} — "
+        f"{application['job_title'] or '(role)'} [{application['status']}][/green]"
     )
-    console.print(f"[dim]tracker now: {stats['total']} rows[/dim]")
-    tracker.close()
+    console.print(f"[dim]tracker now: {result.data['tracker_total']} rows[/dim]")
+    get_application_tracker().close()
 
 
 @app.command()

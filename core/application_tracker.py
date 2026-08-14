@@ -68,6 +68,22 @@ class ApplicationTracker:
         self._conn: sqlite3.Connection | None = None
         self._ensure_schema()
 
+    @classmethod
+    def open_readonly(cls, data_dir: Path | None = None) -> "ApplicationTracker":
+        """Open existing application history without creating or migrating it."""
+        path = (data_dir or DB_DIR) / "applications.db"
+        if not path.is_file():
+            raise FileNotFoundError(path)
+        tracker = cls.__new__(cls)
+        tracker.db_path = path
+        tracker._conn = sqlite3.connect(
+            f"{path.resolve().as_uri()}?mode=ro",
+            uri=True,
+        )
+        tracker._conn.row_factory = sqlite3.Row
+        tracker._conn.execute("PRAGMA query_only = ON")
+        return tracker
+
     def _get_conn(self) -> sqlite3.Connection:
         if self._conn is None:
             self._conn = sqlite3.connect(str(self.db_path))

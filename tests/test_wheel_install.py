@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -45,6 +46,7 @@ def test_built_wheel_installs_and_runs_cli_outside_repository(tmp_path: Path) ->
     assert payload
     assert all(name.startswith("jobpilot/") for name in payload)
     assert "jobpilot/cli.py" in payload
+    assert "jobpilot/cli_agent.py" in payload
     assert "jobpilot/ui/dashboard.html" in payload
     assert "jobpilot/gigs/swipe.html" in payload
     assert not any("/tests/" in name or "/docs/" in name for name in payload)
@@ -56,6 +58,10 @@ def test_built_wheel_installs_and_runs_cli_outside_repository(tmp_path: Path) ->
 
     help_result = _run(str(command), "--help", cwd=tmp_path)
     assert "Evidence-led job search" in help_result.stdout
+    contract_result = _run(str(command), "agent", "capabilities", cwd=tmp_path)
+    contract = json.loads(contract_result.stdout)
+    assert contract["contract_version"] == "jobpilot.agent/v1"
+    assert contract["data"]["boundaries"]["human_submit_required"] is True
 
     probe = _run(
         str(python),
