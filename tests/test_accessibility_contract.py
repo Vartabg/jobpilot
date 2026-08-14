@@ -65,12 +65,21 @@ def test_dashboard_explains_evidence_without_claiming_personality() -> None:
     assert "does not verify the employer or guarantee the role" in source
     assert "Investigation reason" in source
     assert "Biggest gap" in source
+    assert "Relocation evidence" in source
+    assert "Company support confirmed" in source
+    assert "relocation-filter" in source
+    assert "JobPilot performance dashboard" in source
+    assert "Source health" in source
+    assert "30-day funnel" in source
+    assert "Decision learning" in source
+    assert "No automatic ranking changes" in source
+    assert "api('/api/dashboard')" in source
     assert "matched_accounts" in source
     assert "Investigate" in source
     assert "isApplyReady" in source
     assert "safePostingUrl" in source
     assert "parsed.protocol === 'https:'" in source
-    assert "ready companies" in source
+    assert "ready now" in source
     assert "roles to investigate" in source
     assert "if (status === 'queued') return jobs.filter(isApplyReady);" in source
     assert "width: 100vw" not in source

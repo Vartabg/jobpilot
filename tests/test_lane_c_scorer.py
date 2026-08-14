@@ -122,6 +122,29 @@ def test_location_gate_blocks_international_and_unknown_locations(gated_policy):
     assert not _is_allowed_location("Forward Deployed Engineer", "Acme", "Remote Canada")
 
 
+def test_explicit_relocation_support_bypasses_narrow_discovery_location_gate(
+    gated_policy,
+):
+    assert _is_allowed_location(
+        "Solutions Engineer — London",
+        "Acme",
+        "London",
+        "offered",
+    )
+    assert _is_allowed_location(
+        "Solutions Engineer",
+        "Acme",
+        "Boston, MA",
+        "conditional",
+    )
+    assert not _is_allowed_location(
+        "Solutions Engineer",
+        "Acme",
+        "London",
+        "required_unsupported",
+    )
+
+
 def test_blocked_terms_in_title_still_disqualify(gated_policy):
     """A clearly disallowed marker in the TITLE is a conservative block —
     even when the company HQ fallback would otherwise qualify the job."""

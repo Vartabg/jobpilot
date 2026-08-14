@@ -46,7 +46,7 @@
     },
 
     "location_gate": {
-      "_doc": "Hard location gate. Disabled by default — every location passes. When enabled, a job qualifies only if its LOCATION fields (role location, falling back to company HQ) match allowed_locations, remote_terms, or country_terms. The job title can only disqualify (via blocked terms), never qualify — so a title like 'Help us build…' cannot pass a US gate through the word 'us'. All terms are word-anchored: 'us' matches 'Austin, US' but not 'status'.",
+      "_doc": "Hard location gate. Disabled by default — every location passes. When enabled, a job qualifies only if its LOCATION fields (role location, falling back to company HQ) match allowed_locations, remote_terms, or country_terms. A posting with explicit or conditional company relocation support may bypass this narrow discovery gate so it reaches the Relocation dashboard; relocation never bypasses qualification, authorization, transport, or apply-readiness gates. Without relocation support, the job title can only disqualify (via blocked terms), never qualify — so a title like 'Help us build…' cannot pass a US gate through the word 'us'. All terms are word-anchored: 'us' matches 'Austin, US' but not 'status'.",
       "enabled": false,
       "allowed_locations": ["new york", "austin"],
       "remote_terms": ["remote"],

@@ -442,6 +442,7 @@ def test_profile_edit_prompts_for_country_without_inference():
 
     assert any(label.startswith("Country") for label in prompts)
     assert profile.country == "Canada"
+    assert any(label.startswith("Open to relocation") for label in prompts)
     store.save.assert_called_once_with(profile)
 
 

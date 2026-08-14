@@ -35,6 +35,7 @@ class UserProfile(BaseModel):
     state: str = ""
     country: str = ""
     zip_code: str = ""
+    open_to_relocation: bool | None = None
 
     # Professional
     linkedin_url: str = ""
@@ -137,6 +138,14 @@ class ProfileStore:
         # Location
         location = ", ".join(filter(None, [profile.city, profile.state, profile.country]))
         table.add_row("Location", location or "[dim]not set[/dim]")
+        relocation = (
+            "Yes — confirmed roles"
+            if profile.open_to_relocation is True
+            else "No"
+            if profile.open_to_relocation is False
+            else "[dim]not set[/dim]"
+        )
+        table.add_row("Open to Relocation", relocation)
 
         # Professional
         table.add_row("Current Title", profile.current_title or "[dim]not set[/dim]")

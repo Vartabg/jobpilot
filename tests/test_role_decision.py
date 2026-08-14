@@ -519,6 +519,55 @@ def test_unknown_logistics_is_surfaced_before_soft_preference_gaps():
     assert result.decision == "investigate"
 
 
+def test_confirmed_relocation_support_is_not_reported_as_a_candidate_gap():
+    jd = FULL_JD.replace(
+        "Must be authorized to work in the United States without sponsorship.",
+        "Relocation support available for the assigned office.",
+    ).replace(
+        "Python automation experience.",
+        "Kubernetes administration experience.",
+    )
+    result = RoleDecisionEngine().assess(
+        title="Implementation Engineer",
+        jd_text=jd,
+        profile=UserProfile(
+            open_to_relocation=True,
+            skills=["systems troubleshooting", "technical communication"],
+        ),
+    )
+
+    relocation = next(
+        match
+        for match in result.matches
+        if match.category == "logistics" and "Relocation" in match.text
+    )
+    assert relocation.status is EvidenceStatus.DIRECT
+    assert "relocation" not in result.biggest_gap.casefold()
+
+
+def test_required_relocation_contradicts_an_explicit_no_preference():
+    jd = FULL_JD.replace(
+        "Must be authorized to work in the United States without sponsorship.",
+        "Candidates must be willing to relocate to the assigned office.",
+    )
+    result = RoleDecisionEngine().assess(
+        title="Implementation Engineer",
+        jd_text=jd,
+        profile=UserProfile(
+            open_to_relocation=False,
+            skills=["systems troubleshooting", "technical communication", "Python"],
+        ),
+    )
+
+    relocation = next(
+        match
+        for match in result.matches
+        if match.category == "logistics" and "relocate" in match.text
+    )
+    assert relocation.status is EvidenceStatus.CONTRADICTED
+    assert result.decision == "skip"
+
+
 def test_unknown_mandatory_requirement_cannot_reach_apply_now(
     account_path: Path,
 ):

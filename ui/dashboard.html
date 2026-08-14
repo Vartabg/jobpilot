@@ -263,7 +263,7 @@ const remoteToken = consumeRemoteToken();
 
   .metrics {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 10px;
     margin: 0 0 16px;
   }
@@ -288,6 +288,78 @@ const remoteToken = consumeRemoteToken();
     font-size: 12px;
   }
 
+  .insights {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+
+  .insight-card {
+    min-width: 0;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 13px;
+    background: var(--surface);
+  }
+
+  .insight-card h2 {
+    margin: 0 0 9px;
+    font-size: 13px;
+    font-weight: 760;
+  }
+
+  .insight-lead {
+    font-size: 20px;
+    line-height: 1.1;
+    font-weight: 760;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .insight-note {
+    margin-top: 5px;
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1.4;
+  }
+
+  .health-track {
+    height: 7px;
+    margin: 10px 0;
+    overflow: hidden;
+    border-radius: 999px;
+    background: var(--line);
+  }
+
+  .health-track span {
+    display: block;
+    width: 0;
+    height: 100%;
+    background: var(--good);
+  }
+
+  .stat-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px 10px;
+    margin: 10px 0 0;
+  }
+
+  .stat-list div { min-width: 0; }
+  .stat-list dt {
+    color: var(--quiet);
+    font-size: 9px;
+    font-weight: 760;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .stat-list dd {
+    margin: 2px 0 0;
+    font-size: 12px;
+    font-weight: 650;
+    overflow-wrap: anywhere;
+  }
+
   .toolbar {
     display: flex;
     align-items: center;
@@ -300,7 +372,7 @@ const remoteToken = consumeRemoteToken();
     margin-bottom: 12px;
   }
 
-  .search, .log-form input, .log-form select {
+  .search, .toolbar select, .log-form input, .log-form select {
     flex: 1;
     min-width: 180px;
     height: 38px;
@@ -406,6 +478,34 @@ const remoteToken = consumeRemoteToken();
     width: 16px;
     height: 16px;
     accent-color: var(--accent);
+  }
+
+  .relocation-badge {
+    display: inline-block;
+    border: 1px solid var(--line-strong);
+    border-radius: 999px;
+    padding: 2px 7px;
+    background: var(--bg);
+    font-weight: 720;
+  }
+
+  .relocation-badge[data-state="offered"] {
+    border-color: #73b58e;
+    background: #e9f7ef;
+    color: var(--good);
+  }
+
+  .relocation-badge[data-state="conditional"] {
+    border-color: #d6ad66;
+    background: #fff7e8;
+    color: var(--warn);
+  }
+
+  .relocation-badge[data-state="required_unsupported"],
+  .relocation-badge[data-state="not_offered"] {
+    border-color: #dfaaa6;
+    background: #fff1f0;
+    color: var(--bad);
   }
 
   .table-shell {
@@ -607,7 +707,7 @@ const remoteToken = consumeRemoteToken();
 
   @media (forced-colors: active) {
     button, a.button, .chip, .table-shell, .evidence-card, .decision-badge,
-    .account-list li, tr { border: 1px solid ButtonText; }
+    .account-list li, .insight-card, .relocation-badge, tr { border: 1px solid ButtonText; }
   }
 
   @media (min-width: 901px) and (max-width: 1180px) {
@@ -645,6 +745,7 @@ const remoteToken = consumeRemoteToken();
     .topbar { display: grid; }
     .actions { justify-content: flex-start; }
     .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .insights { grid-template-columns: 1fr; }
     .toolbar { align-items: stretch; flex-direction: column; }
     .search { width: 100%; min-width: 0; }
     .organizer { padding: 10px; }
@@ -703,6 +804,7 @@ const remoteToken = consumeRemoteToken();
 
     <nav class="nav" aria-label="Application status filters">
       <button type="button" class="active" aria-pressed="true" data-filter="queued" onclick="setFilter('queued')"><span>Ready</span><span class="nav-count" id="n-queued">0</span></button>
+      <button type="button" aria-pressed="false" data-filter="relocation" onclick="setFilter('relocation')"><span>Relocation</span><span class="nav-count" id="n-relocation">0</span></button>
       <button type="button" aria-pressed="false" data-filter="viewing" onclick="setFilter('viewing')"><span>Open</span><span class="nav-count" id="n-viewing">0</span></button>
       <button type="button" aria-pressed="false" data-filter="applied" onclick="setFilter('applied')"><span>Applied</span><span class="nav-count" id="n-applied">0</span></button>
       <button type="button" aria-pressed="false" data-filter="interview" onclick="setFilter('interview')"><span>Interview</span><span class="nav-count" id="n-interview">0</span></button>
@@ -724,8 +826,8 @@ const remoteToken = consumeRemoteToken();
   <main id="main" tabindex="-1">
     <div class="topbar">
       <div>
-        <h1>Company-first targets</h1>
-        <div class="subtitle" id="subtitle">Ranked by role decision, qualification evidence, posting-source evidence, and freshness. Posting-source evidence checks the listing, not the company.</div>
+        <h1>Job search control center</h1>
+        <div class="subtitle" id="subtitle">Role fit, relocation evidence, source health, and human outcomes in one view. Relocation is classified only from explicit posting language and structured location data.</div>
       </div>
       <div class="actions">
         <button onclick="reload()">Refresh</button>
@@ -735,15 +837,65 @@ const remoteToken = consumeRemoteToken();
     </div>
 
     <section class="metrics" aria-label="Queue summary">
-      <div class="metric"><div class="num" id="m-targets">0</div><div class="label">ready companies</div></div>
+      <div class="metric"><div class="num" id="m-targets">0</div><div class="label">ready now</div></div>
       <div class="metric"><div class="num" id="m-hidden">0</div><div class="label">roles to investigate</div></div>
-      <div class="metric"><div class="num" id="m-tracked">0</div><div class="label">tracked apps</div></div>
-      <div class="metric"><div class="num" id="m-total">0</div><div class="label">roles scanned</div></div>
+      <div class="metric"><div class="num" id="m-relocation">0</div><div class="label">relocation-supported leads</div></div>
+      <div class="metric"><div class="num" id="m-current">0</div><div class="label">current direct roles</div></div>
+      <div class="metric"><div class="num" id="m-total">0</div><div class="label">matched listings in latest source state</div></div>
+    </section>
+
+    <section class="insights" aria-label="JobPilot performance dashboard">
+      <article class="insight-card">
+        <h2>Source health</h2>
+        <div class="insight-lead" id="source-health-lead">Unavailable</div>
+        <div class="health-track" aria-hidden="true"><span id="source-health-bar"></span></div>
+        <div class="insight-note" id="source-health-note">Waiting for scan evidence</div>
+      </article>
+      <article class="insight-card">
+        <h2>30-day funnel</h2>
+        <div class="insight-lead" id="funnel-lead">0 applied</div>
+        <dl class="stat-list">
+          <div><dt>Human responses</dt><dd id="f-human">0</dd></div>
+          <div><dt>Interviews</dt><dd id="f-interviews">0</dd></div>
+          <div><dt>Offers</dt><dd id="f-offers">0</dd></div>
+          <div><dt>Response rate</dt><dd id="f-response-rate">Not enough data</dd></div>
+        </dl>
+      </article>
+      <article class="insight-card">
+        <h2>Relocation evidence</h2>
+        <div class="insight-lead" id="relocation-lead">0 supported</div>
+        <dl class="stat-list">
+          <div><dt>Confirmed</dt><dd id="r-offered">0</dd></div>
+          <div><dt>Conditional</dt><dd id="r-conditional">0</dd></div>
+          <div><dt>Required / no support</dt><dd id="r-required">0</dd></div>
+          <div><dt>Not stated</dt><dd id="r-unknown">0</dd></div>
+        </dl>
+      </article>
+      <article class="insight-card">
+        <h2>Decision learning</h2>
+        <div class="insight-lead" id="learning-lead">Fixed</div>
+        <div class="insight-note" id="learning-note">No automatic ranking changes. Explicit outcomes become eligible for manual review at 20 decided roles.</div>
+        <dl class="stat-list">
+          <div><dt>Decided sample</dt><dd id="learning-decided">0 / 20</dd></div>
+          <div><dt>Tracked apps</dt><dd id="learning-tracked">0</dd></div>
+        </dl>
+      </article>
     </section>
 
     <section class="toolbar" aria-label="Job filters">
       <label class="sr-only" for="search">Search job targets</label>
-      <input id="search" class="search" type="search" placeholder="Search company, role, evidence, or gap" oninput="render()">
+      <input id="search" class="search" type="search" placeholder="Search company, role, relocation evidence, or gap" oninput="render()">
+      <label class="sr-only" for="relocation-filter">Relocation evidence filter</label>
+      <select id="relocation-filter" onchange="render()">
+        <option value="any">Any relocation state</option>
+        <option value="supported">Company-supported or conditional</option>
+        <option value="offered">Confirmed company support</option>
+        <option value="conditional">Conditional support</option>
+        <option value="required_unsupported">Move required; support unconfirmed</option>
+        <option value="not_offered">Explicitly not offered</option>
+        <option value="not_needed">Remote or Austin-area</option>
+        <option value="unknown">Not stated</option>
+      </select>
       <label class="switch"><input id="all-roles" type="checkbox" aria-label="Show every role" onchange="render()"> Show every role</label>
     </section>
 
@@ -805,6 +957,7 @@ let jobs = [];
 let profile = {};
 let draft = {};
 let applications = { stats: {}, status_counts: {}, recent: [] };
+let dashboardMetrics = { queue: {}, relocation: {}, source_health: {}, outcomes: {}, tracker: {} };
 let filter = 'queued';
 
 async function api(path, opts = {}) {
@@ -862,6 +1015,14 @@ function companyKey(job) {
 const VERIFICATION_TTL_MS = 24 * 60 * 60 * 1000;
 const DECISION_RANK = Object.freeze({ apply_now: 4, stretch: 3, investigate: 2, skip: 1 });
 const LEGITIMACY_RANK = Object.freeze({ recommend: 4, review: 3, hold: 2, block: 1 });
+const RELOCATION_RANK = Object.freeze({
+  offered: 6,
+  conditional: 5,
+  not_needed: 4,
+  required_unsupported: 3,
+  not_offered: 2,
+  unknown: 1,
+});
 
 function evidenceNumber(value) {
   if (value === null || value === undefined || value === '') return -1;
@@ -874,6 +1035,7 @@ function compareEvidence(a, b) {
     DECISION_RANK[a.decision] || 0,
     LEGITIMACY_RANK[a.legitimacy_state] || 0,
     evidenceNumber(a.qualification_lower_bound),
+    RELOCATION_RANK[a.relocation_state] || 0,
     evidenceNumber(a.evidence_coverage),
     evidenceNumber(a.work_context_match),
     evidenceNumber(a.fit_score),
@@ -882,6 +1044,7 @@ function compareEvidence(a, b) {
     DECISION_RANK[b.decision] || 0,
     LEGITIMACY_RANK[b.legitimacy_state] || 0,
     evidenceNumber(b.qualification_lower_bound),
+    RELOCATION_RANK[b.relocation_state] || 0,
     evidenceNumber(b.evidence_coverage),
     evidenceNumber(b.work_context_match),
     evidenceNumber(b.fit_score),
@@ -942,7 +1105,24 @@ function isApplyReady(job) {
 function statusJobs(status) {
   if (status === 'all') return jobs;
   if (status === 'queued') return jobs.filter(isApplyReady);
+  if (status === 'relocation') {
+    return jobs.filter(job => job.legitimacy_state === 'recommend'
+      && ['offered', 'conditional'].includes(job.relocation_state));
+  }
   return jobs.filter(j => j.status === status);
+}
+
+function compareRelocation(a, b) {
+  const relocationDelta = (RELOCATION_RANK[b.relocation_state] || 0)
+    - (RELOCATION_RANK[a.relocation_state] || 0);
+  return relocationDelta || compareEvidence(a, b);
+}
+
+function visibleComparator(a, b) {
+  const relocationChoice = document.getElementById('relocation-filter')?.value || 'any';
+  return filter === 'relocation' || relocationChoice !== 'any'
+    ? compareRelocation(a, b)
+    : compareEvidence(a, b);
 }
 
 function groupedBest(items) {
@@ -953,7 +1133,7 @@ function groupedBest(items) {
     groups.get(key).push(job);
   }
   return [...groups.values()].map(group => {
-    group.sort(compareEvidence);
+    group.sort(visibleComparator);
     const best = group[0];
     best._alternatives = group.slice(1);
     best._companyRoleCount = jobs.filter(j => companyKey(j) === companyKey(best)).length;
@@ -964,9 +1144,15 @@ function groupedBest(items) {
 function visibleJobs() {
   const q = (document.getElementById('search')?.value || '').trim().toLowerCase();
   const showAll = document.getElementById('all-roles')?.checked;
+  const relocationChoice = document.getElementById('relocation-filter')?.value || 'any';
   let view = filter === 'queued' && showAll
     ? jobs.filter(j => j.status === 'queued')
     : statusJobs(filter);
+  if (relocationChoice === 'supported') {
+    view = view.filter(job => ['offered', 'conditional'].includes(job.relocation_state));
+  } else if (relocationChoice !== 'any') {
+    view = view.filter(job => job.relocation_state === relocationChoice);
+  }
   if (q) {
     view = view.filter(j => [
       j.company,
@@ -975,6 +1161,10 @@ function visibleJobs() {
       j.decision,
       j.legitimacy_state,
       j.evidence_grade,
+      j.relocation_state,
+      j.relocation_destination,
+      j.relocation_rationale,
+      ...(Array.isArray(j.relocation_evidence) ? j.relocation_evidence.map(evidencePlainText) : []),
       evidencePlainText(j.biggest_gap),
       ...(Array.isArray(j.matched_accounts) ? j.matched_accounts : []),
       ...(j.keywords || [])
@@ -982,9 +1172,10 @@ function visibleJobs() {
   }
   if (!showAll) view = groupedBest(view);
   view.sort((a, b) => {
+    if (filter === 'relocation') return visibleComparator(a, b);
     const order = { interview: 0, viewing: 1, queued: 2, applied: 3, skipped: 4, rejected: 5 };
     const statusDelta = (order[a.status] ?? 9) - (order[b.status] ?? 9);
-    return statusDelta || compareEvidence(a, b) || String(a.company).localeCompare(String(b.company));
+    return statusDelta || visibleComparator(a, b) || String(a.company).localeCompare(String(b.company));
   });
   return view;
 }
@@ -999,19 +1190,80 @@ function investigateCount() {
 
 function updateStats() {
   document.getElementById('n-queued').textContent = uniqueCompanyCount('queued');
+  document.getElementById('n-relocation').textContent = uniqueCompanyCount('relocation');
   document.getElementById('n-viewing').textContent = uniqueCompanyCount('viewing');
   document.getElementById('n-applied').textContent = uniqueCompanyCount('applied');
   document.getElementById('n-interview').textContent = uniqueCompanyCount('interview');
   document.getElementById('n-rejected').textContent = uniqueCompanyCount('rejected');
   document.getElementById('n-skipped').textContent = uniqueCompanyCount('skipped');
-  document.getElementById('m-targets').textContent = uniqueCompanyCount('queued');
-  document.getElementById('m-hidden').textContent = investigateCount();
-  document.getElementById('m-tracked').textContent = applications.stats?.total || 0;
-  document.getElementById('m-total').textContent = jobs.length;
+  document.getElementById('m-targets').textContent = dashboardMetrics.queue?.ready ?? uniqueCompanyCount('queued');
+  document.getElementById('m-hidden').textContent = dashboardMetrics.queue?.investigate ?? investigateCount();
+  document.getElementById('m-relocation').textContent = dashboardMetrics.queue?.supported_relocation ?? uniqueCompanyCount('relocation');
+  document.getElementById('m-current').textContent = dashboardMetrics.queue?.current_direct ?? 0;
+  document.getElementById('m-total').textContent = dashboardMetrics.source_health?.matched_listings ?? jobs.length;
+}
+
+function setMetricText(id, value) {
+  const element = document.getElementById(id);
+  if (element) element.textContent = String(value);
+}
+
+function renderDashboardMetrics() {
+  const source = dashboardMetrics.source_health || {};
+  const totalSources = Number(source.total || 0);
+  const healthySources = Number(source.healthy || 0);
+  const healthPercent = totalSources ? Math.round(100 * healthySources / totalSources) : 0;
+  setMetricText('source-health-lead', source.available ? `${healthySources}/${totalSources} healthy` : 'Unavailable');
+  document.getElementById('source-health-bar').style.width = `${healthPercent}%`;
+  const scanAge = source.last_scan_at ? verificationInfo(source.last_scan_at).relative : 'No scan timestamp';
+  setMetricText(
+    'source-health-note',
+    source.available
+      ? `${source.with_results || 0} with matches · ${source.zero_results || 0} empty · ${source.failed || 0} failed · ${source.disabled || 0} disabled · ${scanAge}`
+      : 'Waiting for source-run evidence',
+  );
+
+  const outcomes = dashboardMetrics.outcomes || {};
+  const stages = outcomes.stages || {};
+  setMetricText('funnel-lead', `${stages.applied || 0} applied`);
+  setMetricText('f-human', outcomes.positive_human_response || 0);
+  setMetricText('f-interviews', stages.interview || 0);
+  setMetricText('f-offers', stages.offer || 0);
+  setMetricText(
+    'f-response-rate',
+    outcomes.response_rate === null || outcomes.response_rate === undefined
+      ? 'Not enough data'
+      : `${outcomes.response_rate}%`,
+  );
+
+  const relocation = dashboardMetrics.relocation || {};
+  const supported = Number(relocation.offered || 0) + Number(relocation.conditional || 0);
+  setMetricText('relocation-lead', `${supported} supported`);
+  setMetricText('r-offered', relocation.offered || 0);
+  setMetricText('r-conditional', relocation.conditional || 0);
+  setMetricText('r-required', relocation.required_unsupported || 0);
+  setMetricText('r-unknown', relocation.unknown || 0);
+
+  const decided = Number(outcomes.decided || 0);
+  const reviewEligible = outcomes.calibration_state === 'manual_review_eligible';
+  setMetricText('learning-lead', reviewEligible ? 'Review eligible' : 'Fixed');
+  setMetricText('learning-decided', `${decided} / 20`);
+  setMetricText('learning-tracked', dashboardMetrics.tracker?.total || applications.stats?.total || 0);
+  setMetricText(
+    'learning-note',
+    reviewEligible
+      ? 'Enough explicit outcomes for a manual calibration review. Ranking still never changes automatically.'
+      : 'No automatic ranking changes. Explicit outcomes become eligible for manual review at 20 decided roles.',
+  );
+  updateStats();
 }
 
 function setFilter(next) {
   filter = next;
+  if (next === 'relocation') {
+    const relocationSelect = document.getElementById('relocation-filter');
+    if (relocationSelect && relocationSelect.value === 'any') relocationSelect.value = 'supported';
+  }
   document.querySelectorAll('.nav button').forEach(button => {
     const isActive = button.dataset.filter === next;
     button.classList.toggle('active', isActive);
@@ -1033,6 +1285,17 @@ function axisText(value) {
 function coverageText(value) {
   const number = evidenceNumber(value);
   return number < 0 ? 'Unknown' : `${Math.round(number)}%`;
+}
+
+function relocationLabel(state) {
+  return ({
+    offered: 'Company support confirmed',
+    conditional: 'Support may be available',
+    required_unsupported: 'Move required; support unconfirmed',
+    not_offered: 'Support explicitly not offered',
+    not_needed: 'Relocation not needed',
+    unknown: 'Support not stated',
+  })[state] || 'Support not stated';
 }
 
 function evidenceCardHtml(job) {
@@ -1057,6 +1320,16 @@ function evidenceCardHtml(job) {
   const reasonsHtml = investigationReasons.length
     ? investigationReasons.map(escape).join('; ')
     : 'None recorded';
+  const relocationEvidence = Array.isArray(job.relocation_evidence)
+    ? job.relocation_evidence.map(item => evidencePlainText(item)).filter(Boolean)
+    : [];
+  const relocationDetails = relocationEvidence.length
+    ? relocationEvidence.map(escape).join('; ')
+    : escape(evidencePlainText(job.relocation_rationale, 'No relocation statement found.'));
+  const destination = evidencePlainText(
+    job.relocation_destination || job.location,
+    'Destination not specified',
+  );
   return `
     <dl class="evidence-card" aria-label="Evidence for ${escape(job.company)} ${escape(job.title)}">
       <div class="evidence-item">
@@ -1074,6 +1347,14 @@ function evidenceCardHtml(job) {
       <div class="evidence-item">
         <dt>Evidence coverage</dt>
         <dd>${escape(coverageText(job.evidence_coverage))}</dd>
+      </div>
+      <div class="evidence-item wide evidence-boundary">
+        <dt>Relocation</dt>
+        <dd><span class="relocation-badge" data-state="${escape(job.relocation_state || 'unknown')}">${escape(relocationLabel(job.relocation_state))}</span> · ${escape(destination)}</dd>
+      </div>
+      <div class="evidence-item wide">
+        <dt>Relocation evidence</dt>
+        <dd>${relocationDetails}</dd>
       </div>
       <div class="evidence-item">
         <dt>Posting-source state</dt>
@@ -1164,7 +1445,13 @@ function render() {
 async function reload() {
   try {
     jobs = await api('/api/queue');
+    try {
+      dashboardMetrics = await api('/api/dashboard');
+    } catch (_error) {
+      dashboardMetrics = { queue: {}, relocation: {}, source_health: {}, outcomes: {}, tracker: {} };
+    }
     await loadApplications();
+    renderDashboardMetrics();
     render();
   } catch (e) {
     toast('Could not load queue: ' + e.message, 'error');
@@ -1318,6 +1605,9 @@ function renderChips() {
     ['LinkedIn', profile.linkedin],
     ['Portfolio', profile.portfolio],
     ['Title', profile.current_title],
+    ['Relocation', profile.open_to_relocation === true
+      ? 'Open for a confirmed role'
+      : profile.open_to_relocation === false ? 'Not open to relocation' : ''],
     ['Experience', profile.years_experience ? `${profile.years_experience} years` : '']
   ].filter(([, value]) => value);
   document.getElementById('chip-wrap').innerHTML = chips.map(([label, value], i) => `

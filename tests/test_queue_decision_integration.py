@@ -313,6 +313,7 @@ def test_build_queue_persists_evidence_and_skips_unsupported_family(
         qb,
         "get_profile_store",
         lambda: type("Store", (), {"load": lambda self: UserProfile(
+            city="Austin",
             skills=["Python automation"],
             authorized_to_work=True,
             requires_sponsorship=False,
@@ -336,6 +337,7 @@ def test_build_queue_persists_evidence_and_skips_unsupported_family(
     assert supported.qualification_lower_bound is not None
     assert supported.matched_accounts == ["customer-field"]
     assert supported.psyche_score == 0
+    assert supported.relocation_state == "not_needed"
     assert qb.is_apply_ready(supported)
     assert unsupported.decision == "skip"
     assert unsupported.status == "skipped"
@@ -345,7 +347,7 @@ def test_build_queue_persists_evidence_and_skips_unsupported_family(
     try:
         assert ledger.table_count("opportunities") == 2
         assert ledger.table_count("observations") == 2
-        assert ledger.table_count("assessments") == 4
+        assert ledger.table_count("assessments") == 6
         assert ledger.table_count("events") >= 4
     finally:
         ledger.close()

@@ -35,6 +35,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
 from jobpilot.core.application_tracker import get_application_tracker
+from jobpilot.core.dashboard_metrics import collect_dashboard_metrics
 from jobpilot.core.logger import get_logger
 from jobpilot.core.opportunity_ledger import EVENT_TYPES, OpportunityLedger
 from jobpilot.core.profile_store import get_profile_store
@@ -281,6 +282,17 @@ async def api_queue() -> JSONResponse:
     return JSONResponse([asdict(j) for j in jobs])
 
 
+@app.get("/api/dashboard")
+async def api_dashboard_metrics() -> JSONResponse:
+    jobs = load_queue()
+    restrict_queue_for_incomplete_history(jobs)
+    restrict_queue_for_action_provenance(jobs)
+    tracker = get_application_tracker()
+    return JSONResponse(
+        collect_dashboard_metrics(jobs, tracker_stats=tracker.get_stats())
+    )
+
+
 @app.post("/api/queue/refresh")
 async def api_queue_refresh() -> JSONResponse:
     def _run() -> int:
@@ -414,6 +426,7 @@ async def api_profile() -> JSONResponse:
         "phone": p.phone,
         "city": p.city,
         "state": p.state,
+        "open_to_relocation": p.open_to_relocation,
         "current_title": p.current_title,
         "years_experience": p.years_of_experience,
         "linkedin": p.linkedin_url,

@@ -1153,6 +1153,21 @@ def _edit_profile(store):
         default=p.country or "",
         show_default=False,
     )
+    while True:
+        relocation = typer.prompt(
+            "Open to relocation for a confirmed role? (yes/no, blank if unknown)",
+            default=(
+                "yes" if p.open_to_relocation is True
+                else "no" if p.open_to_relocation is False
+                else ""
+            ),
+            show_default=False,
+        )
+        parsed_relocation = _parse_optional_yes_no(relocation)
+        if not relocation.strip() or parsed_relocation is not None:
+            p.open_to_relocation = parsed_relocation
+            break
+        console.print("[yellow]Enter yes, no, or leave it blank.[/yellow]")
     p.linkedin_url = typer.prompt("LinkedIn URL", default=p.linkedin_url or "")
     p.portfolio_url = typer.prompt("Portfolio URL", default=p.portfolio_url or "")
     p.github_url = typer.prompt("GitHub URL", default=p.github_url or "")

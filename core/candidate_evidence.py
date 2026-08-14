@@ -54,6 +54,7 @@ class CandidateEvidence:
     accounts: tuple[EvidenceAccount, ...]
     authorized_to_work: bool | None
     requires_sponsorship: bool | None
+    open_to_relocation: bool | None
     years_of_experience: int | None
 
     @classmethod
@@ -103,5 +104,6 @@ class CandidateEvidence:
             accounts=tuple(accounts),
             authorized_to_work=profile.authorized_to_work,
             requires_sponsorship=profile.requires_sponsorship,
+            open_to_relocation=profile.open_to_relocation,
             years_of_experience=profile.years_of_experience,
         )

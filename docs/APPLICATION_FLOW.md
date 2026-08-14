@@ -72,6 +72,8 @@ The decision axes stay separate so a strong work context cannot hide a missing m
 - `logistics`: location, travel, authorization, schedule, and similar constraints.
 - `evidence_coverage`: how much of the posting has direct, adjacent, or contradicted evidence; unknown is not neutral.
 
+Relocation stays separate from role fit. JobPilot records the structured destination, whether a move appears necessary, the exact relocation statement, and one of six states: `offered`, `conditional`, `required_unsupported`, `not_offered`, `not_needed`, or `unknown`. A required move is never treated as employer-paid relocation, and posting/company prose never supplies the destination in place of the ATS location field.
+
 Posting evidence uses deterministic grades and gates, not a confidence percentage or a claim about the employer's full corporate identity. Current direct ATS proof may be `recommend`; aggregator/recruiter-only evidence is `review`; stale or unavailable proof is `hold`; and closed, expired, conflicting, or scam-pattern evidence is `block`. Investigate the company separately before sharing sensitive information.
 
 ## External Gmail history

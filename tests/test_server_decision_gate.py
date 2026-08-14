@@ -132,6 +132,46 @@ def test_queue_refresh_uses_serialized_refresh_operation(monkeypatch) -> None:
     assert calls == [100]
 
 
+def test_dashboard_metrics_endpoint_is_read_only_and_privacy_safe(monkeypatch) -> None:
+    job = _job(relocation_state="offered")
+    monkeypatch.setattr(server, "load_queue", lambda: [job])
+    monkeypatch.setattr(
+        server,
+        "restrict_queue_for_incomplete_history",
+        lambda _jobs: 0,
+    )
+    monkeypatch.setattr(
+        server,
+        "restrict_queue_for_action_provenance",
+        lambda _jobs: 0,
+    )
+    monkeypatch.setattr(
+        server,
+        "get_application_tracker",
+        lambda: SimpleNamespace(get_stats=lambda: {"total": 7}),
+    )
+    calls = []
+
+    def collect(jobs, *, tracker_stats):
+        calls.append((jobs, tracker_stats))
+        return {
+            "queue": {"supported_relocation": 1},
+            "relocation": {"offered": 1},
+            "source_health": {"healthy": 4, "total": 5},
+            "outcomes": {"decided": 2},
+            "tracker": tracker_stats,
+        }
+
+    monkeypatch.setattr(server, "collect_dashboard_metrics", collect)
+
+    response = TestClient(server.app).get("/api/dashboard")
+
+    assert response.status_code == 200
+    assert response.json()["queue"]["supported_relocation"] == 1
+    assert response.json()["tracker"] == {"total": 7}
+    assert calls == [([job], {"total": 7})]
+
+
 def test_live_form_fill_surfaces_are_retired() -> None:
     client = TestClient(server.app)
 

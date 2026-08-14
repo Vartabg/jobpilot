@@ -10,6 +10,7 @@ from pathlib import Path
 from jobpilot.core.candidate_evidence import CandidateEvidence, normalize, tokens
 from jobpilot.core.job_description import normalize_job_description
 from jobpilot.core.profile_store import UserProfile
+from jobpilot.core.relocation import RelocationState, assess_relocation
 
 
 class EvidenceStatus(StrEnum):
@@ -436,6 +437,25 @@ class RequirementMatcher:
         if self._credential_is_unproven(item):
             return EvidenceStatus.UNKNOWN, (), ()
 
+        if category == "logistics" and "relocat" in lowered:
+            relocation = assess_relocation(description=item)
+            if relocation.state in {
+                RelocationState.OFFERED,
+                RelocationState.CONDITIONAL,
+                RelocationState.REQUIRED_UNSUPPORTED,
+            }:
+                if self.evidence.open_to_relocation is True:
+                    return (
+                        EvidenceStatus.DIRECT,
+                        (),
+                        ("profile: open to relocation for a confirmed role",),
+                    )
+                if self.evidence.open_to_relocation is False:
+                    return (
+                        EvidenceStatus.CONTRADICTED,
+                        (),
+                        ("profile: not open to relocation",),
+                    )
         if category == "logistics":
             return EvidenceStatus.UNKNOWN, (), ()
         if category == "work_context":

@@ -112,7 +112,7 @@ The export is deliberately narrow: each record may contain `company`, `title`,
 `applied_at`, or `received_at`), and an optional opaque `message_id`. Subjects,
 message bodies, snippets, attachments, and arbitrary extra fields are rejected.
 
-For the web evidence cards, run `jobpilot serve` and open `http://127.0.0.1:8767/`. The HTML dashboard depends on that local API server; opening the file directly is intentionally unsupported.
+For the full control-center dashboard, run `jobpilot serve` and open `http://127.0.0.1:8767/`. The dashboard shows apply readiness, relocation-supported leads, current direct-role coverage, source health, the 30-day application funnel, explicit-outcome sample size, and every role's evidence card. Its Relocation view sorts confirmed support before conditional support and shows the exact posting statement plus destination; “must relocate” never counts as company support. The dashboard depends on the local API server, so opening the HTML file directly is intentionally unsupported.
 
 **Step 5 — Get a tailored resume draft**
 
@@ -166,6 +166,7 @@ JobPilot also has a **gigs lane** — a second track for freelance and contract 
 - **You paste and submit by hand.** JobPilot never fills or submits the live ATS form.
 - **Posting evidence is a grade, not a company-trust probability.** `A/B recommend` requires a current direct ATS listing; `review` needs human verification; `hold` needs a refresh; `block` means closed, conflicting, expired, or scam-pattern evidence. Investigate the employer separately.
 - **Work context is observed, not a personality diagnosis.** Customer interaction, autonomy, field work, presentations, ambiguity, and similar signals are shown only when the job description and your evidence support them.
+- **Relocation support is evidence, not a location guess.** `offered` requires explicit company support; `conditional` requires explicit may-be-available language; a required move without confirmed support is labeled separately. Remote and home-metro roles are `not_needed`, not relocation offers. Out-of-area roles bypass a narrow personal location gate only when support is explicit or conditional, and relocation never overrides missing qualifications or work authorization.
 - **Outcome data never changes ranking weights automatically.** With fewer than 20 roles that have explicit decided outcomes, weights stay fixed. At 20 or more, calibration becomes eligible for explicit manual review only; every change must still be deliberate and tested. Silence remains censored unless you record `no_response`.
 
 ---

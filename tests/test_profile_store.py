@@ -75,6 +75,7 @@ class TestDefaults:
         assert isinstance(p, UserProfile)
         assert p.first_name == ""
         assert p.country == ""
+        assert p.open_to_relocation is None
         assert p.years_of_experience is None
         assert p.authorized_to_work is None
         assert p.requires_sponsorship is None

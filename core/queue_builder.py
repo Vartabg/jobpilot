@@ -35,6 +35,12 @@ from jobpilot.core.opportunity_models import DIRECT_ATS_PROVIDERS, SourceObserva
 from jobpilot.core.policy_config import get_policy, reset_policy_cache
 from jobpilot.core.portal_scanner import PortalJob, PortalScanner, ScanTarget
 from jobpilot.core.profile_store import get_profile_store
+from jobpilot.core.relocation import (
+    RelocationAssessment,
+    RelocationState,
+    assess_relocation,
+    relocation_sort_rank,
+)
 from jobpilot.core.role_decision import RoleDecisionEngine
 from jobpilot.core.role_identity import identify_role, is_safe_public_role_url
 from jobpilot.core.source_health import summarize_source_runs
@@ -148,6 +154,12 @@ class QueueJob:
     posting_state: str = "unknown"
     posting_age_days: int | None = None
     provider_job_id: str = ""
+    relocation_state: str = "unknown"
+    relocation_destination: str = ""
+    relocation_move_required: bool | None = None
+    relocation_evidence: list[str] = field(default_factory=list)
+    relocation_confidence: int = 0
+    relocation_rationale: str = ""
 
     def __post_init__(self):
         if not self.queued_at:
@@ -484,7 +496,12 @@ def _effective_location(company: str, location: str | None) -> str:
     return _company_hq(company)
 
 
-def _is_allowed_location(title: str, company: str, location: str | None) -> bool:
+def _is_allowed_location(
+    title: str,
+    company: str,
+    location: str | None,
+    relocation_state: str = "unknown",
+) -> bool:
     """Gate a job on its location, per `queue.location_gate` in policy.json.
 
     The gate is off by default — every location passes. When enabled, only
@@ -498,11 +515,22 @@ def _is_allowed_location(title: str, company: str, location: str | None) -> bool
     if not gate.enabled:
         return True
 
+    relocation_supported = relocation_state in {
+        RelocationState.OFFERED,
+        RelocationState.CONDITIONAL,
+    }
+
     title_haystack = _normalize_location_text(title or "")
-    if title_haystack and _has_location_hit(title_haystack, gate.blocked_locations):
+    if (
+        not relocation_supported
+        and title_haystack
+        and _has_location_hit(title_haystack, gate.blocked_locations)
+    ):
         return False
 
     loc_haystack = _normalize_location_text(_effective_location(company, location))
+    if relocation_supported:
+        return True
 
     # Field-service titles: surface anywhere in the US regardless of city
     # (Garo judges travel-vs-relocation per role, 2026-07-17 pivot). Home-metro
@@ -651,7 +679,17 @@ def _score_job(job: PortalJob) -> tuple[int, str, int]:
         return 5, "tech", 0
 
     # Hard gate: configured location gate (no-op unless enabled in policy).
-    if not _is_allowed_location(job.title, job.company, job.location):
+    relocation = assess_relocation(
+        description=job.description,
+        location=job.location,
+        workplace_type=job.workplace_type,
+    )
+    if not _is_allowed_location(
+        job.title,
+        job.company,
+        job.location,
+        relocation.state,
+    ):
         return 0, "tech", 0
 
     industry = policy.moat_company_tags.get(company_l)
@@ -772,6 +810,7 @@ def _queue_job_from_evidence(
     status: str,
     decision,
     legitimacy,
+    relocation: RelocationAssessment,
     application_history_incomplete: bool = False,
 ) -> QueueJob:
     title_l = job.title.lower()
@@ -842,6 +881,12 @@ def _queue_job_from_evidence(
         verified_at=legitimacy.verified_at,
         posting_state=job.listing_state,
         provider_job_id=job.provider_job_id,
+        relocation_state=relocation.state,
+        relocation_destination=relocation.destination,
+        relocation_move_required=relocation.move_required,
+        relocation_evidence=list(relocation.evidence),
+        relocation_confidence=relocation.confidence,
+        relocation_rationale=relocation.rationale,
     )
 
 
@@ -915,9 +960,18 @@ def build_queue(
         for job in raw_jobs:
             if not is_safe_public_role_url(job.canonical_url or job.url) or not job.title:
                 continue
+            relocation = assess_relocation(
+                description=job.description,
+                location=job.location,
+                workplace_type=job.workplace_type,
+                home_city=profile.city,
+            )
             block_reason = policy_block_reason(job.company, job.title)
             if block_reason or not _is_allowed_location(
-                job.title, job.company, job.location
+                job.title,
+                job.company,
+                job.location,
+                relocation.state,
             ):
                 continue
 
@@ -994,6 +1048,13 @@ def build_queue(
                 version="1",
                 source="candidate_evidence",
             )
+            ledger.record_assessment(
+                opportunity_id,
+                "relocation",
+                relocation,
+                version="1",
+                source="deterministic",
+            )
             ledger.append_event(
                 opportunity_id,
                 "discovered",
@@ -1021,6 +1082,7 @@ def build_queue(
                 status=status,
                 decision=decision,
                 legitimacy=legitimacy,
+                relocation=relocation,
                 application_history_incomplete=application_history_incomplete,
             ))
     finally:
@@ -1033,7 +1095,10 @@ def build_queue(
     seen_ids = {j.id for j in queue}
     for pj in prior.values():
         if pj.id in seen_ids or not _is_allowed_location(
-            pj.title, pj.company, pj.location
+            pj.title,
+            pj.company,
+            pj.location,
+            pj.relocation_state,
         ):
             continue
         if pj.status in {"queued", "viewing"}:
@@ -1060,6 +1125,7 @@ def build_queue(
             j.status not in {"queued", "viewing"},
             j.decision != "apply_now",
             -_axis_or_zero(j.qualification_lower_bound),
+            -relocation_sort_rank(j.relocation_state),
             -int(j.evidence_coverage or 0),
         )
     )
@@ -1167,8 +1233,15 @@ def _queue_row_error(item: object) -> str | None:
         "verified_at",
         "posting_state",
         "provider_job_id",
+        "relocation_state",
+        "relocation_destination",
+        "relocation_rationale",
     }
-    integer_fields = {"psyche_score", "evidence_coverage"}
+    integer_fields = {
+        "psyche_score",
+        "evidence_coverage",
+        "relocation_confidence",
+    }
     optional_integer_fields = {
         "qualification_lower_bound",
         "work_context_match",
@@ -1176,7 +1249,12 @@ def _queue_row_error(item: object) -> str | None:
         "logistics_score",
         "posting_age_days",
     }
-    list_fields = {"keywords", "matched_accounts", "legitimacy_reasons"}
+    list_fields = {
+        "keywords",
+        "matched_accounts",
+        "legitimacy_reasons",
+        "relocation_evidence",
+    }
     for name in string_fields:
         if name in item and not isinstance(item[name], str):
             return f"field {name!r} has invalid type {type(item[name]).__name__}"
@@ -1191,6 +1269,9 @@ def _queue_row_error(item: object) -> str | None:
             not isinstance(value, int) or isinstance(value, bool)
         ):
             return f"field {name!r} has invalid type {type(value).__name__}"
+    move_required = item.get("relocation_move_required")
+    if move_required is not None and not isinstance(move_required, bool):
+        return "field 'relocation_move_required' must be boolean or null"
     for name in list_fields:
         if name in item and (
             not isinstance(item[name], list)
@@ -1358,6 +1439,7 @@ def apply_company_slate(queue: list[QueueJob]) -> tuple[int, int]:
                 decision_rank.get(j.decision, 0),
                 legitimacy_rank.get(j.legitimacy_state, 0),
                 int(j.qualification_lower_bound or 0),
+                relocation_sort_rank(j.relocation_state),
                 int(j.evidence_coverage or 0),
                 int(j.work_context_match or 0),
                 status_rank.get(j.status, 0),
