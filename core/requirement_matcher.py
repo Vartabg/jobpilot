@@ -1,4 +1,5 @@
 """Parse full job descriptions and link each claim to candidate evidence."""
+
 from __future__ import annotations
 
 import re
@@ -31,6 +32,8 @@ class RequirementSet:
     def is_sufficient(self) -> bool:
         primary = self.mandatory + self.preferred + self.responsibilities
         return len(self.raw_text.strip()) >= 140 and len(set(primary)) >= 3
+
+
 @dataclass(frozen=True)
 class RequirementMatch:
     category: str
@@ -38,6 +41,7 @@ class RequirementMatch:
     status: EvidenceStatus
     account_ids: tuple[str, ...] = ()
     support: tuple[str, ...] = ()
+
 
 _HEADER_END = r"(?:\s*(?::|[-\u2013\u2014]|=+)\s*|\s*$)"
 _YOU_WILL = r"you(?:['\u2019]ll| will)"
@@ -49,42 +53,57 @@ def _header(labels: str) -> re.Pattern[str]:
 
 
 _HEADERS = (
-    ("preferred", _header(
-        r"preferred(?: (?:skills?(?:\s*(?:&|and)\s*qualifications?)?|"
-        r"qualifications?|experience|requirements?))?|nice to haves?|bonus(?: points?)?|"
-        r"desirable|ideal",
-    )),
-    ("mandatory", _header(
-        rf"required(?: (?:skills?|qualifications?|experience|requirements?))?|"
-        rf"(?:minimum|basic|essential)(?: (?:skills?|qualifications?|requirements?|"
-        rf"experience))?(?: for (?:this|the) role)?|qualifications?|"
-        rf"requirements?(?: for (?:this|the) role)?|what (?:{_WE_ARE} looking for|"
-        rf"{_YOU_WILL} need|{_YOU_WILL} bring(?: to (?:the|our) team)?|"
-        rf"you bring(?: to (?:the|our) team)?|we need)|{_WE_ARE} looking for|"
-        rf"who you are|about you|"
-        rf"candidate profile|ideal candidate(?: profile)?|"
-        rf"your (?:background|experience|skills)|"
-        rf"{_YOU_WILL} have|you have|skills?\s*(?:&|and)\s*(?:experience|"
-        rf"qualifications?)|experience\s*(?:&|and)\s*skills?",
-    )),
-    ("responsibilities", _header(
-        rf"(?:(?:core|key|primary|day[-\u2013\u2014 ]to[-\u2013\u2014 ]day|role and) )?"
-        rf"responsibilit(?:y|ies)|accountabilities|what {_YOU_WILL} "
-        rf"(?:do(?: here)?|be doing|own)|what you own|"
-        rf"about the role|(?:role|position|job) (?:summary|overview|description|focus)|"
-        rf"(?:your|the) role|role (?:purpose|mission)|scope of (?:the )?role|"
-        rf"in (?:this|the) role|your impact|the opportunity|"
-        rf"(?:key |essential )?(?:duties|functions|activities)|(?:a )?day in the life",
-    )),
-    ("work_context", _header(
-        r"work environment|work context|how you work|ways of working|"
-        r"how we work|what success looks like",
-    )),
-    ("logistics", _header(
-        rf"logistics|(?:job |work |office )?locations?|travel|schedule|"
-        rf"work authorization|physical requirements|working conditions|workplace|"
-        rf"where {_YOU_WILL} work",
-    )),
+    (
+        "preferred",
+        _header(
+            r"preferred(?: (?:skills?(?:\s*(?:&|and)\s*qualifications?)?|"
+            r"qualifications?|experience|requirements?))?|nice to haves?|bonus(?: points?)?|"
+            r"desirable|ideal|qualifications? we value|even better if you have",
+        ),
+    ),
+    (
+        "mandatory",
+        _header(
+            rf"required(?: (?:skills?|qualifications?|experience|requirements?))?|"
+            rf"(?:minimum|basic|essential)(?: (?:skills?|qualifications?|requirements?|"
+            rf"experience))?(?: for (?:this|the) role)?|qualifications?|"
+            rf"requirements?(?: for (?:this|the) role)?|what (?:{_WE_ARE} looking for|"
+            rf"{_YOU_WILL} need|{_YOU_WILL} bring(?: to (?:the|this|our) (?:role|team))?|"
+            rf"you bring(?: to (?:the|this|our) (?:role|team))?|we need)|{_WE_ARE} looking for|"
+            rf"who you are|about you|"
+            rf"candidate profile|ideal candidate(?: profile)?|"
+            rf"your (?:background(?: looks something like this)?|experience|skills)|"
+            rf"{_YOU_WILL} have|you have|skills?\s*(?:&|and)\s*(?:experience|"
+            rf"qualifications?)|experience\s*(?:&|and)\s*skills?",
+        ),
+    ),
+    (
+        "responsibilities",
+        _header(
+            rf"(?:(?:core|key|primary|day[-\u2013\u2014 ]to[-\u2013\u2014 ]day|role and) )?"
+            rf"responsibilit(?:y|ies)|accountabilities|what {_YOU_WILL} "
+            rf"(?:do(?: here)?|be doing|own)|what you own|"
+            rf"about the role|(?:role|position|job) (?:summary|overview|description|focus)|"
+            rf"(?:your|the) role|role (?:purpose|mission)|scope of (?:the )?role|"
+            rf"in (?:this|the) role|your impact|the opportunity|"
+            rf"(?:key |essential )?(?:duties|functions|activities)|(?:a )?day in the life",
+        ),
+    ),
+    (
+        "work_context",
+        _header(
+            r"work environment|work context|how you work|ways of working|"
+            r"how we work|what success looks like",
+        ),
+    ),
+    (
+        "logistics",
+        _header(
+            rf"logistics|(?:job |work |office )?locations?|travel|schedule|"
+            rf"work authorization|physical requirements|working conditions|workplace|"
+            rf"where {_YOU_WILL} work",
+        ),
+    ),
 )
 _RESET_HEADER = _header(
     r"about (?:us|the company|our company|the team|our team)|"
@@ -120,6 +139,11 @@ _OVERALL_TENURE = re.compile(
     r"\s+experience(?:\s+(?:is\s+)?required)?$"
 )
 _COMPOSITE_SPLIT = re.compile(r"\s*(?:;|,|\band\b|\bplus\b)\s*", re.IGNORECASE)
+_NEGATIVE_BOUNDARY = re.compile(
+    r"\b(?:do not|don't|never|not|no)\b"
+    r"(?:\s+(?:claim|state|represent|imply|assert))?\s*(?P<claim>.+)",
+    re.IGNORECASE,
+)
 _HARD_CREDENTIALS = (
     re.compile(
         r"\b(?:active\s+|current\s+)?(?:top\s+secret\s*/\s*sci|top\s+secret|"
@@ -139,11 +163,47 @@ _HARD_CREDENTIALS = (
     ),
 )
 _CONCEPTS = {
-    "customer": {"customer", "customers", "client", "clients", "stakeholder", "stakeholders"},
-    "presentation": {"demo", "demos", "demonstration", "demonstrations", "workshop", "workshops", "train", "trained", "training", "explain", "explained", "present"},
-    "diagnosis": {"troubleshoot", "troubleshooting", "diagnose", "diagnosed", "repair", "repairs", "resolve", "resolved"},
+    "customer": {
+        "customer",
+        "customers",
+        "client",
+        "clients",
+        "stakeholder",
+        "stakeholders",
+    },
+    "presentation": {
+        "demo",
+        "demos",
+        "demonstration",
+        "demonstrations",
+        "workshop",
+        "workshops",
+        "train",
+        "trained",
+        "training",
+        "explain",
+        "explained",
+        "present",
+    },
+    "diagnosis": {
+        "troubleshoot",
+        "troubleshooting",
+        "diagnose",
+        "diagnosed",
+        "repair",
+        "repairs",
+        "resolve",
+        "resolved",
+    },
     "integration": {"integration", "integrations", "hardware", "software", "systems"},
-    "autonomy": {"independent", "independently", "autonomous", "autonomy", "ambiguity", "ambiguous"},
+    "autonomy": {
+        "independent",
+        "independently",
+        "autonomous",
+        "autonomy",
+        "ambiguity",
+        "ambiguous",
+    },
 }
 
 
@@ -155,22 +215,33 @@ def _concepts(value: str) -> set[str]:
             found.add(concept)
     return found
 
+
 class RequirementMatcher:
     def __init__(self, evidence: CandidateEvidence):
         self.evidence = evidence
 
     @classmethod
-    def from_profile(cls, profile: UserProfile, accounts_path: Path | None = None) -> RequirementMatcher:
+    def from_profile(
+        cls, profile: UserProfile, accounts_path: Path | None = None
+    ) -> RequirementMatcher:
         return cls(CandidateEvidence.load(profile, accounts_path))
 
     @staticmethod
     def parse(raw_text: str) -> RequirementSet:
         normalized_text = normalize_job_description(raw_text)
-        buckets: dict[str, list[str]] = {name: [] for name in (
-            "mandatory", "preferred", "responsibilities", "work_context", "logistics",
-        )}
+        buckets: dict[str, list[str]] = {
+            name: []
+            for name in (
+                "mandatory",
+                "preferred",
+                "responsibilities",
+                "work_context",
+                "logistics",
+            )
+        }
         current: str | None = None
         one_shot = False
+        ignored_section = False
         for raw_line in re.split(r"\n+", normalized_text):
             item = re.sub(r"^[^\w]+", "", raw_line).strip()
             if not item:
@@ -178,18 +249,26 @@ class RequirementMatcher:
             if _RESET_HEADER.match(item):
                 current = None
                 one_shot = False
+                ignored_section = True
                 continue
             header_match = next(
-                ((name, match) for name, pattern in _HEADERS if (match := pattern.match(item))),
+                (
+                    (name, match)
+                    for name, pattern in _HEADERS
+                    if (match := pattern.match(item))
+                ),
                 None,
             )
             if header_match:
                 header, match = header_match
                 current = header
                 one_shot = header == "logistics" and bool(_SCALAR_LOGISTICS.match(item))
-                item = item[match.end():].strip()
+                ignored_section = False
+                item = item[match.end() :].strip()
                 if not item:
                     continue
+            if ignored_section:
+                continue
             lowered = normalize(item)
             primary = current
             if primary is None:
@@ -207,36 +286,48 @@ class RequirementMatcher:
                     primary = "preferred"
             if primary and len(item) >= 5:
                 buckets[primary].append(item)
-            if _CONTEXT.search(lowered):
+            if primary is not None and _CONTEXT.search(lowered):
                 buckets["work_context"].append(item)
-            if _LOGISTICS.search(lowered):
+            if primary is not None and _LOGISTICS.search(lowered):
                 buckets["logistics"].append(item)
             if one_shot:
                 current = None
                 one_shot = False
-        return RequirementSet(raw_text=normalized_text, **{
-            key: tuple(dict.fromkeys(value)) for key, value in buckets.items()
-        })
+        return RequirementSet(
+            raw_text=normalized_text,
+            **{key: tuple(dict.fromkeys(value)) for key, value in buckets.items()},
+        )
 
     def match(self, requirements: RequirementSet) -> tuple[RequirementMatch, ...]:
         matches = []
-        for category in ("mandatory", "preferred", "responsibilities", "work_context", "logistics"):
+        for category in (
+            "mandatory",
+            "preferred",
+            "responsibilities",
+            "work_context",
+            "logistics",
+        ):
             for item in getattr(requirements, category):
                 status, account_ids, support = self._match_one(item, category)
-                matches.append(RequirementMatch(category, item, status, account_ids, support))
+                matches.append(
+                    RequirementMatch(category, item, status, account_ids, support)
+                )
         return tuple(matches)
 
     @property
     def _explicit_evidence(self) -> tuple[str, ...]:
-        return (*self.evidence.skills, *(
-            skill for account in self.evidence.accounts for skill in account.skills
-        ))
+        return (
+            *self.evidence.skills,
+            *(skill for account in self.evidence.accounts for skill in account.skills),
+        )
 
     def _credential_is_unproven(self, item: str) -> bool:
         for pattern in _HARD_CREDENTIALS:
             for match in pattern.finditer(item):
                 required = tokens(match.group())
-                if not any(required <= tokens(claim) for claim in self._explicit_evidence):
+                if not any(
+                    required <= tokens(claim) for claim in self._explicit_evidence
+                ):
                     return True
         return False
 
@@ -249,13 +340,18 @@ class RequirementMatcher:
         parts = [part for part in _COMPOSITE_SPLIT.split(item) if tokens(part)]
         if len(parts) < 2:
             return False
-        evidence_tokens = set().union(*(tokens(claim) for claim in self._explicit_evidence))
+        evidence_tokens = set().union(
+            *(tokens(claim) for claim in self._explicit_evidence)
+        )
         supported = []
         for part in parts:
             part_tokens = tokens(part)
             supported.append(
                 bool(structured and structured.search(part))
-                or any(tokens(claim) and tokens(claim) <= part_tokens for claim in self._explicit_evidence)
+                or any(
+                    tokens(claim) and tokens(claim) <= part_tokens
+                    for claim in self._explicit_evidence
+                )
                 or part_tokens <= evidence_tokens
             )
         return any(supported) and not all(supported)
@@ -270,7 +366,9 @@ class RequirementMatcher:
         req_concepts = _concepts(item)
         found = []
         for account in self.evidence.accounts:
-            claims = (*account.claims, *account.skills) if include_skills else account.claims
+            claims = (
+                (*account.claims, *account.skills) if include_skills else account.claims
+            )
             claim_text = " ".join(claims)
             overlap = req_tokens & tokens(claim_text)
             concept_overlap = req_concepts & _concepts(claim_text)
@@ -286,24 +384,45 @@ class RequirementMatcher:
         req_tokens = tokens(item)
         for account in self.evidence.accounts:
             for boundary in account.truth_boundaries:
-                overlap = req_tokens & tokens(boundary)
-                if len(overlap) >= min(2, max(1, len(req_tokens))):
-                    return EvidenceStatus.CONTRADICTED, (account.account_id,), (boundary,)
+                negative = _NEGATIVE_BOUNDARY.search(boundary)
+                if not negative:
+                    continue
+                forbidden_tokens = tokens(negative.group("claim"))
+                overlap = req_tokens & forbidden_tokens
+                smaller_claim = min(len(req_tokens), len(forbidden_tokens))
+                if (
+                    smaller_claim
+                    and len(overlap) >= min(2, max(1, len(req_tokens)))
+                    and len(overlap) / smaller_claim >= 0.6
+                ):
+                    return (
+                        EvidenceStatus.CONTRADICTED,
+                        (account.account_id,),
+                        (boundary,),
+                    )
 
         lowered = normalize(item)
-        if (
-            "authoriz" in lowered or "sponsor" in lowered
-        ) and _US_JURISDICTION.search(item):
-            no_sponsorship = "without sponsorship" in lowered or "no sponsorship" in lowered
+        if ("authoriz" in lowered or "sponsor" in lowered) and _US_JURISDICTION.search(
+            item
+        ):
+            no_sponsorship = (
+                "without sponsorship" in lowered or "no sponsorship" in lowered
+            )
             if no_sponsorship and self.evidence.requires_sponsorship is True:
-                return EvidenceStatus.CONTRADICTED, (), ("profile: requires sponsorship",)
+                return (
+                    EvidenceStatus.CONTRADICTED,
+                    (),
+                    ("profile: requires sponsorship",),
+                )
             if (
                 self.evidence.authorized_to_work is True
                 and self.evidence.requires_sponsorship is False
             ):
                 if self._has_unsupported_conjunct(
                     item,
-                    structured=re.compile(r"\b(?:authoriz|sponsor)\w*\b", re.IGNORECASE),
+                    structured=re.compile(
+                        r"\b(?:authoriz|sponsor)\w*\b", re.IGNORECASE
+                    ),
                 ):
                     return EvidenceStatus.UNKNOWN, (), ()
                 return EvidenceStatus.DIRECT, (), ("profile: work authorization",)
@@ -365,15 +484,26 @@ class RequirementMatcher:
                 direct_support.append(f"profile skill: {skill}")
         direct_accounts = []
         for account in self.evidence.accounts:
-            if any(tokens(skill) and tokens(skill) <= req_tokens for skill in account.skills):
+            if any(
+                tokens(skill) and tokens(skill) <= req_tokens
+                for skill in account.skills
+            ):
                 direct_accounts.append(account.account_id)
                 direct_support.append(f"account: {account.title}")
         if direct_support:
             if category == "mandatory" and self._has_unsupported_conjunct(item):
                 return EvidenceStatus.UNKNOWN, (), ()
-            return EvidenceStatus.DIRECT, tuple(dict.fromkeys(direct_accounts)), tuple(direct_support)
+            return (
+                EvidenceStatus.DIRECT,
+                tuple(dict.fromkeys(direct_accounts)),
+                tuple(direct_support),
+            )
 
         adjacent_accounts = self._adjacent_accounts(item)
         if adjacent_accounts:
-            return EvidenceStatus.ADJACENT, adjacent_accounts, ("related account evidence",)
+            return (
+                EvidenceStatus.ADJACENT,
+                adjacent_accounts,
+                ("related account evidence",),
+            )
         return EvidenceStatus.UNKNOWN, (), ()

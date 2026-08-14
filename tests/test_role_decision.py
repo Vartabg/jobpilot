@@ -30,17 +30,30 @@ Logistics
 @pytest.fixture()
 def account_path(tmp_path: Path) -> Path:
     path = tmp_path / "accounts.json"
-    path.write_text(json.dumps({
-        "version": 1,
-        "accounts": [{
-            "id": "customer-field",
-            "title": "Customer-site technical work",
-            "summary": "Diagnosed hardware and software issues at customer sites.",
-            "details": ["Explained technical repairs and trained customers."],
-            "skills": ["systems troubleshooting", "technical communication"],
-            "truth_boundaries": ["Do not claim PLC programming experience."],
-        }],
-    }))
+    path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "accounts": [
+                    {
+                        "id": "customer-field",
+                        "title": "Customer-site technical work",
+                        "summary": "Diagnosed hardware and software issues at customer sites.",
+                        "details": [
+                            "Explained technical repairs and trained customers."
+                        ],
+                        "skills": [
+                            "systems troubleshooting",
+                            "technical communication",
+                        ],
+                        "truth_boundaries": [
+                            "Do not claim PLC programming experience."
+                        ],
+                    }
+                ],
+            }
+        )
+    )
     return path
 
 
@@ -60,9 +73,7 @@ def test_inline_header_preserves_the_requirement_after_the_colon():
         "Requirements: Active Top Secret security clearance required."
     )
 
-    assert parsed.mandatory == (
-        "Active Top Secret security clearance required.",
-    )
+    assert parsed.mandatory == ("Active Top Secret security clearance required.",)
 
 
 def test_location_before_common_primary_sections_does_not_poison_them():
@@ -87,12 +98,15 @@ def test_location_before_common_primary_sections_does_not_poison_them():
         "Python automation experience.",
         "3+ years Kubernetes experience.",
     )
-    assert not any("Medical" in item for item in (
-        *parsed.mandatory,
-        *parsed.preferred,
-        *parsed.responsibilities,
-        *parsed.logistics,
-    ))
+    assert not any(
+        "Medical" in item
+        for item in (
+            *parsed.mandatory,
+            *parsed.preferred,
+            *parsed.responsibilities,
+            *parsed.logistics,
+        )
+    )
 
 
 def test_standalone_location_header_applies_to_one_value_only():
@@ -117,34 +131,111 @@ def test_standalone_location_header_applies_to_one_value_only():
 
 def test_bare_candidate_heading_alias_is_mandatory():
     parsed = RequirementMatcher.parse(
-        "We're looking for ==\n"
-        "Customer-facing troubleshooting experience."
+        "We're looking for ==\nCustomer-facing troubleshooting experience."
+    )
+
+    assert parsed.mandatory == ("Customer-facing troubleshooting experience.",)
+
+
+def test_modern_candidate_headings_and_reset_sections_are_classified():
+    parsed = RequirementMatcher.parse(
+        "About the role\n"
+        "- Lead customer implementations.\n"
+        "What You\N{RIGHT SINGLE QUOTATION MARK}ll Bring to the Role\n"
+        "- 4+ years of sales engineering experience.\n"
+        "Your background looks something like this\n"
+        "- Technical discovery experience.\n"
+        "Even better if you have\n"
+        "- Python automation experience.\n"
+        "Qualifications we value\n"
+        "- Enterprise SaaS experience.\n"
+        "Benefits and perks\n"
+        "- Remote wellness coaching and family travel assistance.\n"
+        "- Customer discounts."
     )
 
     assert parsed.mandatory == (
-        "Customer-facing troubleshooting experience.",
+        "4+ years of sales engineering experience.",
+        "Technical discovery experience.",
+    )
+    assert parsed.preferred == (
+        "Python automation experience.",
+        "Enterprise SaaS experience.",
+    )
+    assert not any(
+        "wellness" in item or "discounts" in item
+        for item in (
+            *parsed.responsibilities,
+            *parsed.work_context,
+            *parsed.logistics,
+        )
     )
 
 
 def test_classifies_direct_adjacent_unknown_and_contradicted(account_path: Path):
     profile = UserProfile(skills=["Python"], authorized_to_work=True)
     matcher = RequirementMatcher.from_profile(profile, account_path)
-    parsed = RequirementMatcher.parse(FULL_JD + "\n- PLC programming.\n- Kubernetes administration.")
+    parsed = RequirementMatcher.parse(
+        FULL_JD + "\n- PLC programming.\n- Kubernetes administration."
+    )
     matches = matcher.match(parsed)
     by_text = {match.text: match.status for match in matches}
 
     assert by_text["Systems troubleshooting experience."] is EvidenceStatus.DIRECT
-    assert by_text["Lead customer discovery workshops and product demonstrations."] is EvidenceStatus.ADJACENT
+    assert (
+        by_text["Lead customer discovery workshops and product demonstrations."]
+        is EvidenceStatus.ADJACENT
+    )
     assert by_text["PLC programming."] is EvidenceStatus.CONTRADICTED
     assert by_text["Kubernetes administration."] is EvidenceStatus.UNKNOWN
 
 
-@pytest.mark.parametrize("title", [
-    "Forward Deployed Creative Designer",
-    "Field Marketing Specialist",
-    "Marketing Data Scientist",
-    "Senior Product Manager",
-])
+def test_truth_boundary_only_contradicts_its_negative_claim(tmp_path: Path):
+    accounts = tmp_path / "accounts.json"
+    accounts.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "accounts": [
+                    {
+                        "id": "field-account",
+                        "title": "Field Service Engineer",
+                        "summary": "Resolved customer-site hardware and network problems.",
+                        "details": [
+                            "Coordinated technicians and customer stakeholders."
+                        ],
+                        "skills": [],
+                        "truth_boundaries": [
+                            "Not a manager of other field engineers or lead over a team."
+                        ],
+                    }
+                ],
+            }
+        )
+    )
+    matcher = RequirementMatcher.from_profile(UserProfile(), accounts)
+    parsed = RequirementMatcher.parse(
+        "Responsibilities\n"
+        "- Lead customer discovery with field stakeholders.\n"
+        "- Coordinate customer engineers during implementation.\n"
+        "Required qualifications\n"
+        "- Customer-facing technical experience."
+    )
+
+    matches = matcher.match(parsed)
+
+    assert all(match.status is not EvidenceStatus.CONTRADICTED for match in matches)
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Forward Deployed Creative Designer",
+        "Field Marketing Specialist",
+        "Marketing Data Scientist",
+        "Senior Product Manager",
+    ],
+)
 def test_false_positive_title_families_are_skipped(title: str, account_path: Path):
     result = RoleDecisionEngine().assess(
         title=title,
@@ -229,13 +320,16 @@ def test_orphaned_legacy_html_tokens_never_escape_into_biggest_gap():
 
     assert result.decision == "investigate"
     assert result.biggest_gap == "Kubernetes administration experience."
-    assert all("li>" not in match.text and "/li>" not in match.text for match in result.matches)
+    assert all(
+        "li>" not in match.text and "/li>" not in match.text for match in result.matches
+    )
 
 
 def test_orphaned_adjacent_tag_tokens_normalize_to_plain_text():
-    assert normalize_job_description(
-        'li class="legacy">Kubernetes experience./li>'
-    ) == "Kubernetes experience."
+    assert (
+        normalize_job_description('li class="legacy">Kubernetes experience./li>')
+        == "Kubernetes experience."
+    )
 
 
 def test_short_html_description_remains_fail_closed():
@@ -321,9 +415,7 @@ def test_us_authorization_never_satisfies_canadian_requirement(
         accounts_path=account_path,
     )
 
-    canadian_auth = next(
-        match for match in result.matches if "Canada" in match.text
-    )
+    canadian_auth = next(match for match in result.matches if "Canada" in match.text)
     assert canadian_auth.status is EvidenceStatus.UNKNOWN
     assert result.decision == "investigate"
 
@@ -388,18 +480,21 @@ def test_supported_role_uses_observed_work_context_and_accounts(account_path: Pa
     assert "intellect" not in result.rationale.lower()
 
 
-@pytest.mark.parametrize("title", [
-    "Customer Engineer",
-    "Field Engineer",
-    "Data Center Technician",
-    "Critical Facilities Technician",
-    "Technical Account Manager",
-    "Customer Success Engineer",
-    "Customer Success Manager",
-    "Deployment Strategist",
-    "Implementation Consultant",
-    "Technical Implementation Specialist",
-])
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Customer Engineer",
+        "Field Engineer",
+        "Data Center Technician",
+        "Critical Facilities Technician",
+        "Technical Account Manager",
+        "Customer Success Engineer",
+        "Customer Success Manager",
+        "Deployment Strategist",
+        "Implementation Consultant",
+        "Technical Implementation Specialist",
+    ],
+)
 def test_adjacent_customer_and_field_families_can_be_assessed(title: str):
     result = RoleDecisionEngine().assess(
         title=title,
@@ -408,6 +503,26 @@ def test_adjacent_customer_and_field_families_can_be_assessed(title: str):
     )
 
     assert result.role_family != "unsupported"
+
+
+@pytest.mark.parametrize(
+    ("title", "family"),
+    [
+        ("Customer Engineer", "applied_implementation"),
+        ("Customer Service Engineer", "field_service"),
+    ],
+)
+def test_customer_engineer_family_distinguishes_software_from_service(
+    title: str,
+    family: str,
+):
+    result = RoleDecisionEngine().assess(
+        title=title,
+        jd_text=FULL_JD,
+        profile=UserProfile(skills=["Python"]),
+    )
+
+    assert result.role_family == family
 
 
 def test_domain_experience_proves_only_its_named_years_requirement():
@@ -471,9 +586,9 @@ def test_supported_skill_cannot_mask_an_unsupported_hard_conjunct():
     requirements = RequirementMatcher.parse(
         "Requirements: Python and an active Top Secret security clearance."
     )
-    match = RequirementMatcher.from_profile(
-        UserProfile(skills=["Python"])
-    ).match(requirements)[0]
+    match = RequirementMatcher.from_profile(UserProfile(skills=["Python"])).match(
+        requirements
+    )[0]
 
     assert match.status is EvidenceStatus.UNKNOWN
     assert not match.support
@@ -515,9 +630,9 @@ def test_each_named_skill_in_a_mandatory_conjunction_needs_evidence():
     requirements = RequirementMatcher.parse(
         "Requirements: Python and Kubernetes experience."
     )
-    match = RequirementMatcher.from_profile(
-        UserProfile(skills=["Python"])
-    ).match(requirements)[0]
+    match = RequirementMatcher.from_profile(UserProfile(skills=["Python"])).match(
+        requirements
+    )[0]
 
     assert match.status is EvidenceStatus.UNKNOWN
 
@@ -551,9 +666,9 @@ def test_generic_tech_skill_does_not_prove_context_or_logistics():
         "Logistics\n"
         "- Python automation experience."
     )
-    matches = RequirementMatcher.from_profile(
-        UserProfile(skills=["Python"])
-    ).match(requirements)
+    matches = RequirementMatcher.from_profile(UserProfile(skills=["Python"])).match(
+        requirements
+    )
 
     by_category = {match.category: match.status for match in matches}
     assert by_category["work_context"] is EvidenceStatus.UNKNOWN
