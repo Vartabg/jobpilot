@@ -1,7 +1,9 @@
 """Tests for the prefilled-mailto path and the crib sheet generator."""
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import parse_qs, urlparse
 
 from jobpilot.gigs.core import preferences
@@ -107,7 +109,25 @@ def test_build_actions_single_apply_button() -> None:
     assert "View post" not in actions
 
 
-def test_crib_sheet_has_standard_answers_and_per_lead_section(tmp_path: Path) -> None:
+def test_crib_sheet_has_standard_answers_and_per_lead_section(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        preferences,
+        "load",
+        lambda path=None: deepcopy(preferences.DEFAULTS),
+    )
+    neutral_profile = SimpleNamespace(
+        country="",
+        authorized_to_work=None,
+        requires_sponsorship=None,
+        demographics={},
+    )
+    monkeypatch.setattr(
+        "jobpilot.core.profile_store.get_profile_store",
+        lambda: SimpleNamespace(load=lambda: neutral_profile),
+    )
     crib = write_crib_sheet([_gig()], crib_dir=tmp_path)
     text = crib.read_text()
     # Identity block — email comes from preferences (DEFAULTS or

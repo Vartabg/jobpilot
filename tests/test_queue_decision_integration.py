@@ -4,6 +4,8 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
+
 import jobpilot.core.queue_builder as qb
 from jobpilot.core.opportunity_ledger import OpportunityLedger
 from jobpilot.core.opportunity_models import SourceObservation, SourceRunResult
@@ -25,6 +27,16 @@ Work environment
 Logistics
 - Must be authorized to work in the United States without sponsorship.
 """
+
+
+@pytest.fixture(autouse=True)
+def _neutral_policy_for_each_test():
+    """Never let a developer's private policy change these unit tests."""
+    set_policy(policy_from_dict({}))
+    try:
+        yield
+    finally:
+        set_policy(None)
 
 
 def test_scan_keywords_include_new_evidence_supported_title_families() -> None:
