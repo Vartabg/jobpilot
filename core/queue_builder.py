@@ -23,6 +23,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
+from jobpilot.core.application_evidence import ApplicationEvidenceIndex
 from jobpilot.core.application_tracker import get_application_tracker
 from jobpilot.core.config import DATA_DIR
 from jobpilot.core.logger import get_logger
@@ -69,6 +70,7 @@ class QueueJob:
     status: str = "queued"   # queued | applied | skipped
     queued_at: str = ""
     psyche_score: int = 0    # 0-15 sub-score (work-style fit, exposed for transparency)
+    suppression_reason: str = ""
 
     def __post_init__(self):
         if not self.queued_at:
@@ -245,6 +247,53 @@ def _is_allowed_location(title: str, company: str, location: str | None) -> bool
     )
 
 
+def _evidence_path(value: str) -> Optional[Path]:
+    if not value:
+        return None
+    path = Path(value).expanduser()
+    repo_root = Path(__file__).resolve().parent.parent
+    return path if path.is_absolute() else repo_root / path
+
+
+def get_application_evidence_index(tracker=None) -> ApplicationEvidenceIndex:
+    """Merge every configured source that can prove a role was already touched."""
+    policy = get_policy().application_evidence
+    return ApplicationEvidenceIndex.build(
+        tracker=tracker or get_application_tracker(),
+        employment_dir=_evidence_path(policy.employment_dir),
+        gmail_cache_path=_evidence_path(policy.gmail_cache_path),
+        gmail_cache_max_age_hours=policy.gmail_cache_max_age_hours,
+    )
+
+
+def policy_block_reason(company: str, title: str) -> Optional[str]:
+    """Return the personal-policy reason a role must not enter the active queue."""
+    policy = get_policy()
+    company_l = (company or "").strip().lower()
+    title_l = (title or "").strip().lower()
+
+    if company_l in policy.scoring.refused_companies:
+        return policy.scoring.refused_companies[company_l] or "company refused by policy"
+    for keyword, reason in policy.scoring.refused_title_keywords.items():
+        if keyword in title_l:
+            return reason or f"title contains refused term: {keyword}"
+    for keyword in policy.queue.title_kill_keywords:
+        if keyword in title_l:
+            return f"title blocked by policy: {keyword}"
+    allowed_titles = policy.queue.title_allow_keywords
+    if allowed_titles and not any(keyword in title_l for keyword in allowed_titles):
+        return "outside configured role lane"
+
+    transport = policy.queue.transport_gate
+    if transport.enabled and transport.mode == "transit":
+        if any(term in title_l for term in transport.fixed_site_title_keywords):
+            return None
+        for keyword in transport.mobile_title_keywords:
+            if keyword in title_l:
+                return f"routine driving likely required: {keyword}"
+    return None
+
+
 def _score_psyche_fit(
     title_l: str, company_l: str, industry: Optional[str], note_l: str,
     profile: dict[str, Any],
@@ -388,10 +437,15 @@ def build_queue(
     # Authoritative dedup source: applications.db (URL + company-level).
     # Catches backfilled history that prior queue.json won't have.
     tracker = get_application_tracker()
+    evidence = get_application_evidence_index(tracker)
+    if get_policy().application_evidence.fail_closed:
+        evidence.ensure_usable()
 
     queue: list[QueueJob] = []
     for job in raw_jobs:
         if not job.url or not job.title:
+            continue
+        if policy_block_reason(job.company, job.title):
             continue
         if not _is_allowed_location(job.title, job.company, job.location):
             continue
@@ -403,12 +457,17 @@ def build_queue(
         # rows with synthetic URLs). Rejected wins over applied so dead ground
         # is visible in the queue.
         tracker_status = tracker_status_for_job(tracker, job.url, job.company)
+        evidence_match = evidence.match(job.company, job.title, job.url)
         # Status precedence: exact tracker URL > explicit prior skip > company
         # tracker status > prior queue.json > default queued.
         if prior_job and prior_job.status == "skipped" and not tracker.has_applied(job.url):
             status = "skipped"
         else:
-            status = tracker_status or (prior_job.status if prior_job else "queued")
+            status = (
+                tracker_status
+                or (evidence_match.status if evidence_match else None)
+                or (prior_job.status if prior_job else "queued")
+            )
         queue.append(QueueJob(
             id=job_id,
             company=job.company,
@@ -490,18 +549,33 @@ def update_job_status(job_id: str, status: str) -> bool:
 
 
 def reconcile_queue_with_tracker() -> tuple[int, int]:
-    """Apply authoritative application tracker states to queue.json."""
+    """Apply live policy and cross-source evidence states to queue.json."""
     queue = load_queue()
     if not queue:
         return 0, 0
     tracker = get_application_tracker()
+    evidence = get_application_evidence_index(tracker)
+    if get_policy().application_evidence.fail_closed:
+        evidence.ensure_usable()
     changed = 0
     for job in queue:
+        block_reason = policy_block_reason(job.company, job.title)
+        if block_reason and job.status in {"queued", "viewing"}:
+            job.status = "skipped"
+            job.suppression_reason = block_reason
+            changed += 1
+            continue
         if job.status == "skipped" and not tracker.has_applied(job.url):
             continue
         tracker_status = tracker_status_for_job(tracker, job.url, job.company)
-        if tracker_status and job.status != tracker_status:
-            job.status = tracker_status
+        evidence_match = evidence.match(job.company, job.title, job.url)
+        evidence_status = tracker_status or (evidence_match.status if evidence_match else None)
+        if evidence_status and job.status != evidence_status:
+            job.status = evidence_status
+            job.suppression_reason = (
+                f"application evidence: {evidence_match.source}"
+                if evidence_match else "application evidence: tracker"
+            )
             changed += 1
     if changed:
         save_queue(queue)

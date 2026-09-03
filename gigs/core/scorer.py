@@ -157,9 +157,18 @@ def _phrase_in(text: str, phrase: str) -> bool:
 
 
 _REMOTE_TOKENS = ("remote", "anywhere", "distributed", "worldwide", "global")
+# Strong "you can work from anywhere" signals — not soft "remote interviews".
+_FULLY_REMOTE_RE = re.compile(
+    r"\b("
+    r"fully\s+remote|remote[- ]first|work\s+from\s+anywhere|"
+    r"remote\s+us|remote,?\s+us|us[- ]remote|remote\s+within\s+the\s+us|"
+    r"distributed\s+(?:team|company)|remote\s+worldwide"
+    r")\b",
+    re.IGNORECASE,
+)
 # A location requirement naming one of these is compatible with a US/home-metro
 # applicant ("must live in the US"); anything else ("must live in Canada")
-# means out of reach. Word-boundary so "us" matches "the US." but not "Russia".
+# means out of reach. Word-boundary so "us" matches the US but not Russia.
 _HOME_OK_RE = re.compile(
     r"\b(u\.?s\.?a?|united states|north america|remote|anywhere|worldwide|texas|tx)\b",
     re.IGNORECASE,
@@ -171,36 +180,181 @@ _RESTRICTION_RE = re.compile(
     r"must\s+(?:live|reside|be\s+located|be\s+based|work)\s+(?:in|from|near|within)?\s*([a-z .,/&'-]{2,40})",
     re.IGNORECASE,
 )
-_UNKNOWN_LOC = ("", "see post", "not specified", "n/a", "unspecified")
+_UNKNOWN_LOC = ("", "see post", "not specified", "n/a", "unspecified", "remote", "worldwide")
+
+# Non-home US metros commonly used as location pins. Matched on title +
+# location + URL only (not full description — HQ noise). An NYC/SF pin must
+# not be rescued by a soft "remote" / "distributed" mention in the body.
+_OTHER_US_METRO_RE = re.compile(
+    r"\b("
+    r"new\s*york(?:\s*city)?|\bnyc\b|brooklyn|manhattan|queens|"
+    r"san\s*francisco|sf\s*bay|bay\s*area|"
+    r"los\s*angeles|"
+    r"seattle|chicago|boston|denver|miami|atlanta|"
+    r"washington\s*d\.?c\.?|arlington,?\s*va|"
+    r"philadelphia|phoenix|portland|san\s*diego|"
+    r"jersey\s*city|hoboken"
+    r")\b",
+    re.IGNORECASE,
+)
+
+# Region locks visible in title / URL / location even when the feed hardcodes
+# "Remote". Intentionally NOT full-description: body text often names HQ
+# cities without restricting applicants. Catches shapes like
+# "Founding AI Engineer (India)", "… – Remote (UK)", slug "...-india-2896…".
+_REGION_LOCK_RES = (
+    re.compile(
+        r"\((?:india|uk|u\.k\.|emea|apac|eu|europe|canada|australia|"
+        r"germany|singapore|latam|mexico|brazil|philippines|poland|"
+        r"portugal|spain|france|netherlands)\)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:india|uk|u\.k\.|emea|apac|eu|europe|canada|australia|"
+        r"germany|singapore)[- ](?:only|based)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:only|based)\s+in\s+(?:india|the\s+uk|united\s+kingdom|"
+        r"canada|australia|germany|singapore|europe)\b",
+        re.IGNORECASE,
+    ),
+    # Title/slug trailing market pin: "… Engineer - India", "…/india", "…-india-"
+    re.compile(
+        r"(?:^|[\s/_\-–—])(?:india|uk|emea|apac)(?:$|[\s/_\-–—])",
+        re.IGNORECASE,
+    ),
+)
+
+
+def _pin_blob(gig: Gig) -> str:
+    """Title + location + URLs — where market pins usually live."""
+    return " ".join([
+        gig.title or "",
+        gig.location or "",
+        gig.url or "",
+        gig.apply_url or "",
+    ]).lower()
+
+
+def _is_home_blob(s: str, home_tags: list[str]) -> bool:
+    return any(t in s for t in home_tags)
+
+
+def _other_us_metro_pinned(gig: Gig, *, home_tags: list[str]) -> bool:
+    """True when title/location/URL pins a non-home US metro (e.g. NYC, SF)."""
+    blob = _pin_blob(gig)
+    if _is_home_blob(blob, home_tags):
+        return False
+    return bool(_OTHER_US_METRO_RE.search(blob))
+
+
+def _region_locked_away(gig: Gig, *, home_tags: list[str]) -> bool:
+    """True when title/URL/location pins the role to a non-home market.
+
+    Used only for high-precision markers (parenthetical markets, *-only /
+    *-based, slug/title market pins). Does not scan the full description.
+    """
+    blob = _pin_blob(gig)
+    if _is_home_blob(blob, home_tags):
+        return False
+    # Explicit US / home-compatible framing in the same fields wins only when
+    # there is no competing non-home metro pin (e.g. "Remote US" ok;
+    # "NYC — US" still NYC-pinned).
+    if _OTHER_US_METRO_RE.search(blob):
+        return True
+    if re.search(r"\b(u\.?s\.?a?|united states|north america|texas|tx)\b", blob):
+        return False
+    return any(rx.search(blob) for rx in _REGION_LOCK_RES)
+
+
+def _location_is_remote(loc: str) -> bool:
+    loc = (loc or "").lower().strip()
+    if not loc or loc in _UNKNOWN_LOC:
+        return False
+    if _OTHER_US_METRO_RE.search(loc):
+        return False  # "Remote - NYC" / "New York (Remote)" still metro-pinned
+    return any(t in loc for t in _REMOTE_TOKENS) or bool(_FULLY_REMOTE_RE.search(loc))
 
 
 def _geo_eligible(gig: Gig, *, home_tags: list[str], allow_remote: bool) -> bool:
-    """True when a gig is reachable for an applicant who wants home-metro or
-    remote roles only. Conservative: keeps remote/home/unknown, and only drops
-    a role on clear evidence it's tied elsewhere (an explicit 'must live in
-    <non-home>' requirement, or a specific non-home onsite location)."""
+    """True when a gig is reachable for home-metro or *fully* remote roles.
+
+    Non-home metro pins (NYC, SF, …) in title/location/URL are excluded even
+    if the description casually says "remote" or "distributed". Soft remote
+    keywords no longer rescue a city-pinned role.
+    """
     loc = (gig.location or "").lower().strip()
+    pin = _pin_blob(gig)
     text = " ".join([gig.location or "", gig.title or "", gig.description or ""]).lower()
 
-    def _is_home(s: str) -> bool:
-        return any(t in s for t in home_tags)
-
-    if _is_home(text):
+    # Home metro in title/location wins.
+    if _is_home_blob(pin, home_tags):
         return True
+
+    # Non-home US metro pin (NYC job when home is Austin) — hard no.
+    if _other_us_metro_pinned(gig, home_tags=home_tags):
+        return False
+
+    if _region_locked_away(gig, home_tags=home_tags):
+        return False
 
     # Explicit hard location requirement → judge by the region it names.
     for m in _RESTRICTION_RE.finditer(text):
         region = m.group(1)
-        if _is_home(region) or _HOME_OK_RE.search(region):
-            return True  # requirement is satisfiable (US / home / remote)
+        if _is_home_blob(region, home_tags) or _HOME_OK_RE.search(region):
+            # "must live in NYC" is not home-ok for Austin even if "remote" elsewhere
+            if _OTHER_US_METRO_RE.search(region) and not _is_home_blob(region, home_tags):
+                return False
+            return True
         return False     # requirement names somewhere else → out of reach
 
-    if allow_remote and any(t in text for t in _REMOTE_TOKENS):
-        return True
-    if loc in _UNKNOWN_LOC or any(tok in loc for tok in ("united states", "usa", "us")):
+    # Fully remote (location field or strong phrasing) — not soft body keywords.
+    if allow_remote:
+        if _location_is_remote(loc):
+            return True
+        if _FULLY_REMOTE_RE.search(text) and not _OTHER_US_METRO_RE.search(pin):
+            return True
+        # Bare location "Remote" with no metro pin
+        if loc in ("remote", "worldwide", "global", "anywhere") or loc.startswith("remote "):
+            if not _OTHER_US_METRO_RE.search(pin):
+                return True
+
+    if loc in _UNKNOWN_LOC or any(
+        re.search(rf"\b{re.escape(tok)}\b", loc) for tok in ("united states", "usa")
+    ):
         return True
     # A specific, non-home, non-remote location → onsite elsewhere.
     return False
+
+
+def _seniority_drag(title: str) -> tuple[int, str | None]:
+    """Strongest seniority penalty for this title, or (0, None).
+
+    Word-boundary checks so 'leadership' / 'seniority' don't false-trigger;
+    'sr' requires a following space/dot so it doesn't match inside words.
+    """
+    best_w = 0
+    best_label: str | None = None
+    # Ordered strongest-first so ties prefer the clearer label.
+    checks: list[tuple[str, int, re.Pattern[str]]] = [
+        ("staff", _rules.TITLE_SENIORITY_DRAG.get("staff", -18),
+         re.compile(r"\bstaff\b")),
+        ("principal", _rules.TITLE_SENIORITY_DRAG.get("principal", -16),
+         re.compile(r"\bprincipal\b")),
+        ("senior", _rules.TITLE_SENIORITY_DRAG.get("senior", -12),
+         re.compile(r"\bsenior\b")),
+        ("sr", _rules.TITLE_SENIORITY_DRAG.get("sr ", -12),
+         re.compile(r"\bsr\.?\b")),
+        ("lead", _rules.TITLE_SENIORITY_DRAG.get("lead", -10),
+         re.compile(r"\b(?:tech\s+)?lead\b")),
+    ]
+    for label, weight, rx in checks:
+        if rx.search(title):
+            if weight < best_w:
+                best_w = weight
+                best_label = label
+    return best_w, best_label
 
 
 def score_gig(gig: Gig) -> Gig:
@@ -289,9 +443,20 @@ def score_gig(gig: Gig) -> Gig:
         score += 8
         reasons.append("+8 revenue-term fit")
 
-    if any(_phrase_in(title, term) for term in _rules.STRONG_FIT_TERMS):
+    # Strong-fit bonus only when the title layer did NOT already score an
+    # engineering pattern — otherwise "AI Engineer" double-counts
+    # (+28 title + +15 strong-fit) and everything piles at 100.
+    if not title_eng_hits and any(
+        _phrase_in(title, term) for term in _rules.STRONG_FIT_TERMS
+    ):
         score += 15
         reasons.append("+15 strong-fit phrase in title")
+
+    # ----- Seniority drag (always; even with engineering rescue) -----
+    drag, drag_label = _seniority_drag(title)
+    if drag:
+        score += drag
+        reasons.append(f"{drag} seniority:{drag_label}")
 
     # ----- Generic-job-board penalty -----
     # WWR/RemoteOK/Himalayas/HN postings without a title-level engineering
@@ -305,13 +470,11 @@ def score_gig(gig: Gig) -> Gig:
         score -= 25
         reasons.append("-25 generic job-board role (no AI title signal)")
 
-    # ----- Pay -----
+    # ----- Pay (bonus only — never a hard block or score penalty) -----
+    # Unstated / low posted pay must not hide a great role. High stated pay
+    # still gets a small ranking bump; the user judges rate after triage.
     hourly_eq = _normalize_pay(gig)
-    floor_h = _pay_floor_hourly()
-    if hourly_eq and hourly_eq < floor_h:
-        score -= 25
-        reasons.append(f"-25 pay ${hourly_eq:.0f}/hr (below floor ${floor_h:.0f}/hr)")
-    elif hourly_eq >= 125:
+    if hourly_eq >= 125:
         score += 15
         reasons.append(f"+15 pay ${hourly_eq:.0f}/hr")
     elif hourly_eq >= 75:
@@ -341,10 +504,9 @@ def score_gig(gig: Gig) -> Gig:
 def _pay_parse_is_confident(gig: Gig) -> bool:
     """True when the comp came from an explicit salary range or hourly figure.
 
-    Hourly estimates only exist when the text carried a per-hour marker, and
-    a salary range needs both ends — a single-ended salary (or partial data
-    from a cross-source merge) is too weak to hard-drop a gig on. The -25
-    below-floor penalty in score_gig applies either way."""
+    Kept for crib/salary-anchor helpers and tests. Pay is not used as a hard
+    rank filter (low/unstated pay must not hide strong roles).
+    """
     if gig.pay_hourly_est:
         return True
     return bool(gig.salary_min and gig.salary_max)
@@ -360,9 +522,9 @@ def filter_and_rank(
 ) -> list[Gig]:
     """Score every gig, drop the weak ones, return top N sorted.
 
-    Below-floor pay only hard-drops a gig when the parse is confident — a
-    comp mis-parse must not silently kill a good gig (the 2026-06 "$70-$90
-    per hour read as $70K-$90K" bug). Unstated pay always passes.
+    Pay is never a hard filter: low or missing stated pay still passes so
+    great-fit roles are not hidden. High stated pay only helps as a soft
+    sort/score bonus.
 
     ``contract_first`` drops explicit W-2-only postings unless contract
     signals are also present. ``drop_rigid_schedule`` removes postings with
@@ -376,16 +538,8 @@ def filter_and_rank(
     """
     from jobpilot.core.work_style import is_schedule_rigid
 
-    floor_h = _pay_floor_hourly()
     scored = [score_gig(g) for g in gigs]
-    kept = [
-        g for g in scored
-        if g.fit_score >= min_score
-        and (
-            _normalize_pay(g) >= floor_h
-            or not _pay_parse_is_confident(g)
-        )
-    ]
+    kept = [g for g in scored if g.fit_score >= min_score]
     if contract_first:
         kept = [
             g for g in kept

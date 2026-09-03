@@ -31,6 +31,7 @@ fi
 # Launch Chrome with debugging enabled
 open -na "$CHROME_PATH" --args \
     --remote-debugging-port=$DEBUG_PORT \
+    --enable-automation \
     --user-data-dir="$DEBUG_PROFILE" \
     --no-first-run \
     --no-default-browser-check \

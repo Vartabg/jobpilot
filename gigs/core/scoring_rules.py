@@ -126,6 +126,20 @@ TITLE_NEGATIVES = {
 # Hard cap applied when a title hits TITLE_NEGATIVES with no engineering rescue.
 TITLE_NEGATIVE_CAP = 45
 
+# Seniority drag — applied EVEN when a title-engineering pattern rescues the
+# role. Without this, "Senior AI Engineer" / "Staff AI Engineer" pin the same
+# 100 ceiling as mid-level target titles (the engineering match skips the
+# TITLE_NEGATIVES cap). Phrase → weight; only the strongest match fires so
+# "Senior/Staff" doesn't stack past the intended drag.
+TITLE_SENIORITY_DRAG = {
+    "staff": -18,
+    "principal": -16,
+    "senior": -12,
+    "sr ": -12,   # "Sr AI", "Sr. " normalized via scorer word check
+    "sr.": -12,
+    "lead": -10,
+}
+
 # Full-text skill weights. Apply against title + description + tags + company
 # (lowercased). Calibrated low for words that appear in almost every modern
 # tech ad ("ai", "automation", "workflow") and high for words that genuinely
@@ -301,9 +315,9 @@ JOB_BOARD_SOURCES = {"remoteok", "wwr", "himalayas", "hn"}
 
 _OVERRIDABLE = (
     "TITLE_ENGINEERING_PATTERNS", "TITLE_TECH_BONUS", "TITLE_NEGATIVES",
-    "TITLE_NEGATIVE_CAP", "SKILL_WEIGHTS", "SKILL_WEIGHTS_CAP", "SCAM_SIGNALS",
-    "NEGATIVE_TERMS", "STRONG_FIT_TERMS", "DOMAIN_BONUS", "REVENUE_TERMS",
-    "JOB_BOARD_SOURCES",
+    "TITLE_NEGATIVE_CAP", "TITLE_SENIORITY_DRAG", "SKILL_WEIGHTS",
+    "SKILL_WEIGHTS_CAP", "SCAM_SIGNALS", "NEGATIVE_TERMS", "STRONG_FIT_TERMS",
+    "DOMAIN_BONUS", "REVENUE_TERMS", "JOB_BOARD_SOURCES",
 )
 
 

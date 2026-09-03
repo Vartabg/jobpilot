@@ -5,7 +5,6 @@ Split out of `cdp_bridge.py` to keep it under the HC-1 200-line limit.
 """
 
 from dataclasses import dataclass
-from typing import Optional
 
 from playwright.async_api import Page
 
@@ -13,11 +12,12 @@ from playwright.async_api import Page
 @dataclass
 class PageInfo:
     """Information about the current page state"""
+
     url: str
     title: str
     is_linkedin: bool
     is_job_application: bool
-    application_step: Optional[int] = None
+    application_step: int | None = None
 
 
 async def build_page_info(page: Page) -> PageInfo:
@@ -27,9 +27,7 @@ async def build_page_info(page: Page) -> PageInfo:
 
     is_linkedin = "linkedin.com" in url
     is_job_application = is_linkedin and (
-        "/jobs/view/" in url
-        or "jobs/collections" in url
-        or "/jobs/search/" in url
+        "/jobs/view/" in url or "jobs/collections" in url or "/jobs/search/" in url
     )
 
     application_step = None
@@ -38,9 +36,7 @@ async def build_page_info(page: Page) -> PageInfo:
             '[data-test-modal-id="easy-apply-modal"]'
         )
         if step_indicator:
-            progress = await page.query_selector(
-                '.jobs-easy-apply-content progress'
-            )
+            progress = await page.query_selector(".jobs-easy-apply-content progress")
             if progress:
                 value = await progress.get_attribute("value")
                 try:

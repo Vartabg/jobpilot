@@ -26,6 +26,9 @@
     "_doc_title_kill_keywords": "Title substrings that hard-gate a job to score 5 so it never ranks. Typical use: management-ladder titles you never want queued.",
     "title_kill_keywords": ["senior manager", "vice president"],
 
+    "_doc_title_allow_keywords": "Optional role-lane allowlist. When non-empty, a title must contain at least one term to enter the active queue. Leave empty for the neutral allow-all default.",
+    "title_allow_keywords": [],
+
     "_doc_moat_company_tags": "{company: industry-tag} map, assigned at scan time because JD text is not fetched. Tags listed in high_moat_industries earn full vertical-moat points (25); other tagged industries earn 15; untagged companies earn the neutral 6.",
     "moat_company_tags": {
       "example corp": "healthcare_ops"
@@ -52,6 +55,22 @@
       "blocked_locations": ["london", "europe"],
       "_doc_blocked_without_country": "Blocked unless a country term also appears in the location — e.g. 'canada' blocks 'Remote Canada' but allows 'Remote US/Canada'.",
       "blocked_without_country": ["canada"]
+    },
+
+    "transport_gate": {
+      "_doc": "Optional no-car safeguard. In transit mode, mobile_title_keywords are blocked unless the title also contains a fixed_site_title_keyword. Disabled by default.",
+      "enabled": false,
+      "mode": "transit",
+      "mobile_title_keywords": ["field service", "route technician"],
+      "fixed_site_title_keywords": ["data center", "critical environments"]
     }
+  },
+
+  "application_evidence": {
+    "_doc": "Optional read-only evidence sources checked alongside data/applications.db before jobs are shown. Relative cache paths resolve from the repo root. Set fail_closed true to stop recommendations when a configured source is missing.",
+    "employment_dir": "",
+    "gmail_cache_path": "",
+    "gmail_cache_max_age_hours": 0,
+    "fail_closed": false
   }
 }

@@ -62,3 +62,14 @@ def test_doctor_flags_missing_resume_and_bad_status(tmp_path: Path):
     assert report.status == "warn"
     assert any("Resume path not found" in item for item in report.warnings)
     assert any("Invalid application statuses" in item for item in report.warnings)
+
+
+def test_doctor_warns_about_shadow_application_database(tmp_path: Path):
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    (tmp_path / "applications.db").write_bytes(b"")
+
+    report = run_doctor(data_dir=data_dir, check_bro=False)
+
+    assert report.status == "warn"
+    assert any("shadow application database" in item.lower() for item in report.warnings)

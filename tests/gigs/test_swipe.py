@@ -20,11 +20,22 @@ def _gig(**kw):
 def test_card_has_everything_the_phone_needs():
     c = swipe.card(_gig())
     for key in ("id", "company", "role", "score", "pay", "location",
-                "offer", "subject", "draft", "apply_target", "is_mailto"):
+                "offer", "subject", "draft", "apply_target", "is_mailto", "crib"):
         assert key in c
     assert c["is_mailto"] is True
     assert c["apply_target"].startswith("mailto:jobs@acme.test?subject=")
     assert "example.com" not in c["draft"]
+    crib = c["crib"]
+    assert "salary_paste" in crib and "relocate" in crib
+    assert "identity" in crib and "ats_answers" in crib
+    assert isinstance(crib["ats_answers"], list) and crib["ats_answers"]
+
+
+def test_session_meta_has_criteria_pills():
+    meta = swipe.session_meta()
+    assert "criteria_pills" in meta
+    assert isinstance(meta["criteria_pills"], list)
+    assert meta.get("on_demand") is True
 
 
 def test_card_non_mailto_uses_apply_url():
@@ -53,6 +64,16 @@ def test_queue_endpoint_returns_cards(client):
     data = r.json()
     assert data["count"] == 2
     assert {c["company"] for c in data["cards"]} == {"Acme", "Globex"}
+    assert "meta" in data and "criteria_pills" in data["meta"]
+    assert data["cards"][0].get("crib")
+
+
+def test_meta_endpoint_no_scan(client):
+    r = client.get("/api/meta")
+    assert r.status_code == 200
+    body = r.json()
+    assert "criteria_pills" in body
+    assert "resumes" in body
 
 
 def test_decision_records_and_keeps_gig_for_undo(client):
@@ -84,6 +105,8 @@ def test_index_serves_the_mobile_page(client):
     r = client.get("/")
     assert r.status_code == 200
     assert "GigPilot" in r.text and "Get jobs" in r.text
+    assert "Crib" in r.text or "crib" in r.text
+    assert "/api/meta" in r.text
 
 
 # --- decision persistence (the showstopper: status must reach pipeline.md) ---
