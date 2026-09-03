@@ -62,6 +62,7 @@ class ApplicationLogPayload(BaseModel):
 # Dashboard
 # ---------------------------------------------------------------------------
 
+
 @app.get("/", include_in_schema=False)
 async def dashboard() -> FileResponse:
     if not DASHBOARD_PATH.exists():
@@ -111,6 +112,7 @@ async def install_page() -> HTMLResponse:
     step-by-step instructions to save the bookmark on their phone."""
     # Generate the bookmarklet URL
     import urllib.parse as _up
+
     _, js_min = _bookmarklet_js()
     href = "javascript:" + _up.quote(js_min)
 
@@ -189,6 +191,7 @@ async def install_page() -> HTMLResponse:
 # Queue
 # ---------------------------------------------------------------------------
 
+
 @app.get("/api/queue")
 async def api_queue() -> JSONResponse:
     reconcile_queue_with_tracker()
@@ -202,6 +205,7 @@ async def api_queue_refresh() -> JSONResponse:
         jobs = build_queue(limit=100)
         save_queue(jobs)
         return len(jobs)
+
     count = await asyncio.to_thread(_run)
     return JSONResponse({"ok": True, "count": count})
 
@@ -215,12 +219,14 @@ async def api_queue_reconcile() -> JSONResponse:
 @app.post("/api/queue/focus")
 async def api_queue_focus() -> JSONResponse:
     changed, total, companies = focus_queue_company_first()
-    return JSONResponse({
-        "ok": True,
-        "changed": changed,
-        "total": total,
-        "companies": companies,
-    })
+    return JSONResponse(
+        {
+            "ok": True,
+            "changed": changed,
+            "total": total,
+            "companies": companies,
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -232,11 +238,13 @@ async def api_queue_focus() -> JSONResponse:
 async def api_applications(limit: int = 40) -> JSONResponse:
     tracker = get_application_tracker()
     recent = tracker.get_recent(limit=limit)
-    return JSONResponse({
-        "stats": tracker.get_stats(),
-        "status_counts": tracker.get_status_counts(),
-        "recent": [asdict(app) for app in recent],
-    })
+    return JSONResponse(
+        {
+            "stats": tracker.get_stats(),
+            "status_counts": tracker.get_status_counts(),
+            "recent": [asdict(app) for app in recent],
+        }
+    )
 
 
 @app.post("/api/applications/log")
@@ -254,17 +262,20 @@ async def api_log_application(payload: ApplicationLogPayload) -> JSONResponse:
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     changed, total = reconcile_queue_with_tracker()
-    return JSONResponse({
-        "ok": True,
-        "application": asdict(app_row),
-        "queue_changed": changed,
-        "queue_total": total,
-    })
+    return JSONResponse(
+        {
+            "ok": True,
+            "application": asdict(app_row),
+            "queue_changed": changed,
+            "queue_total": total,
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
 # Job state
 # ---------------------------------------------------------------------------
+
 
 @app.post("/api/job/{job_id}/opened")
 async def api_opened(job_id: str) -> JSONResponse:
@@ -306,21 +317,24 @@ async def api_reset(job_id: str) -> JSONResponse:
 # Profile
 # ---------------------------------------------------------------------------
 
+
 @app.get("/api/profile")
 async def api_profile() -> JSONResponse:
     p = get_profile_store().load()
-    return JSONResponse({
-        "name": f"{p.first_name} {p.last_name}".strip(),
-        "email": p.email,
-        "phone": p.phone,
-        "city": p.city,
-        "state": p.state,
-        "current_title": p.current_title,
-        "years_experience": p.years_of_experience,
-        "linkedin": p.linkedin_url,
-        "portfolio": p.portfolio_url,
-        "resume": Path(p.resume_path).name if p.resume_path else "",
-    })
+    return JSONResponse(
+        {
+            "name": f"{p.first_name} {p.last_name}".strip(),
+            "email": p.email,
+            "phone": p.phone,
+            "city": p.city,
+            "state": p.state,
+            "current_title": p.current_title,
+            "years_experience": p.years_of_experience,
+            "linkedin": p.linkedin_url,
+            "portfolio": p.portfolio_url,
+            "resume": Path(p.resume_path).name if p.resume_path else "",
+        }
+    )
 
 
 @app.get("/api/latest-draft")
@@ -341,12 +355,15 @@ async def api_bookmarklet() -> JSONResponse:
     User saves this as a Safari bookmark, taps it on any job form to auto-fill."""
     # URL-encode for bookmark use (minify whitespace)
     import urllib.parse as _up
+
     js, js_min = _bookmarklet_js()
-    return JSONResponse({
-        "bookmarklet": "javascript:" + _up.quote(js_min),
-        "raw": js,
-        "preview": js_min[:200] + "…",
-    })
+    return JSONResponse(
+        {
+            "bookmarklet": "javascript:" + _up.quote(js_min),
+            "raw": js,
+            "preview": js_min[:200] + "…",
+        }
+    )
 
 
 # Self-contained form-fill bookmarklet. Demographic/EEO answer defaults below
@@ -407,7 +424,9 @@ BOOKMARKLET_TEMPLATE = r"""
     var l = (label || '').toLowerCase();
     if (/authorized to work|legally authorized|us citizen|u\.s\. citizen|citizenship|eligible to work/.test(l)) return 'Yes';
     if (/sponsorship|visa sponsor|require sponsorship/.test(l)) return 'No';
-    if (/willing to relocate|open to relocation|able to relocate/.test(l)) return 'Yes';
+    // Relocation generic fallback → 'No' (Austin/remote-only, pinned 2026-09-03).
+    // User-said custom_answers (valueFor) are checked BEFORE this and win.
+    if (/willing to relocate|open to relocation|able to relocate/.test(l)) return 'No';
     if (/willing to work|open to work|open to hybrid|on-site|in-office|hub location|days per week|days a week/.test(l)) return 'Yes';
     if (/family member|close personal relationship|outside business|worked for.*past|live within|conflict of interest/.test(l)) return 'No';
     /* Demographic/EEO defaults: decline-to-answer family. Per-user answers come
@@ -522,11 +541,14 @@ BOOKMARKLET_TEMPLATE = r"""
 # Network helpers
 # ---------------------------------------------------------------------------
 
+
 def get_tailscale_ip() -> str | None:
     try:
         result = subprocess.run(
             ["tailscale", "ip", "-4"],
-            capture_output=True, text=True, timeout=3,
+            capture_output=True,
+            text=True,
+            timeout=3,
         )
         ip = result.stdout.strip().split("\n")[0]
         if ip and ip.startswith("100."):
@@ -551,4 +573,5 @@ def run_server(host: str = "127.0.0.1", port: int | None = None) -> None:
     from jobpilot.core.config import DEFAULT_SERVE_PORT
 
     import uvicorn
+
     uvicorn.run(app, host=host, port=port or DEFAULT_SERVE_PORT, log_level="info")

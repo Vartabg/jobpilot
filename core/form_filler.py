@@ -82,12 +82,15 @@ class FillResult:
 # Label → profile-value mapping
 # ---------------------------------------------------------------------------
 
+
 def _field_to_value(label: str, profile: UserProfile) -> Optional[str]:
     l = label.lower()
 
     if any(k in l for k in ["first name", "firstname", "given name", "first_name"]):
         return profile.first_name
-    if any(k in l for k in ["last name", "lastname", "family name", "surname", "last_name"]):
+    if any(
+        k in l for k in ["last name", "lastname", "family name", "surname", "last_name"]
+    ):
         return profile.last_name
     if "preferred name" in l or "nickname" in l or "goes by" in l:
         return profile.first_name
@@ -117,9 +120,21 @@ def _field_to_value(label: str, profile: UserProfile) -> Optional[str]:
     if any(k in l for k in ["portfolio", "website", "personal site", "blog"]):
         return profile.portfolio_url
 
-    if any(k in l for k in ["current title", "current role", "current position", "job title", "headline"]):
+    if any(
+        k in l
+        for k in [
+            "current title",
+            "current role",
+            "current position",
+            "job title",
+            "headline",
+        ]
+    ):
         return profile.current_title
-    if any(k in l for k in ["current company", "current employer", "employer", "organization"]):
+    if any(
+        k in l
+        for k in ["current company", "current employer", "employer", "organization"]
+    ):
         return profile.current_company or "Independent"
     if "years of experience" in l or "years experience" in l:
         return str(profile.years_of_experience)
@@ -127,7 +142,12 @@ def _field_to_value(label: str, profile: UserProfile) -> Optional[str]:
         return profile.desired_salary or "Negotiable"
 
     # "How did you hear about this job?" — common required field
-    if "how did you hear" in l or "how you heard" in l or "hear about" in l or "referral source" in l:
+    if (
+        "how did you hear" in l
+        or "how you heard" in l
+        or "hear about" in l
+        or "referral source" in l
+    ):
         answers = profile.custom_answers or {}
         for q, a in answers.items():
             if "how did you hear" in q.lower() or "hear about" in q.lower():
@@ -169,32 +189,78 @@ def _demographic_value(profile: UserProfile, key: str) -> str:
 
 def _yesno_for_question(label: str, profile: UserProfile) -> Optional[str]:
     l = label.lower()
-    if any(p in l for p in [
-        "authorized to work", "legally authorized", "authorization to work",
-        "eligible to work", "work in the us", "work in the united states",
-        "us citizen", "u.s. citizen", "citizenship",
-    ]):
+    if any(
+        p in l
+        for p in [
+            "authorized to work",
+            "legally authorized",
+            "authorization to work",
+            "eligible to work",
+            "work in the us",
+            "work in the united states",
+            "us citizen",
+            "u.s. citizen",
+            "citizenship",
+        ]
+    ):
         return "Yes" if profile.authorized_to_work else "No"
-    if any(p in l for p in [
-        "sponsorship", "visa sponsorship", "require sponsorship",
-        "need sponsorship", "will you require employment",
-    ]):
+    if any(
+        p in l
+        for p in [
+            "sponsorship",
+            "visa sponsorship",
+            "require sponsorship",
+            "need sponsorship",
+            "will you require employment",
+        ]
+    ):
         return "No" if not profile.requires_sponsorship else "Yes"
-    if any(p in l for p in [
-        "willing to work", "open to work", "open to hybrid", "on-site", "in-office",
-        "hub location", "able to commute", "willing to commute",
-        "willing to relocate", "open to relocation", "able to relocate",
-        "will you relocate", "comfortable relocating",
-        "days per week in", "days a week in", "days in the office",
-        "comfortable with hybrid", "hybrid work schedule", "hybrid schedule",
-        "office presence", "onsite requirement",
-    ]):
+    # Relocation willingness — generic fill gated by the profile flag
+    # (Austin/remote-only per pinned rule). User-said answers in
+    # custom_answers are checked first (valueFor) and always win.
+    if any(
+        p in l
+        for p in [
+            "willing to relocate",
+            "open to relocation",
+            "able to relocate",
+            "will you relocate",
+            "comfortable relocating",
+        ]
+    ):
+        return "Yes" if profile.open_to_relocation else "No"
+    if any(
+        p in l
+        for p in [
+            "willing to work",
+            "open to work",
+            "open to hybrid",
+            "on-site",
+            "in-office",
+            "hub location",
+            "able to commute",
+            "willing to commute",
+            "days per week in",
+            "days a week in",
+            "days in the office",
+            "comfortable with hybrid",
+            "hybrid work schedule",
+            "hybrid schedule",
+            "office presence",
+            "onsite requirement",
+        ]
+    ):
         return "Yes"
     # Don't preemptively request relocation ASSISTANCE — skip those, user reviews
-    if any(p in l for p in [
-        "relocation assistance", "require relocation", "need relocation",
-        "relocation package",
-    ]):
+    if any(
+        p in l
+        for p in [
+            "relocation assistance",
+            "require relocation",
+            "need relocation",
+            "relocation package",
+        ]
+    ):
         return None  # user decides — better to leave blank than say Yes too early
 
     # EEOC / self-identification questions — answers come from the user's
@@ -216,13 +282,24 @@ def _yesno_for_question(label: str, profile: UserProfile) -> Optional[str]:
         return _demographic_value(profile, "disability")
 
     # Okta-style conflict-of-interest / prior-employment dropdowns — default No
-    if any(p in l for p in [
-        "family member", "close personal relationship", "relative who works",
-        "outside business activity", "outside business",
-        "worked for", "past employee of", "previous employment with",
-        "currently live within", "live within 50 miles", "live within",
-        "conflict of interest", "improperly bias",
-    ]):
+    if any(
+        p in l
+        for p in [
+            "family member",
+            "close personal relationship",
+            "relative who works",
+            "outside business activity",
+            "outside business",
+            "worked for",
+            "past employee of",
+            "previous employment with",
+            "currently live within",
+            "live within 50 miles",
+            "live within",
+            "conflict of interest",
+            "improperly bias",
+        ]
+    ):
         return "No"
 
     answers = profile.custom_answers or {}
@@ -250,7 +327,10 @@ def _radio_option_matches(candidate: str, radio_label: str, radio_value: str) ->
     needle = _normalize_option_text(candidate)
     if not needle:
         return False
-    for haystack in (_normalize_option_text(radio_label), _normalize_option_text(radio_value)):
+    for haystack in (
+        _normalize_option_text(radio_label),
+        _normalize_option_text(radio_value),
+    ):
         if not haystack:
             continue
         if needle == haystack:
@@ -272,10 +352,12 @@ def _detect_disallowed_form_location(text: str) -> Optional[str]:
 # DOM helpers
 # ---------------------------------------------------------------------------
 
+
 async def _label_text(page: Page, element: ElementHandle) -> str:
     try:
-        return await page.evaluate(
-            """el => {
+        return (
+            await page.evaluate(
+                """el => {
                 if (el.getAttribute('aria-label')) return el.getAttribute('aria-label');
                 if (el.getAttribute('aria-labelledby')) {
                     const ref = document.getElementById(el.getAttribute('aria-labelledby'));
@@ -301,8 +383,10 @@ async def _label_text(page: Page, element: ElementHandle) -> str:
                 if (prev && prev.innerText) return prev.innerText.trim();
                 return el.getAttribute('placeholder') || el.name || el.id || '';
             }""",
-            element,
-        ) or ""
+                element,
+            )
+            or ""
+        )
     except Exception:
         return ""
 
@@ -310,10 +394,10 @@ async def _label_text(page: Page, element: ElementHandle) -> str:
 async def _click_apply_button(page: Page) -> bool:
     selectors = [
         'a.postings-btn[href*="apply"]',
-        'a.posting-btn-submit',
+        "a.posting-btn-submit",
         'a[href*="/apply"]',
-        'button#apply_button',
-        'a.apply',
+        "button#apply_button",
+        "a.apply",
         'button:has-text("Apply for this job")',
         'button:has-text("Apply for this Job")',
         'button:has-text("Apply now")',
@@ -356,7 +440,10 @@ async def _click_apply_button(page: Page) -> bool:
 # Field handlers
 # ---------------------------------------------------------------------------
 
-async def _fill_text_inputs(page: Page, profile: UserProfile) -> tuple[list[str], list[str]]:
+
+async def _fill_text_inputs(
+    page: Page, profile: UserProfile
+) -> tuple[list[str], list[str]]:
     filled, skipped = [], []
     selector = (
         'input[type="text"]:not([disabled]):not([readonly]), '
@@ -364,8 +451,8 @@ async def _fill_text_inputs(page: Page, profile: UserProfile) -> tuple[list[str]
         'input[type="tel"]:not([disabled]):not([readonly]), '
         'input[type="url"]:not([disabled]):not([readonly]), '
         'input[type="number"]:not([disabled]):not([readonly]), '
-        'input:not([type]):not([disabled]):not([readonly]), '
-        'textarea:not([disabled]):not([readonly])'
+        "input:not([type]):not([disabled]):not([readonly]), "
+        "textarea:not([disabled]):not([readonly])"
     )
     inputs = await page.query_selector_all(selector)
     for el in inputs:
@@ -383,9 +470,9 @@ async def _fill_text_inputs(page: Page, profile: UserProfile) -> tuple[list[str]
 
             # Handle autocomplete fields (Location City etc.) differently
             is_autocomplete = (
-                "location" in label.lower() and "city" in label.lower()
-            ) or (await el.get_attribute("role") == "combobox") or (
-                await el.get_attribute("aria-autocomplete") in ("list", "both")
+                ("location" in label.lower() and "city" in label.lower())
+                or (await el.get_attribute("role") == "combobox")
+                or (await el.get_attribute("aria-autocomplete") in ("list", "both"))
             )
 
             value = _field_to_value(combined, profile)
@@ -504,7 +591,9 @@ async def _upload_resume(page: Page, profile: UserProfile) -> Optional[str]:
             await asyncio.sleep(1.2)  # let the UI register the file
             if await _verify_upload(page, resume.name):
                 return None
-            log.info("Upload set but filename not detected — continuing with Attach fallback")
+            log.info(
+                "Upload set but filename not detected — continuing with Attach fallback"
+            )
 
         # Attempt 2: click an "Attach" / "Upload" button to reveal a file input.
         attach_selectors = [
@@ -554,7 +643,9 @@ async def _upload_resume(page: Page, profile: UserProfile) -> Optional[str]:
 
 async def _answer_yesno_radios(page: Page, profile: UserProfile) -> list[str]:
     answered = []
-    groups = await page.query_selector_all('fieldset, div[role="radiogroup"], ul.application-question')
+    groups = await page.query_selector_all(
+        'fieldset, div[role="radiogroup"], ul.application-question'
+    )
     for group in groups:
         try:
             question = await page.evaluate(
@@ -580,7 +671,9 @@ async def _answer_yesno_radios(page: Page, profile: UserProfile) -> list[str]:
                     continue
             # Try each "||" synonym in priority order; exact/word-boundary
             # match only — "No" must not grab "None of the above".
-            candidates = [t.strip() for t in target.split("||")] if "||" in target else [target]
+            candidates = (
+                [t.strip() for t in target.split("||")] if "||" in target else [target]
+            )
             for cand in candidates:
                 match = next(
                     (
@@ -602,7 +695,9 @@ async def _answer_yesno_radios(page: Page, profile: UserProfile) -> list[str]:
     return answered
 
 
-async def _answer_all_selects(page: Page, profile: UserProfile) -> tuple[list[str], list[str]]:
+async def _answer_all_selects(
+    page: Page, profile: UserProfile
+) -> tuple[list[str], list[str]]:
     """Answer every <select> dropdown — even hidden ones (Select2 hides the native).
 
     Strategy:
@@ -616,14 +711,20 @@ async def _answer_all_selects(page: Page, profile: UserProfile) -> tuple[list[st
     for sel in selects:
         try:
             current = await sel.input_value()
-            if current and current.strip() and current.lower() not in ("", "select", "choose"):
+            if (
+                current
+                and current.strip()
+                and current.lower() not in ("", "select", "choose")
+            ):
                 continue
 
             label = await _label_text(page, sel)
             l_lower = label.lower()
 
             # Decide target value
-            target = _field_to_value(label, profile) or _yesno_for_question(label, profile)
+            target = _field_to_value(label, profile) or _yesno_for_question(
+                label, profile
+            )
             if not target:
                 skipped.append(f"[select] {label[:60]}")
                 continue
@@ -633,12 +734,16 @@ async def _answer_all_selects(page: Page, profile: UserProfile) -> tuple[list[st
                 """el => Array.from(el.options).map(o => ({ value: o.value, text: (o.text || '').trim() }))""",
                 sel,
             )
+
             # Find best match — if target contains "||" try each synonym
             def _match(opts, needle):
                 n = needle.lower()
                 # Exact text/value
                 for o in opts:
-                    if o["text"].strip().lower() == n or o["value"].strip().lower() == n:
+                    if (
+                        o["text"].strip().lower() == n
+                        or o["value"].strip().lower() == n
+                    ):
                         return o
                 # Substring
                 for o in opts:
@@ -653,7 +758,9 @@ async def _answer_all_selects(page: Page, profile: UserProfile) -> tuple[list[st
                 return None
 
             # If target has synonyms, try each until one matches
-            candidates = [t.strip() for t in target.split("||")] if "||" in target else [target]
+            candidates = (
+                [t.strip() for t in target.split("||")] if "||" in target else [target]
+            )
             match = None
             for cand in candidates:
                 match = _match(options, cand)
@@ -688,7 +795,9 @@ async def _answer_all_selects(page: Page, profile: UserProfile) -> tuple[list[st
     return filled, skipped
 
 
-async def _answer_react_dropdowns(page: Page, profile: UserProfile) -> tuple[list[str], list[str]]:
+async def _answer_react_dropdowns(
+    page: Page, profile: UserProfile
+) -> tuple[list[str], list[str]]:
     """Handle custom React-style dropdowns (role=combobox or div.select__control).
 
     These are NOT native <select> elements. Pattern:
@@ -743,14 +852,22 @@ async def _answer_react_dropdowns(page: Page, profile: UserProfile) -> tuple[lis
             if not label:
                 continue
 
-            target = _field_to_value(label, profile) or _yesno_for_question(label, profile)
+            target = _field_to_value(label, profile) or _yesno_for_question(
+                label, profile
+            )
             if not target:
                 skipped.append(f"[react-dropdown] {label[:50]}")
                 continue
 
             # Check if already filled (trigger text includes something other than "Select..." / "Choose...")
             current_text = (await trigger.inner_text()).strip().lower()
-            if current_text and current_text not in ("select...", "select", "choose...", "choose", ""):
+            if current_text and current_text not in (
+                "select...",
+                "select",
+                "choose...",
+                "choose",
+                "",
+            ):
                 if target.lower() in current_text:
                     continue  # already correct
                 # else: user had a stale value — leave alone
@@ -761,7 +878,9 @@ async def _answer_react_dropdowns(page: Page, profile: UserProfile) -> tuple[lis
 
             # Look for an option matching target. Target may contain "||"
             # synonyms — try each until one matches.
-            targets_list = [t.strip() for t in target.split("||")] if "||" in target else [target]
+            targets_list = (
+                [t.strip() for t in target.split("||")] if "||" in target else [target]
+            )
             option = await page.evaluate(
                 """targets => {
                     const norm = s => (s || '').trim().toLowerCase();
@@ -826,16 +945,30 @@ async def _check_required_acknowledgments(page: Page) -> list[str]:
                 await cb.get_attribute("aria-required") == "true"
             )
             ack_keywords = [
-                "acknowledge", "i agree", "agree to", "accept", "confirm",
-                "privacy policy", "terms", "consent to", "read and understand",
+                "acknowledge",
+                "i agree",
+                "agree to",
+                "accept",
+                "confirm",
+                "privacy policy",
+                "terms",
+                "consent to",
+                "read and understand",
             ]
             looks_like_ack = any(k in l for k in ack_keywords)
 
             # Skip marketing opt-ins unless also required
-            is_marketing = any(m in l for m in [
-                "marketing", "newsletter", "promotional", "updates about",
-                "sign me up", "notifications",
-            ])
+            is_marketing = any(
+                m in l
+                for m in [
+                    "marketing",
+                    "newsletter",
+                    "promotional",
+                    "updates about",
+                    "sign me up",
+                    "notifications",
+                ]
+            )
 
             if (required_attr or looks_like_ack) and not is_marketing:
                 try:
@@ -865,6 +998,7 @@ async def _check_required_acknowledgments(page: Page) -> list[str]:
 # Main entry point
 # ---------------------------------------------------------------------------
 
+
 async def fill_application(
     job_url: str,
     job_title: str,
@@ -879,7 +1013,10 @@ async def fill_application(
         async with async_playwright() as p:
             browser = await p.chromium.connect_over_cdp(cdp_url)
             if not browser.contexts:
-                return FillResult(success=False, error="No Chrome contexts — is Chrome open with debug port?")
+                return FillResult(
+                    success=False,
+                    error="No Chrome contexts — is Chrome open with debug port?",
+                )
             ctx = browser.contexts[0]
             page = await ctx.new_page()
 
@@ -902,7 +1039,9 @@ async def fill_application(
                     await page.evaluate("u => { window.location.href = u; }", job_url)
                     await asyncio.sleep(8)
                 except Exception as e2:
-                    return FillResult(success=False, error=f"Could not load {job_url}: {e2}")
+                    return FillResult(
+                        success=False, error=f"Could not load {job_url}: {e2}"
+                    )
 
             # Click Apply button if we're on the job-listing page instead of the apply form
             if "/apply" not in page.url:
@@ -964,11 +1103,17 @@ async def fill_application(
                     if frame == page.main_frame:
                         continue
                     url = frame.url or ""
-                    if any(k in url for k in [
-                        "greenhouse.io", "lever.co", "ashbyhq.com",
-                        "boards.greenhouse", "job-boards.greenhouse",
-                        "/embed/",
-                    ]):
+                    if any(
+                        k in url
+                        for k in [
+                            "greenhouse.io",
+                            "lever.co",
+                            "ashbyhq.com",
+                            "boards.greenhouse",
+                            "job-boards.greenhouse",
+                            "/embed/",
+                        ]
+                    ):
                         frames_to_fill.append(frame)
                         log.info("Will also fill iframe: %s", url[:80])
             except Exception as e:
@@ -983,18 +1128,24 @@ async def fill_application(
                     radio_filled = await _answer_yesno_radios(frame, profile)
                     all_filled.extend(radio_filled)
 
-                    select_filled, select_skipped = await _answer_all_selects(frame, profile)
+                    select_filled, select_skipped = await _answer_all_selects(
+                        frame, profile
+                    )
                     all_filled.extend(select_filled)
                     all_skipped.extend(select_skipped)
 
-                    react_filled, react_skipped = await _answer_react_dropdowns(frame, profile)
+                    react_filled, react_skipped = await _answer_react_dropdowns(
+                        frame, profile
+                    )
                     all_filled.extend(react_filled)
                     all_skipped.extend(react_skipped)
 
                     ack_checked = await _check_required_acknowledgments(frame)
                     all_filled.extend(ack_checked)
                 except Exception as e:
-                    log.debug("Frame fill error on %s: %s", getattr(frame, "url", "?"), e)
+                    log.debug(
+                        "Frame fill error on %s: %s", getattr(frame, "url", "?"), e
+                    )
 
             # Upload resume (try every frame's file inputs)
             uploaded = False
@@ -1005,7 +1156,9 @@ async def fill_application(
                     break
             if uploaded:
                 resume_path, source = _preferred_resume_upload(profile)
-                resume_name = resume_path.name if resume_path else Path(profile.resume_path).name
+                resume_name = (
+                    resume_path.name if resume_path else Path(profile.resume_path).name
+                )
                 suffix = " (tailored)" if source == "tailored" else ""
                 all_filled.append(f"📎 Resume: {resume_name}{suffix}")
             else:
@@ -1069,4 +1222,7 @@ async def submit_application(cdp_port: int = 9222) -> tuple[bool, str]:
     integrations cannot accidentally resurrect an auto-submit path by
     importing it.
     """
-    return False, "Auto-submit disabled: you must click the final submit button yourself."
+    return (
+        False,
+        "Auto-submit disabled: you must click the final submit button yourself.",
+    )
