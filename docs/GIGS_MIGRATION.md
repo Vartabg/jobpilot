@@ -1,5 +1,7 @@
 # Migrating from standalone GigPilot
 
+> STATUS: EXECUTED 2026-06-19 (GigPilot retired; gigs lane lives in this repo). Historical runbook — do not re-run.
+
 Runbook for cutting over from a standalone GigPilot checkout to the gigs lane inside this repo. One-time, ~10 minutes, fully reversible until step 5.
 
 This is a **document, not a script** — run each step yourself and check the result before moving on. Nothing below is executed automatically.
