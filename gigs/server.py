@@ -1,6 +1,7 @@
 """Mobile swipe server — a phone-first, on-demand job swiper.
 
-Run `jobpilot gigs swipe`; open the printed Tailscale URL on your phone. Tap
+Run `jobpilot gigs swipe --host <tailscale-ip>`; open the printed Tailscale URL
+on your phone. Tap
 "Get jobs" to scan, then swipe: right/Apply opens the prefilled email (or apply
 page) so you just hit send and logs it as sent; left/Pass logs the pass. One
 card at a time. The scan/score/geo/currency engine is shared with the
@@ -39,6 +40,12 @@ def index() -> HTMLResponse:
     return HTMLResponse(_PAGE.read_text())
 
 
+@app.get("/api/meta")
+def meta() -> JSONResponse:
+    """Lightweight criteria + resume map for the phone start screen (no scan)."""
+    return JSONResponse(swipe.session_meta())
+
+
 @app.get("/api/queue")
 def queue(refresh: int = 0) -> JSONResponse:
     """Return the swipe queue. Scans on first call (or refresh=1); the scan hits
@@ -58,7 +65,11 @@ def queue(refresh: int = 0) -> JSONResponse:
             {"cards": [], "count": 0, "error": "Scan failed — is the Mac online?"},
             status_code=503,
         )
-    return JSONResponse({"cards": [swipe.card(g) for g in snapshot], "count": len(snapshot)})
+    return JSONResponse({
+        "cards": [swipe.card(g) for g in snapshot],
+        "count": len(snapshot),
+        "meta": swipe.session_meta(),
+    })
 
 
 class Decision(BaseModel):
@@ -126,13 +137,12 @@ def _print_qr(url: str) -> None:
     print()
 
 
-def run_server(host: str = "0.0.0.0", port: int = 8799) -> None:
-    """Serve the swiper. Binds all interfaces by default so the phone can reach
-    it over Tailscale; prints the URL (and a scannable QR) to open."""
+def run_server(host: str = "127.0.0.1", port: int = 8799) -> None:
+    """Serve the swiper, defaulting to loopback for local-only access."""
     import uvicorn
 
     ts = _tailscale_ip()
-    phone_url = f"http://{ts}:{port}/" if ts else ""
+    phone_url = f"http://{ts}:{port}/" if ts and host == ts else ""
     print("\n  GigPilot Swipe — open on your phone:")
     if phone_url:
         print(f"    {phone_url}   (Tailscale — works anywhere)")

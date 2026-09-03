@@ -37,6 +37,7 @@ DEFAULTS: dict[str, Any] = {
     },
     "queue": {
         "title_kill_keywords": [],
+        "title_allow_keywords": [],
         "title_deprioritize_keywords": [],
         "title_deprioritize_penalty": 18,
         "moat_company_tags": {},
@@ -51,6 +52,18 @@ DEFAULTS: dict[str, Any] = {
             "blocked_locations": [],
             "blocked_without_country": [],
         },
+        "transport_gate": {
+            "enabled": False,
+            "mode": "",
+            "mobile_title_keywords": [],
+            "fixed_site_title_keywords": [],
+        },
+    },
+    "application_evidence": {
+        "employment_dir": "",
+        "gmail_cache_path": "",
+        "gmail_cache_max_age_hours": 0,
+        "fail_closed": False,
     },
 }
 
@@ -77,10 +90,31 @@ class LocationGate:
 
 
 @dataclass(frozen=True)
+class TransportGate:
+    """Block roles that require routine driving when transit-only mode is active."""
+
+    enabled: bool = False
+    mode: str = ""
+    mobile_title_keywords: tuple[str, ...] = ()
+    fixed_site_title_keywords: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class ApplicationEvidencePolicy:
+    """Optional external evidence sources used before jobs are recommended."""
+
+    employment_dir: str = ""
+    gmail_cache_path: str = ""
+    gmail_cache_max_age_hours: int = 0
+    fail_closed: bool = False
+
+
+@dataclass(frozen=True)
 class QueuePolicy:
     """Queue-builder policy (consumed by ``core/queue_builder.py``)."""
 
     title_kill_keywords: tuple[str, ...] = ()
+    title_allow_keywords: tuple[str, ...] = ()
     title_deprioritize_keywords: tuple[str, ...] = ()
     title_deprioritize_penalty: int = 18
     moat_company_tags: dict[str, str] = field(default_factory=dict)
@@ -88,6 +122,7 @@ class QueuePolicy:
     excluded_industries: frozenset = frozenset()
     company_hq: dict[str, str] = field(default_factory=dict)
     location_gate: LocationGate = field(default_factory=LocationGate)
+    transport_gate: TransportGate = field(default_factory=TransportGate)
 
 
 @dataclass(frozen=True)
@@ -96,6 +131,7 @@ class Policy:
 
     scoring: ScoringPolicy = field(default_factory=ScoringPolicy)
     queue: QueuePolicy = field(default_factory=QueuePolicy)
+    application_evidence: ApplicationEvidencePolicy = field(default_factory=ApplicationEvidencePolicy)
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -153,6 +189,8 @@ def policy_from_dict(data: Optional[dict[str, Any]]) -> Policy:
     scoring_raw = merged.get("scoring") or {}
     queue_raw = merged.get("queue") or {}
     gate_raw = queue_raw.get("location_gate") or {}
+    transport_raw = queue_raw.get("transport_gate") or {}
+    evidence_raw = merged.get("application_evidence") or {}
 
     scoring = ScoringPolicy(
         refused_companies=_reason_map(scoring_raw.get("refused_companies")),
@@ -167,8 +205,15 @@ def policy_from_dict(data: Optional[dict[str, Any]]) -> Policy:
         blocked_locations=_term_tuple(gate_raw.get("blocked_locations")),
         blocked_without_country=_term_tuple(gate_raw.get("blocked_without_country")),
     )
+    transport = TransportGate(
+        enabled=bool(transport_raw.get("enabled", False)),
+        mode=str(transport_raw.get("mode", "")).strip().lower(),
+        mobile_title_keywords=_term_tuple(transport_raw.get("mobile_title_keywords")),
+        fixed_site_title_keywords=_term_tuple(transport_raw.get("fixed_site_title_keywords")),
+    )
     queue = QueuePolicy(
         title_kill_keywords=_term_tuple(queue_raw.get("title_kill_keywords")),
+        title_allow_keywords=_term_tuple(queue_raw.get("title_allow_keywords")),
         title_deprioritize_keywords=_term_tuple(queue_raw.get("title_deprioritize_keywords")),
         title_deprioritize_penalty=int(queue_raw.get("title_deprioritize_penalty", 18) or 18),
         moat_company_tags=_str_map(queue_raw.get("moat_company_tags"), lower_values=True),
@@ -176,8 +221,17 @@ def policy_from_dict(data: Optional[dict[str, Any]]) -> Policy:
         excluded_industries=frozenset(_term_tuple(queue_raw.get("excluded_industries"))),
         company_hq=_str_map(queue_raw.get("company_hq")),
         location_gate=gate,
+        transport_gate=transport,
     )
-    return Policy(scoring=scoring, queue=queue)
+    evidence = ApplicationEvidencePolicy(
+        employment_dir=str(evidence_raw.get("employment_dir", "") or "").strip(),
+        gmail_cache_path=str(evidence_raw.get("gmail_cache_path", "") or "").strip(),
+        gmail_cache_max_age_hours=max(
+            0, int(evidence_raw.get("gmail_cache_max_age_hours", 0) or 0)
+        ),
+        fail_closed=bool(evidence_raw.get("fail_closed", False)),
+    )
+    return Policy(scoring=scoring, queue=queue, application_evidence=evidence)
 
 
 def load_policy(path: Optional[Path] = None) -> Policy:
