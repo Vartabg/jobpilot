@@ -3,7 +3,7 @@
 ## One command
 
 ```bash
-cd ~/AI_Workspace/projects/jobpilot
+cd ~/code/jobpilot   # canonical tree (dev moved here 2026-08; projects/jobpilot is legacy)
 ./scripts/boot.sh
 ```
 
