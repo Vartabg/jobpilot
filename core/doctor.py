@@ -63,6 +63,7 @@ def run_doctor(data_dir: Optional[Path] = None, *, check_bro: bool = True) -> Do
     }
 
     _check_profile(root, infos, warnings)
+    _check_shadow_application_db(root, warnings)
     _check_applications(root, summary, infos, warnings)
     _check_learning(root, summary, infos, warnings)
     _check_reports(root, summary, infos)
@@ -91,6 +92,17 @@ def run_doctor(data_dir: Optional[Path] = None, *, check_bro: bool = True) -> Do
         warnings=warnings,
         errors=errors,
     )
+
+
+def _check_shadow_application_db(root: Path, warnings: list[str]) -> None:
+    """Warn when a repo-root DB could be mistaken for the canonical data DB."""
+    canonical = root / "applications.db"
+    shadow = root.parent / "applications.db"
+    if shadow.exists() and shadow.resolve() != canonical.resolve():
+        warnings.append(
+            f"Shadow application database found at {shadow}; JobPilot uses {canonical}. "
+            "Move or remove the shadow file after confirming it contains no needed records."
+        )
 
 
 def _check_profile(root: Path, infos: list[str], warnings: list[str]) -> None:

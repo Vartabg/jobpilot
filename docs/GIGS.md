@@ -23,19 +23,28 @@ Current sources:
 All gigs commands live under `jobpilot gigs`:
 
 ```bash
-./jobpilot gigs scan        # show top gigs from all sources (dry run, sends nothing)
-./jobpilot gigs digest      # scan + filter + dedupe + write digest + push
+./jobpilot gigs criteria    # active job-search gate + resume map + pipeline metrics
+./jobpilot gigs hygiene     # archive stale/overflow `new` rows (also runs on Get jobs)
+./jobpilot gigs hygiene --dry-run
+./jobpilot gigs now         # ON-DEMAND pull (no phone push unless --push)
+./jobpilot gigs now --push  # same pull + ntfy to phone
+./jobpilot gigs schedule off|on|status   # kill/reinstall 8am+5pm launchd agents
+./jobpilot gigs scan        # show top gigs (dry run, sends nothing)
+./jobpilot gigs digest      # legacy path (prefer `now`); --no-push available
 ./jobpilot gigs stats       # dedupe + pipeline + health summary
 ./jobpilot gigs health      # source scrape health + last digest heartbeat
 ./jobpilot gigs feedback    # aggregate your pass reasons from the pipeline
 ./jobpilot gigs weekly-summary   # one-screen week in review
+./jobpilot gigs swipe       # phone-first swipe UI
 ```
 
-Try it manually first:
+**Default product mode is on-demand.** Scheduled 8am/5pm pushes are off
+(`gigs schedule off`). You pull when ready:
 
 ```bash
-./jobpilot gigs scan --top 10 --min-score 60
-./jobpilot gigs digest --top 12 --min-score 60
+./jobpilot gigs criteria          # see pay floor, geo, titles, resumes
+./jobpilot gigs now               # scan + rank + pipeline + crib (no buzz)
+./jobpilot gigs now --push        # when you want the phone notification
 ```
 
 ## Your profile
@@ -99,17 +108,17 @@ Each notification surfaces the direct apply target where one can be extracted (a
 
 For `mailto:` apply targets, the **Apply** button opens a prefilled subject and body. The body now includes one grounded personalization sentence generated from the posting text and your configured skill keywords, so you should not need to hand-edit a generic opener before sending. Still review for accuracy before sending.
 
-## Running it on a schedule
+## Running on a schedule (optional — off by default)
 
-Installs two macOS LaunchAgents for the logged-in user — a digest at 8am and 5pm, and a weekly summary on Sundays at 9am:
+On-demand is the default. If you want the old twice-daily phone digests back:
 
 ```bash
-./scripts/install_gigs_launchd.sh install
-./scripts/install_gigs_launchd.sh status
-./scripts/install_gigs_launchd.sh uninstall
+./jobpilot gigs schedule on      # or: ./scripts/install_gigs_launchd.sh install
+./jobpilot gigs schedule status
+./jobpilot gigs schedule off     # recommended: you pull with `gigs now`
 ```
 
-Prefer interval-based runs instead of the fixed times:
+Prefer interval-based runs instead of the fixed 8am/5pm times:
 
 ```bash
 GIGPILOT_INTERVAL_SECONDS=3600 ./scripts/install_gigs_launchd.sh install

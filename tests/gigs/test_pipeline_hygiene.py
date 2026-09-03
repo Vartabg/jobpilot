@@ -292,6 +292,62 @@ def test_split_archivable_keeps_rows_it_cannot_date() -> None:
     assert len(keep) == 2
 
 
+def test_split_archivable_respects_after_days_override() -> None:
+    old = Row(gig_id="a", status="new")
+    first_seen = {"a": _iso_days_ago(5)}
+    keep, stale = split_archivable([old], first_seen, after_days=3)
+    assert stale == [old]
+    keep2, stale2 = split_archivable([old], first_seen, after_days=10)
+    assert keep2 == [old] and stale2 == []
+
+
+def test_split_over_cap_keeps_highest_scores() -> None:
+    from jobpilot.gigs.core.pipeline import split_over_cap
+
+    rows = [
+        Row(gig_id=f"g{i}", status="new", score=score, company=f"C{i}", role="R")
+        for i, score in enumerate([40, 90, 70, 95, 50, 80])
+    ]
+    first_seen = {f"g{i}": _iso_days_ago(1) for i in range(6)}
+    keep, spill = split_over_cap(rows, first_seen, max_new=3)
+    keep_ids = {r.gig_id for r in keep if r.status == "new"}
+    assert keep_ids == {"g1", "g3", "g5"}  # scores 90, 95, 80
+    assert {r.gig_id for r in spill} == {"g0", "g2", "g4"}
+
+
+def test_archive_stale_new_end_to_end(tmp_path: Path, monkeypatch) -> None:
+    from jobpilot.gigs.core import pipeline as pipe
+    from jobpilot.gigs.core.pipeline import archive_stale_new
+
+    _point_store_at(tmp_path, monkeypatch)
+    pipe_path = tmp_path / "pipeline.md"
+    arch = tmp_path / "archive.md"
+    monkeypatch.setattr(pipe, "PIPELINE_PATH", pipe_path)
+    monkeypatch.setattr(pipe, "ARCHIVE_PATH", arch)
+    monkeypatch.setattr(pipe, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(pipe, "STATUS_SNAPSHOT_PATH", tmp_path / "snap.json")
+    monkeypatch.setattr(pipe, "HYGIENE_MARKER", tmp_path / ".hygiene")
+
+    old = Row(gig_id="old", status="new", score=50, company="Old", role="R")
+    young = Row(gig_id="young", status="new", score=90, company="Young", role="R")
+    write([old, young], pipe_path)
+    # Seed first_seen so age archive fires for old only (after store path patch)
+    store.FIRST_SEEN_PATH.parent.mkdir(parents=True, exist_ok=True)
+    store.FIRST_SEEN_PATH.write_text(json.dumps({
+        "old": _iso_days_ago(10),
+        "young": _iso_days_ago(1),
+    }))
+    # Bypass prefs so test is deterministic regardless of local preferences.json
+    monkeypatch.setattr(pipe, "archive_after_days", lambda: 7)
+    monkeypatch.setattr(pipe, "max_live_new", lambda: 30)
+    result = archive_stale_new(after_days=7, max_new=30)
+    assert result["archived_age"] == 1, result
+    assert result["refused"] is False
+    live = {r.gig_id for r in parse(pipe_path)}
+    assert live == {"young"}
+    assert "old" in arch.read_text()
+
+
 def test_append_to_archive_creates_documented_header_once(
     tmp_path: Path,
 ) -> None:
