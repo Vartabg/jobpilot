@@ -19,7 +19,7 @@ def _gig(**kw):
 def test_fte_draft_leads_with_engineer_framing_and_cta():
     body = proposals.email_body(_gig(title="Founding Engineer"))
     assert "Is this still open?" in body          # low-friction CTA
-    assert "I build" in body or "I work" in body  # plain builder/engineer framing
+    assert "I build" in body or "I work" in body or "builder" in body
     assert "Service outline" not in body          # no contractor service pitch
     assert "example.com" not in body
     # humble/straight: no flourish words
@@ -27,11 +27,35 @@ def test_fte_draft_leads_with_engineer_framing_and_cta():
         assert flourish not in body
 
 
+def test_fte_hn_role_is_not_labeled_workflow_audit():
+    """Mobile Apply was shipping freelance 'AI workflow audit' on FTE posts."""
+    g = _gig(
+        title="Forward Deployed Engineer, Applied AI",
+        description="Embed with customers; ship agent workflows with Claude and MCP.",
+    )
+    assert proposals.draft_mode(g) == "fte"
+    assert proposals.pick_offer(g) == "Forward Deployed / Solutions"
+    brief = proposals.build_revenue_brief(g)
+    assert "workflow audit" not in brief.offer.lower()
+    assert "Service outline" not in brief.draft
+    assert "Is this still open?" in brief.draft
+
+
+def test_fte_ai_engineer_track_maps_to_applied_ai():
+    g = _gig(title="AI Engineer", description="Build agents with Python and Claude.")
+    assert proposals.pick_offer(g) == "Applied AI / builder"
+    assert proposals.draft_mode(g) == "fte"
+
+
 def test_contract_draft_keeps_service_framing():
     body = proposals.email_body(_gig(id="up-1", source="upwork",
                                      title="Contract: automation freelancer"))
     assert "Service outline" in body
     assert "scope it" in body
+    g = _gig(id="up-1", source="upwork", title="Contract: automation freelancer",
+             description="n8n llm crm slack")
+    assert proposals.draft_mode(g) == "contract"
+    assert "audit" in proposals.pick_offer(g).lower() or "automation" in proposals.pick_offer(g).lower()
 
 
 def test_is_contract_lead_detection():

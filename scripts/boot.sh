@@ -68,9 +68,12 @@ else
 fi
 
 # ── Swipe server (phone-first job swiper) ────────────────────────────────────
-# Bound to all interfaces so the phone reaches it over plain WiFi (LAN IP) OR
-# Tailscale. Prefer the always-on LaunchAgent (install_swipe_launchd.sh) when
-# present; boot just restarts it so it's running the latest code.
+# Bind to the Tailscale interface when available, otherwise loopback. This
+# keeps phone access while avoiding exposure to every device on the LAN.
+SWIPE_BIND_HOST="127.0.0.1"
+if [[ -n "$TS_IP" && "$TS_IP" == 100.* ]]; then
+  SWIPE_BIND_HOST="$TS_IP"
+fi
 SWIPE_LABEL="com.vartny.jobpilot.swipe"
 if launchctl print "gui/${UID}/${SWIPE_LABEL}" >/dev/null 2>&1; then
   launchctl kickstart -k "gui/${UID}/${SWIPE_LABEL}" >/dev/null 2>&1 || true
@@ -78,8 +81,8 @@ if launchctl print "gui/${UID}/${SWIPE_LABEL}" >/dev/null 2>&1; then
 elif [[ -f "$SWIPE_PID_FILE" ]] && kill -0 "$(cat "$SWIPE_PID_FILE")" 2>/dev/null; then
   $QUIET || echo "✓ Swipe already running (pid $(cat "$SWIPE_PID_FILE"))"
 else
-  $QUIET || echo "▶ Starting swipe on 0.0.0.0:${SWIPE_PORT}  (always-on: ./scripts/install_swipe_launchd.sh)"
-  nohup jobpilot gigs swipe --host 0.0.0.0 --port "$SWIPE_PORT" >>"$SWIPE_LOG_FILE" 2>&1 &
+  $QUIET || echo "▶ Starting swipe on ${SWIPE_BIND_HOST}:${SWIPE_PORT}  (always-on: ./scripts/install_swipe_launchd.sh)"
+  nohup jobpilot gigs swipe --host "$SWIPE_BIND_HOST" --port "$SWIPE_PORT" >>"$SWIPE_LOG_FILE" 2>&1 &
   echo $! >"$SWIPE_PID_FILE"
 fi
 
@@ -99,7 +102,7 @@ fi
 if $QUIET; then
   echo "✓ JobPilot is ready"
   echo "  Dashboard: http://${HEALTH_HOST}:${SERVE_PORT}/"
-  echo "  Swipe:     http://${LAN_IP:-$HEALTH_HOST}:${SWIPE_PORT}/  (open on phone, same WiFi)"
+  echo "  Swipe:     http://${SWIPE_BIND_HOST}:${SWIPE_PORT}/  (Tailscale when available)"
   echo ""
   exit 0
 fi
@@ -116,13 +119,9 @@ fi
 if [[ -n "${TS_IP:-}" && "$HEALTH_HOST" != "$TS_IP" ]]; then
   echo "  Tailscale:  http://${TS_IP}:${SERVE_PORT}/"
 fi
-# Swipe: prefer the LAN URL (same-WiFi, most reliable), Tailscale as backup.
-SWIPE_HOST="${LAN_IP:-$HEALTH_HOST}"
-echo "  Swipe:      http://${SWIPE_HOST}:${SWIPE_PORT}/  (scan the QR below on your phone)"
-if [[ -n "${TS_IP:-}" && "$TS_IP" != "$SWIPE_HOST" ]]; then
-  echo "              http://${TS_IP}:${SWIPE_PORT}/  (backup, via Tailscale anywhere)"
-fi
-python - "$SWIPE_HOST" "$SWIPE_PORT" <<'PY' 2>/dev/null || true
+# Swipe: use the Tailscale-bound address (or loopback fallback).
+echo "  Swipe:      http://${SWIPE_BIND_HOST}:${SWIPE_PORT}/  (scan the QR below on your phone)"
+python - "$SWIPE_BIND_HOST" "$SWIPE_PORT" <<'PY' 2>/dev/null || true
 import sys
 try:
     import qrcode

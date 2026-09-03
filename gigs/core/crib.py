@@ -152,6 +152,42 @@ def _gig_section(index: int, gig: Gig) -> list[str]:
     ]
 
 
+def mobile_crib(gig: Gig) -> dict:
+    """Phone-ready crib pack for one gig (paste fields + identity).
+
+    Used by the swipe card so the mobile surface is complete without
+    opening Files / iCloud for the markdown crib sheet.
+    """
+    ident = preferences.identity()
+    ws = preferences.work_style()
+    answers = [
+        {"label": label, "value": value}
+        for label, value in _standard_answers()
+    ]
+    # Per-lead relocate overrides the generic table row for this card.
+    relocate = _relocate_answer(gig)
+    for row in answers:
+        if row["label"] == "Willing to relocate?":
+            row["value"] = relocate
+            break
+    return {
+        "salary_paste": _salary_candidate(gig),
+        "salary_anchor": _salary_note(gig),  # eyes only — never into an ATS field
+        "relocate": relocate,
+        "in_office": ws.get("in_office_default", ""),
+        "identity": {
+            "first_name": ident.get("first_name", ""),
+            "last_name": ident.get("last_name", ""),
+            "email": ident.get("email", ""),
+            "phone": ident.get("phone", ""),
+            "linkedin": ident.get("linkedin", ""),
+            "github": ident.get("github", ""),
+            "portfolio": ident.get("portfolio", ""),
+        },
+        "ats_answers": answers,
+    }
+
+
 def write_crib_sheet(gigs: list[Gig], crib_dir: Path = CRIB_DIR) -> Path:
     """Write today's form-fill crib sheet to iCloud Drive."""
     crib_dir.mkdir(parents=True, exist_ok=True)
@@ -163,6 +199,13 @@ def write_crib_sheet(gigs: list[Gig], crib_dir: Path = CRIB_DIR) -> Path:
         f"# GigPilot Crib Sheet — {today}",
         "",
         "Reference for ATS form-fill on phone. Copy values; do not auto-submit.",
+        "On-demand: run `jobpilot gigs now` when you want a fresh pack (not the old 8am push).",
+        "",
+        "## Active criteria + resumes",
+        "",
+        "```",
+        preferences.format_criteria_report(),
+        "```",
         "",
         "## Identity (top of every form)",
         "",
