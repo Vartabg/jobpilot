@@ -36,58 +36,7 @@ class CDPBridge:
     async def connect(self) -> bool:
         """Attach to existing CDP or launch detached Chrome and then attach."""
         self._playwright = await async_playwright().start()
-<<<<<<< HEAD
-
-        # --- path 1: reuse an already-running debug session ---
-        try:
-            self._browser = await self._playwright.chromium.connect_over_cdp(self.debug_url)
-            contexts = self._browser.contexts
-            if contexts:
-                self._context = contexts[0]
-                self._page = await self.get_active_page()
-                if self._page is None:
-                    self._page = await self._context.new_page()
-                log.info("Reconnected to existing session")
-                log.info("Current page: %s", self._page.url)
-                return True
-        except Exception:
-            self._browser = None  # fall through to launch
-
-        # --- path 2: launch a fresh persistent window ---
-        try:
-            _PROFILE_DIR.mkdir(parents=True, exist_ok=True)
-            launch_options = {
-                "headless": False,
-                "args": [
-                    f"--remote-debugging-port={self.debug_port}",
-                    # No --remote-allow-origins: Playwright sends no Origin header,
-                    # and the wildcard would let any website attach to the CDP socket.
-                    "--no-first-run",
-                    "--no-default-browser-check",
-                ],
-            }
-            executable = _chrome_executable()
-            if executable:
-                launch_options["executable_path"] = executable
-            self._context = await self._playwright.chromium.launch_persistent_context(
-                str(_PROFILE_DIR),
-                **launch_options,
-            )
-            # Reuse an existing LinkedIn tab or navigate the first page there
-            self._page = await self.get_active_page()
-            if self._page is None:
-                pages = self._context.pages
-                self._page = pages[0] if pages else await self._context.new_page()
-                await self._page.goto(_LINKEDIN_JOBS)
-            elif "/jobs/" not in self._page.url:
-                # get_active_page() may return feed/notifications/messaging — force to jobs
-                await self._page.goto(_LINKEDIN_JOBS)
-
-            log.info("Launched dedicated browser window")
-            log.info("Current page: %s", self._page.url)
-=======
         if await self._try_cdp_connect():
->>>>>>> origin/codex/jobpilot-cdp-runtime
             return True
 
         log.info("[CDP] No listener → launching detached Chrome on %s", self.debug_port)
@@ -192,46 +141,6 @@ class CDPBridge:
             self._page = page
         return page
 
-<<<<<<< HEAD
-        pages = self._context.pages
-        if not pages:
-            return None
-
-        def _is_injectable(url: str) -> bool:
-            return url.startswith("http://") or url.startswith("https://")
-
-        # Priority 1: LinkedIn page with Easy Apply modal open
-        for page in pages:
-            if "linkedin.com" not in page.url:
-                continue
-            try:
-                modal = await page.query_selector(
-                    '[role="dialog"][aria-label*="Easy Apply"], '
-                    '[data-test-modal-id="easy-apply-modal"], '
-                    '.jobs-easy-apply-modal'
-                )
-                if modal:
-                    if self._page != page:
-                        log.debug("Switched to tab with Easy Apply modal")
-                    self._page = page
-                    return page
-            except Exception:
-                continue
-
-        # Priority 2: Any LinkedIn page
-        for page in pages:
-            if "linkedin.com" in page.url:
-                self._page = page
-                return page
-
-        # Priority 3: first http(s) page (skip chrome:// and friends)
-        for page in pages:
-            if _is_injectable(page.url):
-                self._page = page
-                return page
-
-        return None
-
     async def neutralize_page(self, url: Optional[str] = None) -> bool:
         """Navigate a staged, submit-ready tab away from the form.
 
@@ -264,11 +173,7 @@ class CDPBridge:
             log.warning("Could not neutralize staged tab: %s", e)
             return False
 
-    async def inject_script(self, script: str) -> any:
-        """Inject and execute JavaScript in the page"""
-=======
     async def inject_script(self, script: str) -> Any:
->>>>>>> origin/codex/jobpilot-cdp-runtime
         if not self._page:
             raise RuntimeError("Not connected to browser")
         return await self._page.evaluate(script)
