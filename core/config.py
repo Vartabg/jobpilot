@@ -34,6 +34,7 @@ SYSTEM_CHROME_APP = Path("/Applications/Google Chrome.app")
 # EYE backend owns :8766 — JobPilot uses :8767 to avoid collision.
 # ---------------------------------------------------------------------------
 DEFAULT_SERVE_PORT: int = int(os.environ.get("JOBPILOT_SERVE_PORT", "8767"))
+SERVER_AUTH_TOKEN: str = os.environ.get("JOBPILOT_SERVER_TOKEN", "")
 
 # ---------------------------------------------------------------------------
 # Bro Client
