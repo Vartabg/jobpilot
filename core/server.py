@@ -27,11 +27,13 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
+from jobpilot.core.server_auth import access_url, install_authentication
 from jobpilot.core.logger import get_logger
 from jobpilot.core.profile_store import get_profile_store
 from jobpilot.core.application_tracker import get_application_tracker
 from jobpilot.core.queue_builder import (
     QUEUE_PATH,
+    QueueLoadError,
     build_queue,
     focus_queue_company_first,
     get_job,
@@ -47,6 +49,17 @@ PROJECT_ROOT = Path(__file__).parent.parent
 DASHBOARD_PATH = PROJECT_ROOT / "ui" / "dashboard.html"
 
 app = FastAPI(title="JobPilot Remote", version="0.3.0")
+install_authentication(app)
+
+
+@app.exception_handler(QueueLoadError)
+async def queue_recovery_required(request, exc):
+    return JSONResponse(
+        {"error": "Your saved queue needs recovery.",
+         "action": "Repair queue.json from a recovery copy on your Mac, then retry."},
+        status_code=503,
+    )
+
 
 
 class ApplicationLogPayload(BaseModel):
@@ -117,7 +130,7 @@ async def install_page() -> HTMLResponse:
     href = "javascript:" + _up.quote(js_min)
 
     html = f"""<!DOCTYPE html>
-<html><head>
+<html lang="en"><head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#0d1117">
@@ -140,9 +153,13 @@ async def install_page() -> HTMLResponse:
   ol li {{ margin:12px 0 12px 20px; line-height:1.5; }}
   code {{ background:#21262d; padding:2px 6px; border-radius:4px; font-family:ui-monospace,monospace; font-size:14px; }}
   .tip {{ background:#161b22; border-left:3px solid #d29922; padding:12px 14px; border-radius:6px; margin:16px 0; font-size:14px; color:#e6edf3; }}
-  a.back {{ color:#58a6ff; font-size:14px; }}
+  a {{ color:#58a6ff; }}
+  a.back {{ font-size:14px; }}
+  :focus-visible {{ outline:3px solid #58a6ff; outline-offset:3px; }}
 </style>
 </head><body>
+<a href="#instructions">Skip to instructions</a>
+<main id="instructions" tabindex="-1">
 <a href="/" class="back">← Back to JobPilot</a>
 <h1>⚡ Install the Fill Button</h1>
 
@@ -180,6 +197,7 @@ async def install_page() -> HTMLResponse:
 <p style="margin-top:24px; color:#8b949e; font-size:13px">
   <b>What it can't do:</b> Upload your resume file (iOS blocks programmatic file selection), solve CAPTCHAs (designed to require humans), answer essay questions (that's your voice — do those manually).
 </p>
+</main>
 </body></html>"""
     return HTMLResponse(
         html,
@@ -574,4 +592,6 @@ def run_server(host: str = "127.0.0.1", port: int | None = None) -> None:
 
     import uvicorn
 
-    uvicorn.run(app, host=host, port=port or DEFAULT_SERVE_PORT, log_level="info")
+    serve_port = port or DEFAULT_SERVE_PORT
+    print(f"\n  JobPilot — private access link:\n    {access_url(host, serve_port)}\n")
+    uvicorn.run(app, host=host, port=serve_port, log_level="info", access_log=False)

@@ -53,7 +53,9 @@ def client(monkeypatch, tmp_path):
                         lambda gig, action, reason="": recorded.append((gig.id, action)) or "sent")
     monkeypatch.setattr(swipe, "undo_decision", lambda gig: undone.append(gig.id))
     server._GIGS.clear()
-    c = TestClient(server.app)
+    from jobpilot.core import config
+    monkeypatch.setattr(config, "SERVER_AUTH_TOKEN", "test-only-swiper")
+    c = TestClient(server.app, headers={"X-JobPilot-Token": "test-only-swiper"})
     c._recorded, c._undone = recorded, undone
     return c
 
