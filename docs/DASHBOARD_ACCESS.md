@@ -54,8 +54,8 @@ PYTHONPATH="$(dirname "$PWD")" python -m pytest tests/ -q
 node --test tests/swipe_actions.test.cjs
 ```
 
-GitHub CI is disabled for now. Local verification remains the default; the
-saved GitHub workflow supports manual runs if it is re-enabled later.
+GitHub CI runs these checks on pushes and pull requests. The workflow also
+supports manual runs. Local verification remains available before pushing.
 
 Run `python scripts/check_ui.py --axe <axe.min.js>` locally
 against synthetic loopback servers. It fails on browser interaction errors,
