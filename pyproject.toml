@@ -33,6 +33,7 @@ dependencies = [
     "uvicorn>=0.23.0",
     "feedparser>=6.0.10",
     "qrcode>=7.4",
+    "Pillow>=10.1.0",  # PNG dashboard and sized default-font fallback
 ]
 
 [project.optional-dependencies]
