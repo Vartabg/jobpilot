@@ -54,7 +54,10 @@ PYTHONPATH="$(dirname "$PWD")" python -m pytest tests/ -q
 node --test tests/swipe_actions.test.cjs
 ```
 
-The CI workflow also runs `python scripts/check_ui.py --axe <axe.min.js>`
+GitHub CI is disabled for now. Local verification remains the default; the
+saved GitHub workflow supports manual runs if it is re-enabled later.
+
+Run `python scripts/check_ui.py --axe <axe.min.js>` locally
 against synthetic loopback servers. It fails on browser interaction errors,
 AA accessibility violations, missing landmarks, or missing audit dependencies.
 On this Mac, supply `--executable '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'`.
