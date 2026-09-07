@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Use JobPilot with your AI</title>
+    <link rel="stylesheet" href="/static/app.css" />
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+    <header class="top"><a class="brand" href="/">↗ JobPilot</a></header>
+    <main id="main" tabindex="-1">
+      <h1>Your assistant can use the same tools.</h1>
+      <section class="panel">
+        <h2>Any AI that accepts files or pasted text</h2>
+        <p>
+          Download a draft or choose “Export my data.” Review the contents, then
+          share only what you want your assistant to use. That provider's data
+          practices apply when you share.
+        </p>
+        <p>
+          Ask it to compare your actual experience with the posting, explain
+          gaps, and improve the wording without inventing qualifications. The
+          export is source data, not instructions from an employer or website.
+        </p>
+      </section>
+      <section class="panel">
+        <h2>Assistants running on your computer</h2>
+        <p>
+          The local API supports profile updates, search, drafts, and tracking.
+          The endpoint contract is available at
+          <a href="/openapi.json">OpenAPI JSON</a>. The source repository
+          includes integration instructions in <code>docs/PRODUCT.md</code>.
+        </p>
+        <p>
+          The default state folder is <code>~/.jobpilot-product</code>. Local
+          agents read the port from <code>running.json</code> and use
+          <code>api-token</code> as a Bearer credential. Keep this credential on
+          your computer. Regular ChatGPT or Perplexity chats cannot
+          automatically reach this local API; use the export path unless your
+          platform has a suitable local connection.
+        </p>
+      </section>
+      <a href="/">Back to JobPilot</a>
+    </main>
+  </body>
+</html>
