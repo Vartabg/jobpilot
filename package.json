@@ -1,0 +1,1 @@
+{"name":"jobpilot-product-checks","private":true,"type":"module","scripts":{"test:product":"node scripts/verify-product.mjs"},"devDependencies":{"@playwright/test":"1.56.0","@axe-core/playwright":"4.10.2"}}
