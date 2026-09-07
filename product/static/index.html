@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>JobPilot — Your next move</title>
+    <link rel="stylesheet" href="/static/app.css" />
+    <script type="module" src="/static/app.js"></script>
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+    <header class="top">
+      <a class="brand" href="/">↗ <strong>JobPilot</strong></a
+      ><span class="local">Free · On your computer</span
+      ><button id="export">Export my data</button
+      ><button id="quit" class="quiet">Quit</button>
+    </header>
+    <div class="shell">
+      <nav aria-label="JobPilot sections" class="nav">
+        <button data-view="jobs" aria-pressed="true">
+          Find work <span>01</span></button
+        ><button data-view="applications" aria-pressed="false">
+          Applications <span>02</span></button
+        ><button data-view="profile" aria-pressed="false">
+          Your profile <span>03</span></button
+        ><button data-view="helper" aria-pressed="false">
+          Application helper <span>04</span>
+        </button>
+        <p>A different path can still lead somewhere good.</p>
+        <a href="/static/guide.html">Using JobPilot with your AI</a>
+      </nav>
+      <main id="main" tabindex="-1">
+        <p class="eyebrow">A little less busywork.</p>
+        <h1 id="heading" tabindex="-1">Your next move.</h1>
+        <p id="intro" class="intro">
+          Find openings, prepare your application, and keep the details in one
+          place.
+        </p>
+        <p id="status" role="status" aria-live="polite" aria-atomic="true"></p>
+        <div id="copy-fallback" class="hint"></div>
+        <section id="jobs-view" aria-label="Find work">
+          <div class="toolbar">
+            <label
+              >Filter your list<input
+                id="filter"
+                type="search"
+                placeholder="Role, company or location" /></label
+            ><button id="search" class="primary">Find openings</button
+            ><button id="profile-shortcut">Edit search preferences</button>
+          </div>
+          <div id="source-status" class="sources" aria-live="polite"></div>
+          <details class="panel">
+            <summary>Add a posting from another site</summary>
+            <p>Paste its description to prepare a draft and track it here.</p>
+            <form id="manual-form" class="form-grid">
+              <label
+                >Role title<input
+                  name="title"
+                  required
+                  maxlength="200" /></label
+              ><label>Company<input name="company" maxlength="200" /></label
+              ><label class="wide"
+                >Posting link<input
+                  name="url"
+                  type="url"
+                  maxlength="2048" /></label
+              ><label class="wide"
+                >Job description<textarea
+                  name="description"
+                  required
+                  minlength="30"
+                  maxlength="100000"
+                  rows="5"
+                ></textarea></label
+              ><button class="primary">Add posting</button>
+            </form>
+          </details>
+          <div class="work-grid">
+            <section aria-label="Your job list">
+              <div class="list-heading">
+                <h2 id="list-title">Openings</h2>
+                <span id="job-count"></span>
+              </div>
+              <div id="job-list"></div>
+            </section>
+            <section
+              id="job-detail"
+              class="panel detail"
+              aria-label="Selected job"
+            >
+              <h2>Make room for your next move.</h2>
+              <p>
+                Save your profile, then search hiring boards or add a posting.
+                Choose a role to see the details.
+              </p>
+            </section>
+          </div>
+        </section>
+        <section id="profile-view" hidden aria-label="Your profile">
+          <form id="profile-form">
+            <section class="panel">
+              <h2>Your experience</h2>
+              <p>
+                Paste your existing resume or import a text-based PDF. JobPilot
+                keeps it on this computer.
+              </p>
+              <label class="file"
+                >Import resume (PDF, TXT or Markdown)<input
+                  id="resume-file"
+                  type="file"
+                  accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown" /></label
+              ><label
+                >Resume text<textarea
+                  name="resume_text"
+                  rows="9"
+                  maxlength="40000"
+                  placeholder="Paste your work history, projects and skills here."
+                ></textarea>
+              </label>
+              <div class="form-grid">
+                <label
+                  >Current headline<input
+                    name="headline"
+                    maxlength="200"
+                    placeholder="What you do, in your words" /></label
+                ><label
+                  >Skills to look for<input
+                    name="skills"
+                    placeholder="Troubleshooting, Python, customer support"
+                /></label>
+              </div>
+              <p class="hint">
+                Separate skills with commas. A matching word is a clue to
+                review, not proof you meet a qualification.
+              </p>
+            </section>
+            <section class="panel">
+              <h2>What you're looking for</h2>
+              <div class="form-grid">
+                <label
+                  >Roles or keywords<input
+                    name="keywords"
+                    placeholder="Support, technician, operations" /></label
+                ><label
+                  >Location preference<input
+                    name="location"
+                    maxlength="200"
+                    placeholder="Austin, London, or leave open"
+                /></label>
+              </div>
+              <label class="check"
+                ><input name="remote_only" type="checkbox" />Only listings
+                marked remote</label
+              >
+              <p class="hint">
+                Remote listings can still have country or time-zone
+                restrictions. Check the full posting.
+              </p>
+              <label
+                >Company hiring-board links<textarea
+                  name="boards"
+                  rows="4"
+                  placeholder="https://jobs.ashbyhq.com/notion"
+                ></textarea>
+              </label>
+              <p class="hint">
+                One Greenhouse, Lever or Ashby board link per line. Other job
+                sites work through “Add a posting.”
+              </p>
+              <button type="button" id="example-boards">
+                Use three example company boards
+              </button>
+            </section>
+            <section class="panel">
+              <h2>Details you keep typing</h2>
+              <p>Save these once for quick copy and optional basic autofill.</p>
+              <div class="form-grid">
+                <label
+                  >Full name<input
+                    name="full_name"
+                    autocomplete="name"
+                    maxlength="200" /></label
+                ><label
+                  >Email<input
+                    name="email"
+                    type="email"
+                    autocomplete="email"
+                    maxlength="200" /></label
+                ><label
+                  >First name<input
+                    name="first_name"
+                    autocomplete="given-name"
+                    maxlength="200" /></label
+                ><label
+                  >Last name<input
+                    name="last_name"
+                    autocomplete="family-name"
+                    maxlength="200" /></label
+                ><label
+                  >Phone<input
+                    name="phone"
+                    type="tel"
+                    autocomplete="tel"
+                    maxlength="200" /></label
+                ><label
+                  >City<input
+                    name="city"
+                    autocomplete="address-level2"
+                    maxlength="200" /></label
+                ><label
+                  >State or region<input
+                    name="region"
+                    autocomplete="address-level1"
+                    maxlength="200" /></label
+                ><label
+                  >Country<input
+                    name="country"
+                    autocomplete="country-name"
+                    maxlength="200" /></label
+                ><label
+                  >Postal code<input
+                    name="postal_code"
+                    autocomplete="postal-code"
+                    maxlength="200" /></label
+                ><label
+                  >LinkedIn<input
+                    name="linkedin"
+                    type="url"
+                    maxlength="200" /></label
+                ><label
+                  >Portfolio<input
+                    name="portfolio"
+                    type="url"
+                    maxlength="200" /></label
+                ><label
+                  >GitHub<input name="github" type="url" maxlength="200"
+                /></label>
+              </div>
+            </section>
+            <button class="primary save-profile">Save profile</button>
+            <p class="hint">
+              Saved locally in this app. No AI account, uploaded profile, or
+              email signup required.
+            </p>
+          </form>
+        </section>
+        <section id="helper-view" hidden aria-label="Application helper">
+          <section class="panel">
+            <p class="eyebrow">Your details, already here.</p>
+            <h2>Less typing. More attention for the real questions.</h2>
+            <p>
+              Drag the button below to your browser's bookmarks bar. When you're
+              on an application page, click that bookmark to fill empty basic
+              contact fields.
+            </p>
+            <a
+              id="fill-bookmark"
+              class="button primary"
+              draggable="true"
+              href="#"
+              >Fill basic details</a
+            >
+            <p class="hint">
+              The bookmark contains your saved contact details. Browser bookmark
+              sync may copy them to other devices. Recreate it after changing
+              your profile.
+            </p>
+            <p>
+              Review every filled value. Uploads, custom dropdowns, eligibility
+              questions, consent and submission stay with you. Some sites block
+              bookmarklets; use quick copy below.
+            </p>
+          </section>
+          <section class="panel">
+            <h2>Quick copy</h2>
+            <div id="copy-fields" class="copy-grid"></div>
+          </section>
+        </section>
+      </main>
+    </div>
+    <footer>Built by ATX BRO. A useful tool for a path of your own.</footer>
+  </body>
+</html>
