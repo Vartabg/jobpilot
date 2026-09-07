@@ -1,0 +1,22 @@
+{
+  "schema_version": "jobpilot.workshop/v1",
+  "created_at": "2026-09-07T12:00:00Z",
+  "review_status": "wording_confirmed",
+  "work": {
+    "title": "A clearer volunteer handoff",
+    "kind": "people",
+    "story": "Volunteers were missing the next step at shift changes.",
+    "contribution": "I interviewed two volunteers and wrote a one-page handoff guide.",
+    "tools": "A shared document; feedback from the coordinator.",
+    "validation": "Two volunteers tried the guide and identified one unclear instruction, which I revised.",
+    "outcome": "The coordinator adopted the revised guide. I did not measure time savings.",
+    "source_url": "https://example.org/handoff"
+  },
+  "direction": {
+    "title": "Customer support",
+    "why": "I like turning confusing processes into clear next steps.",
+    "gap": "I have not used a professional ticketing system.",
+    "constraints": "A predictable schedule matters to me.",
+    "next_step": "Compare this example with the required qualifications in three current support postings."
+  }
+}
