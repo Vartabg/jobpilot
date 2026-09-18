@@ -2,6 +2,7 @@
 data/reminder_flags.json sidecar (never the user-facing Notes cell), so each
 actively-pursued row gets exactly one Reminder. No osascript, no real
 iCloud pipeline.md."""
+
 from __future__ import annotations
 
 import json
@@ -18,15 +19,27 @@ def _sidecar(tmp_path: Path, monkeypatch) -> Path:
     return path
 
 
-def test_sync_creates_once_and_records_sidecar_flag(tmp_path: Path, monkeypatch) -> None:
+def test_sync_creates_once_and_records_sidecar_flag(
+    tmp_path: Path, monkeypatch
+) -> None:
     flags_path = _sidecar(tmp_path, monkeypatch)
     rows = [
-        Row(status="saved", score=90, company="Acme", role="X",
-            apply="mailto:jobs@acme.io", gig_id="hn-1"),
+        Row(
+            status="saved",
+            score=90,
+            company="Acme",
+            role="X",
+            apply="mailto:jobs@acme.io",
+            gig_id="hn-1",
+        ),
         Row(status="new", score=80, company="Beta", role="Y", gig_id="hn-2"),
     ]
-    with patch("jobpilot.gigs.core.away.create_reminder_for_gig", return_value=True) as create, \
-            patch.object(pipeline, "write", MagicMock()) as write:
+    with (
+        patch(
+            "jobpilot.gigs.core.away.create_reminder_for_gig", return_value=True
+        ) as create,
+        patch.object(pipeline, "write", MagicMock()) as write,
+    ):
         assert away.sync_reminders_from_pipeline(rows) == 1
         assert create.call_count == 1
 
@@ -40,7 +53,9 @@ def test_sync_creates_once_and_records_sidecar_flag(tmp_path: Path, monkeypatch)
         assert create.call_count == 1
 
 
-def test_sync_skips_non_pursued_and_already_flagged_rows(tmp_path: Path, monkeypatch) -> None:
+def test_sync_skips_non_pursued_and_already_flagged_rows(
+    tmp_path: Path, monkeypatch
+) -> None:
     flags_path = _sidecar(tmp_path, monkeypatch)
     flags_path.write_text(json.dumps({"c": "2026-06-11T07:00:00"}))
     rows = [
@@ -48,12 +63,16 @@ def test_sync_skips_non_pursued_and_already_flagged_rows(tmp_path: Path, monkeyp
         Row(status="passed", company="B", role="Y", gig_id="b"),
         Row(status="saved", company="C", role="Z", gig_id="c"),
     ]
-    with patch("jobpilot.gigs.core.away.create_reminder_for_gig", return_value=True) as create:
+    with patch(
+        "jobpilot.gigs.core.away.create_reminder_for_gig", return_value=True
+    ) as create:
         assert away.sync_reminders_from_pipeline(rows) == 0
     create.assert_not_called()
 
 
-def test_sync_does_not_flag_rows_when_creation_fails(tmp_path: Path, monkeypatch) -> None:
+def test_sync_does_not_flag_rows_when_creation_fails(
+    tmp_path: Path, monkeypatch
+) -> None:
     flags_path = _sidecar(tmp_path, monkeypatch)
     rows = [Row(status="saved", company="Acme", role="X", gig_id="hn-1")]
     with patch("jobpilot.gigs.core.away.create_reminder_for_gig", return_value=False):
@@ -66,22 +85,39 @@ def test_legacy_notes_flag_migrates_to_sidecar(tmp_path: Path, monkeypatch) -> N
     # Pre-sidecar rows carried "reminder_created" in Notes; pipeline.parse
     # strips the literal and raises legacy_reminder_flag instead.
     rows = [
-        Row(status="saved", company="Acme", role="X", gig_id="hn-1",
-            notes="pass:low-pay", legacy_reminder_flag=True),
-        Row(status="passed", company="Beta", role="Y", gig_id="hn-2",
-            legacy_reminder_flag=True),  # migrated even when not pursued
+        Row(
+            status="saved",
+            company="Acme",
+            role="X",
+            gig_id="hn-1",
+            notes="pass:low-pay",
+            legacy_reminder_flag=True,
+        ),
+        Row(
+            status="passed",
+            company="Beta",
+            role="Y",
+            gig_id="hn-2",
+            legacy_reminder_flag=True,
+        ),  # migrated even when not pursued
     ]
-    with patch("jobpilot.gigs.core.away.create_reminder_for_gig", return_value=True) as create:
+    with patch(
+        "jobpilot.gigs.core.away.create_reminder_for_gig", return_value=True
+    ) as create:
         assert away.sync_reminders_from_pipeline(rows) == 0
     create.assert_not_called()  # no duplicate for already-flagged rows
     flags = json.loads(flags_path.read_text())
     assert set(flags) == {"hn-1", "hn-2"}
 
 
-def test_rows_without_gig_id_dedupe_on_company_role(tmp_path: Path, monkeypatch) -> None:
+def test_rows_without_gig_id_dedupe_on_company_role(
+    tmp_path: Path, monkeypatch
+) -> None:
     flags_path = _sidecar(tmp_path, monkeypatch)
     rows = [Row(status="saved", company="Acme", role="X")]
-    with patch("jobpilot.gigs.core.away.create_reminder_for_gig", return_value=True) as create:
+    with patch(
+        "jobpilot.gigs.core.away.create_reminder_for_gig", return_value=True
+    ) as create:
         assert away.sync_reminders_from_pipeline(rows) == 1
         assert away.sync_reminders_from_pipeline(rows) == 0
     assert create.call_count == 1
@@ -89,7 +125,8 @@ def test_rows_without_gig_id_dedupe_on_company_role(tmp_path: Path, monkeypatch)
 
 
 def test_parse_to_sync_round_trip_strips_literal_and_stays_deduped(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path,
+    monkeypatch,
 ) -> None:
     """End-to-end migration: a pipeline.md with the legacy literal in Notes
     parses clean, the flag reaches the sidecar, the next write scrubs the
@@ -105,7 +142,9 @@ def test_parse_to_sync_round_trip_strips_literal_and_stays_deduped(
     assert rows[0].notes == "ping Sam"
     assert rows[0].legacy_reminder_flag is True
 
-    with patch("jobpilot.gigs.core.away.create_reminder_for_gig", return_value=True) as create:
+    with patch(
+        "jobpilot.gigs.core.away.create_reminder_for_gig", return_value=True
+    ) as create:
         assert away.sync_reminders_from_pipeline(rows) == 0
     create.assert_not_called()
     assert "hn-1" in json.loads(flags_path.read_text())

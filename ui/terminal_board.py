@@ -6,7 +6,7 @@ import time
 from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 from rich import box
 from rich.columns import Columns
@@ -90,7 +90,9 @@ def filter_jobs(jobs: list[QueueJob], filters: BoardFilters) -> list[QueueJob]:
 
 def _stats_panel(jobs: list[QueueJob]) -> Panel:
     counts = Counter(j.status for j in jobs)
-    loc_counts = Counter(_location_bucket(j.location) for j in jobs if j.status == "queued")
+    loc_counts = Counter(
+        _location_bucket(j.location) for j in jobs if j.status == "queued"
+    )
     lines = [
         f"[bold]Queue[/bold]  [green]{counts.get('queued', 0)}[/] ready  "
         f"[yellow]{counts.get('applied', 0)}[/] applied  "
@@ -100,7 +102,9 @@ def _stats_panel(jobs: list[QueueJob]) -> Panel:
     if loc_counts:
         loc_bits = "  ".join(f"{k}: {v}" for k, v in loc_counts.most_common(5))
         lines.append(f"[dim]Locations (queued):[/dim] {loc_bits}")
-    return Panel("\n".join(lines), title="Pipeline", border_style="blue", box=box.ROUNDED)
+    return Panel(
+        "\n".join(lines), title="Pipeline", border_style="blue", box=box.ROUNDED
+    )
 
 
 def _tracker_panel(stats: dict[str, Any]) -> Panel:
@@ -126,7 +130,7 @@ def _services_panel(*, dashboard_up: bool, chrome_up: bool, port: int) -> Panel:
     )
 
 
-def _next_up_panel(jobs: list[QueueJob]) -> Optional[Panel]:
+def _next_up_panel(jobs: list[QueueJob]) -> Panel | None:
     queued = [j for j in jobs if j.status == "queued"]
     if not queued:
         return Panel(
@@ -147,7 +151,7 @@ def _next_up_panel(jobs: list[QueueJob]) -> Optional[Panel]:
         f"[dim]{top.url}[/dim]\n"
         f"ID [bold]{top.id}[/bold]  ·  portal {top.portal}\n"
         f"{mat_line}\n"
-        f"[dim]Apply:[/dim] open URL in your browser · paste from sheet · [cyan]jobpilot log {top.company} -t \"{top.title}\" -u \"{top.url}\"[/cyan]"
+        f'[dim]Apply:[/dim] open URL in your browser · paste from sheet · [cyan]jobpilot log {top.company} -t "{top.title}" -u "{top.url}"[/cyan]'
     )
     return Panel(body, title="Next Up", border_style="green", box=box.HEAVY)
 
@@ -188,7 +192,9 @@ def _queue_table(jobs: list[QueueJob], *, title: str) -> Table:
 
 
 def _recent_table(rows: list[Any], limit: int = 6) -> Table:
-    table = Table(title=f"Recent Applications (last {limit})", box=box.SIMPLE, expand=True)
+    table = Table(
+        title=f"Recent Applications (last {limit})", box=box.SIMPLE, expand=True
+    )
     table.add_column("Date", style="dim", width=10)
     table.add_column("Company", max_width=14)
     table.add_column("Role", style="green", max_width=30)
@@ -223,7 +229,7 @@ def _filter_caption(filters: BoardFilters) -> str:
 
 def build_board_renderable(
     *,
-    filters: Optional[BoardFilters] = None,
+    filters: BoardFilters | None = None,
     serve_port: int = DEFAULT_SERVE_PORT,
 ) -> RenderableType:
     """Assemble the full terminal board as a Rich renderable."""
@@ -251,9 +257,7 @@ def build_board_renderable(
         f"[dim]{datetime.now().strftime('%A %b %d, %Y · %H:%M')}[/dim]  "
         f"[dim]filter: {_filter_caption(filters)}[/dim]",
         title="[bold cyan]JobPilot Board[/bold cyan]",
-        subtitle="[dim]Web: http://127.0.0.1:{port}/ · CLI: jobpilot board --watch[/dim]".format(
-            port=serve_port,
-        ),
+        subtitle=f"[dim]Web: http://127.0.0.1:{serve_port}/ · CLI: jobpilot board --watch[/dim]",
         border_style="cyan",
         box=box.DOUBLE,
     )
@@ -297,7 +301,7 @@ def build_board_renderable(
             "[cyan]jobpilot board --austin --watch[/cyan] · "
             "[cyan]jobpilot queue --refresh --no-open[/cyan] · "
             "[cyan]jobpilot score <jd.txt>[/cyan] · "
-            "[cyan]jobpilot answer draft <co> \"question\"[/cyan]",
+            '[cyan]jobpilot answer draft <co> "question"[/cyan]',
             border_style="dim",
             box=box.ROUNDED,
         )
@@ -308,7 +312,7 @@ def build_board_renderable(
 def render_board(
     console: Console,
     *,
-    filters: Optional[BoardFilters] = None,
+    filters: BoardFilters | None = None,
     serve_port: int = DEFAULT_SERVE_PORT,
 ) -> None:
     """Print the terminal board once."""
@@ -318,7 +322,7 @@ def render_board(
 def watch_board(
     console: Console,
     *,
-    filters: Optional[BoardFilters] = None,
+    filters: BoardFilters | None = None,
     interval: float = 5.0,
     serve_port: int = DEFAULT_SERVE_PORT,
 ) -> None:

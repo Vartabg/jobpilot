@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+from playwright.async_api import Browser, BrowserContext, Page, async_playwright
+
 from jobpilot.core.chrome_runtime import (
     CDP_READY_TIMEOUT_S,
     LINKEDIN_JOBS,
@@ -16,7 +18,6 @@ from jobpilot.core.config import CHROME_PROFILE
 from jobpilot.core.logger import get_logger
 from jobpilot.core.page_info import PageInfo, build_page_info
 from jobpilot.core.tab_selection import select_active_page
-from playwright.async_api import Browser, BrowserContext, Page, async_playwright
 
 log = get_logger(__name__)
 
@@ -141,7 +142,7 @@ class CDPBridge:
             self._page = page
         return page
 
-    async def neutralize_page(self, url: Optional[str] = None) -> bool:
+    async def neutralize_page(self, url: str | None = None) -> bool:
         """Navigate a staged, submit-ready tab away from the form.
 
         Call this whenever a fill run is declined or dry-run — a filled ATS

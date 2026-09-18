@@ -55,12 +55,16 @@ class TestExtractSkillsWordBoundaries:
         assert "Java" not in skills
 
     def test_java_and_javascript_both_present(self):
-        skills = JDParser._extract_skills("We use Java on the backend and JavaScript on the frontend.")
+        skills = JDParser._extract_skills(
+            "We use Java on the backend and JavaScript on the frontend."
+        )
         assert "Java" in skills
         assert "JavaScript" in skills
 
     def test_no_substring_match_inside_longer_word(self):
-        skills = JDParser._extract_skills("We are a Gitlab shop using Reactor patterns.")
+        skills = JDParser._extract_skills(
+            "We are a Gitlab shop using Reactor patterns."
+        )
         assert "Git" not in skills
         assert "React" not in skills
 
@@ -70,7 +74,9 @@ class TestExtractSkillsWordBoundaries:
         assert "Next.js" in skills
 
     def test_multiword_skill_matches(self):
-        skills = JDParser._extract_skills("Familiarity with GitHub Actions and Machine Learning.")
+        skills = JDParser._extract_skills(
+            "Familiarity with GitHub Actions and Machine Learning."
+        )
         assert "GitHub Actions" in skills
         assert "Machine Learning" in skills
 
@@ -83,7 +89,9 @@ class TestExtractSkillsCaseInsensitivity:
     """Matching is case-insensitive but output uses canonical casing."""
 
     def test_lowercase_input_returns_canonical_casing(self):
-        skills = JDParser._extract_skills("experience with python, docker and kubernetes")
+        skills = JDParser._extract_skills(
+            "experience with python, docker and kubernetes"
+        )
         assert "Python" in skills
         assert "Docker" in skills
         assert "Kubernetes" in skills
@@ -99,9 +107,10 @@ class TestExtractSkillsCaseInsensitivity:
 
 
 class TestExtractSkillsEmpty:
-
     def test_no_skills_in_unrelated_text(self):
-        skills = JDParser._extract_skills("We are a friendly bakery looking for a cashier.")
+        skills = JDParser._extract_skills(
+            "We are a friendly bakery looking for a cashier."
+        )
         assert skills == []
 
     def test_empty_text(self):

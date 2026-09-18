@@ -15,7 +15,6 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Optional
 
 # Support both editable installs and repo-local execution from inside this folder.
 _PROJECTS_DIR = Path(__file__).resolve().parent.parent
@@ -26,34 +25,34 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 
-from jobpilot.core.cdp_bridge import connect_to_chrome
-from jobpilot.core.profile_store import get_profile_store
-from jobpilot.core.question_matcher import get_question_matcher
+from jobpilot.core import llm_client
+from jobpilot.core.application_answerer import TRUE_ACCOUNTS_PATH, ApplicationAnswerer
 from jobpilot.core.application_tracker import get_application_tracker
 from jobpilot.core.autonomy import AutonomyMode, get_autonomy_config, set_autonomy_mode
-from jobpilot.core.logger import get_logger
+from jobpilot.core.bro_client import get_health
+from jobpilot.core.cdp_bridge import connect_to_chrome
+from jobpilot.core.doctor import run_doctor
+from jobpilot.core.engine import ApplicationEngine
 from jobpilot.core.events import (
-    EventBus,
-    INFO,
-    WARNING,
-    ERROR,
-    FIELD_FILLED,
-    FIELD_SKIPPED,
-    FIELD_EDITED,
+    APPLICATION_ABANDONED,
     APPLICATION_STARTED,
     APPLICATION_SUBMITTED,
-    APPLICATION_ABANDONED,
+    ERROR,
+    FIELD_EDITED,
+    FIELD_FILLED,
+    FIELD_SKIPPED,
+    INFO,
+    WARNING,
+    EventBus,
 )
-from jobpilot.core.engine import ApplicationEngine
-from jobpilot.core import llm_client
-from jobpilot.core.bro_client import get_health
+from jobpilot.core.interview_prep import InterviewPrepGenerator
 from jobpilot.core.jd_parser import JDParser
 from jobpilot.core.job_scorer import JobScorer
+from jobpilot.core.logger import get_logger
 from jobpilot.core.portal_scanner import PortalScanner, ScanTarget
-from jobpilot.core.doctor import run_doctor
+from jobpilot.core.profile_store import get_profile_store
+from jobpilot.core.question_matcher import get_question_matcher
 from jobpilot.core.resume_tailor import ResumeTailor
-from jobpilot.core.interview_prep import InterviewPrepGenerator
-from jobpilot.core.application_answerer import ApplicationAnswerer, TRUE_ACCOUNTS_PATH
 from jobpilot.learning.action_recorder import get_action_recorder
 
 # Named `logger`, not `log`: the `log` CLI command below would shadow it and
@@ -71,10 +70,10 @@ CLAUDE_VETTED_TARGETS_GLOB = "claude-vetted-targets-*.json"
 # Explicit override (tests patch this). When None, the newest matching report
 # in CLAUDE_VETTED_TARGETS_DIR is used. When no file exists at all, the
 # claim-lock gate is considered not configured and is skipped.
-CLAUDE_VETTED_TARGETS_PATH: Optional[Path] = None
+CLAUDE_VETTED_TARGETS_PATH: Path | None = None
 
 
-def _resolve_claim_lock_path() -> Optional[Path]:
+def _resolve_claim_lock_path() -> Path | None:
     """Return the newest claude-vetted-targets report, or None if not configured."""
     if CLAUDE_VETTED_TARGETS_PATH is not None:
         path = Path(CLAUDE_VETTED_TARGETS_PATH)
@@ -152,8 +151,8 @@ def _check_and_index_resume() -> None:
         if not resume_path:
             return
 
-        from pathlib import Path
         import sys
+        from pathlib import Path
 
         resume = Path(resume_path).expanduser()
         if not resume.exists():
@@ -245,7 +244,7 @@ def _looks_like_path(source: str) -> bool:
     return has_doc_suffix or (has_separator and is_single_token)
 
 
-def _parse_years_of_experience(raw: str) -> Optional[int]:
+def _parse_years_of_experience(raw: str) -> int | None:
     """Parse a years-of-experience answer ('5', '5 years', '12+ yrs') into an int.
 
     Returns None when no leading number can be found.
@@ -267,7 +266,7 @@ def _load_claim_targets(lock_path: Path) -> list[dict]:
     return targets if isinstance(targets, list) else []
 
 
-def _find_claim_target(job, lock_path: Path) -> Optional[dict]:
+def _find_claim_target(job, lock_path: Path) -> dict | None:
     job_company = _norm_claim_text(getattr(job, "company", ""))
     job_title = _norm_claim_text(getattr(job, "title", ""))
     job_url = _norm_claim_text(getattr(job, "url", ""))
@@ -591,7 +590,7 @@ def _render_doctor_report(report) -> None:
 async def _resume_active_page(
     port: int,
     *,
-    output: Optional[Path],
+    output: Path | None,
     use_bro: bool,
     export_html: bool,
     export_pdf: bool,
@@ -859,19 +858,19 @@ async def _start_async(port: int, watch: bool):
 
 @app.command()
 def scan(
-    greenhouse: Optional[list[str]] = typer.Option(
+    greenhouse: list[str] | None = typer.Option(
         None, "--greenhouse", help="Greenhouse board token; repeat for multiple."
     ),
-    lever: Optional[list[str]] = typer.Option(
+    lever: list[str] | None = typer.Option(
         None, "--lever", help="Lever site token; repeat for multiple."
     ),
-    ashby: Optional[list[str]] = typer.Option(
+    ashby: list[str] | None = typer.Option(
         None, "--ashby", help="Ashby org slug; repeat for multiple."
     ),
-    keyword: Optional[list[str]] = typer.Option(
+    keyword: list[str] | None = typer.Option(
         None, "--keyword", "-k", help="Keyword filter for titles or locations."
     ),
-    config: Optional[Path] = typer.Option(
+    config: Path | None = typer.Option(
         None, "--config", help="Optional JSON file of scan targets."
     ),
     limit: int = typer.Option(20, help="Maximum number of rows to show"),
@@ -941,7 +940,7 @@ def doctor(
 
 @app.command()
 def resume(
-    source: Optional[str] = typer.Argument(
+    source: str | None = typer.Argument(
         None,
         help="Job description text or a path to a JD text file. Omit to use the active LinkedIn page.",
     ),
@@ -949,7 +948,7 @@ def resume(
     active: bool = typer.Option(
         False, "--active", help="Use the active LinkedIn job tab in Chrome"
     ),
-    output: Optional[Path] = typer.Option(
+    output: Path | None = typer.Option(
         None,
         "--output",
         "-o",
@@ -1023,7 +1022,7 @@ def _render_prep_result(result, source_label: str) -> None:
 async def _prep_active_page(
     port: int,
     *,
-    output: Optional[Path],
+    output: Path | None,
     use_bro: bool,
     export_pdf: bool,
 ) -> bool:
@@ -1063,7 +1062,7 @@ async def _prep_active_page(
 
 @app.command()
 def prep(
-    source: Optional[str] = typer.Argument(
+    source: str | None = typer.Argument(
         None,
         help="Job description text or a path to a JD text file. Omit to use the active LinkedIn page.",
     ),
@@ -1071,7 +1070,7 @@ def prep(
     active: bool = typer.Option(
         False, "--active", help="Use the active LinkedIn job tab in Chrome"
     ),
-    output: Optional[Path] = typer.Option(
+    output: Path | None = typer.Option(
         None, "--output", "-o", help="Optional HTML output path for the brief"
     ),
     pdf: bool = typer.Option(
@@ -1105,7 +1104,7 @@ def prep(
 
 @app.command()
 def score(
-    source: Optional[str] = typer.Argument(
+    source: str | None = typer.Argument(
         None,
         help="Job description text or a path to a JD text file. Omit to score the active LinkedIn page.",
     ),
@@ -1180,10 +1179,8 @@ def _edit_profile(store):
 @app.command()
 def templates(
     add: bool = typer.Option(False, "--add", "-a", help="Add a new template"),
-    question: Optional[str] = typer.Option(
-        None, "--question", "-q", help="Question text"
-    ),
-    answer: Optional[str] = typer.Option(None, "--answer", help="Answer text"),
+    question: str | None = typer.Option(None, "--question", "-q", help="Question text"),
+    answer: str | None = typer.Option(None, "--answer", help="Answer text"),
 ):
     """Manage answer templates for common questions"""
     matcher = get_question_matcher()
@@ -1229,7 +1226,7 @@ def serve(
     host: str = typer.Option(
         "127.0.0.1", help="Bind address. Use a specific Tailscale IP for phone access."
     ),
-    port: Optional[int] = typer.Option(None, help="Port (default: 8767)"),
+    port: int | None = typer.Option(None, help="Port (default: 8767)"),
     allow_lan: bool = typer.Option(
         False, "--allow-lan", help="Allow a non-loopback bind address."
     ),
@@ -1307,7 +1304,7 @@ def hud(
 
 @app.command()
 def dashboard(
-    save: Optional[Path] = typer.Option(
+    save: Path | None = typer.Option(
         None, "--save", help="Write the PNG here (in addition to showing it)"
     ),
     ascii_only: bool = typer.Option(
@@ -1510,10 +1507,11 @@ def queue(
     ),
 ):
     """Scan ATS boards, score jobs, and open the apply dashboard."""
-    from jobpilot.core.queue_builder import build_queue, load_queue, save_queue
-    from jobpilot.ui.terminal_board import BoardFilters, render_board
     import subprocess
     from dataclasses import asdict
+
+    from jobpilot.core.queue_builder import build_queue, load_queue, save_queue
+    from jobpilot.ui.terminal_board import BoardFilters, render_board
 
     dashboard_path = Path(__file__).parent / "ui" / "dashboard.html"
 
@@ -1537,7 +1535,7 @@ def queue(
             f"[cyan]Loaded existing queue: {len(queued)} jobs ready to apply[/cyan]"
         )
         if not queued:
-            console.print(f"[dim]Run with --refresh to re-scan portals[/dim]")
+            console.print("[dim]Run with --refresh to re-scan portals[/dim]")
     else:
         console.print("[cyan]Scanning ATS boards (this takes ~30 seconds)...[/cyan]")
         jobs = build_queue(limit=limit)
@@ -1563,13 +1561,13 @@ def queue(
     if open_dashboard and dashboard_path.exists():
         subprocess.run(["open", str(dashboard_path)], check=False)
         console.print(
-            f"[green]✓ Web dashboard opened — or run [cyan]jobpilot board --watch[/cyan] in another tab[/green]"
+            "[green]✓ Web dashboard opened — or run [cyan]jobpilot board --watch[/cyan] in another tab[/green]"
         )
     elif not dashboard_path.exists():
         console.print(f"[yellow]Dashboard not found at {dashboard_path}[/yellow]")
 
 
-async def _neutralize_staged_tab(port: int, url: Optional[str]) -> None:
+async def _neutralize_staged_tab(port: int, url: str | None) -> None:
     """Best-effort: navigate a just-filled, un-submitted tab to about:blank.
 
     Runs after a declined submit-confirm so a live, submit-ready form is
@@ -1606,8 +1604,8 @@ def apply(
     ),
 ):
     """Auto-fill a job application. Stops before submit — you approve."""
-    from jobpilot.core.queue_builder import get_job, update_job_status
     from jobpilot.core.form_filler import fill_application
+    from jobpilot.core.queue_builder import get_job, update_job_status
 
     job = get_job(job_id)
     if not job:
@@ -1694,7 +1692,7 @@ def report(
     days: int = typer.Option(7, "--days", "-d", help="Number of days to include"),
 ):
     """Generate application analytics report"""
-    from jobpilot.core.analytics import export_csv, daily_digest
+    from jobpilot.core.analytics import daily_digest, export_csv
 
     if csv_export:
         path = export_csv(days=days)
@@ -1713,8 +1711,9 @@ def review(
     ),
 ):
     """Review templates with low approval rates"""
+    from rich.prompt import Confirm, Prompt
     from rich.table import Table
-    from rich.prompt import Prompt, Confirm
+
     from jobpilot.learning.learning_db import get_learning_db
 
     db = get_learning_db()
@@ -1780,11 +1779,11 @@ def review(
         if action == "edit":
             new_answer = Prompt.ask("  New answer", default=t["answer"])
             db.upsert_template(t["question"], new_answer)
-            console.print(f"  [green]✓ Updated[/green]")
+            console.print("  [green]✓ Updated[/green]")
         elif action == "delete":
-            if Confirm.ask(f"  Really delete?", default=False):
+            if Confirm.ask("  Really delete?", default=False):
                 db.delete_template(t["question"])
-                console.print(f"  [red]✗ Deleted[/red]")
+                console.print("  [red]✗ Deleted[/red]")
         elif action == "skip":
             break
 
@@ -1829,7 +1828,7 @@ def _answer_path(company: str, question: str) -> Path:
     return _answers_dir() / _slug(company) / f"{_slug(question)}.txt"
 
 
-def _verify_ascii(path: Path) -> Optional[str]:
+def _verify_ascii(path: Path) -> str | None:
     """Return None if file is pure ASCII; else a sample of offending chars."""
     try:
         raw = path.read_bytes()
@@ -1851,7 +1850,7 @@ def _copy_file_to_clipboard(path: Path) -> bool:
     return True
 
 
-def _resolve_answer_jd(company: str, jd: Optional[str]) -> tuple[str, str]:
+def _resolve_answer_jd(company: str, jd: str | None) -> tuple[str, str]:
     """Resolve an explicit JD source, else best matching file in data/jds."""
     if jd:
         return _load_score_source(jd)
@@ -1893,10 +1892,10 @@ def _latest_draft_title_for_company(company: str) -> str:
 def answer_save(
     company: str = typer.Argument(..., help="Company slug (e.g. 'extend')"),
     question: str = typer.Argument(..., help="Question slug (e.g. 'q1-vetnav')"),
-    from_file: Optional[Path] = typer.Option(
+    from_file: Path | None = typer.Option(
         None, "--from-file", "-f", help="Source text file (overrides --text)"
     ),
-    text: Optional[str] = typer.Option(None, "--text", "-t", help="Inline answer text"),
+    text: str | None = typer.Option(None, "--text", "-t", help="Inline answer text"),
     pbcopy: bool = typer.Option(
         True, "--pbcopy/--no-pbcopy", help="Also load to clipboard after saving"
     ),
@@ -1907,7 +1906,6 @@ def answer_save(
     that ATS forms render as AI-usage tells. Optionally pbcopies in one step.
     """
     import shutil
-    import subprocess as _sp
 
     if from_file is None and not text:
         console.print("[red]Provide --from-file <path> or --text '...'.[/red]")
@@ -1938,7 +1936,7 @@ def answer_save(
     if pbcopy:
         if _copy_file_to_clipboard(target):
             console.print(
-                f"[cyan]→ on clipboard. Cmd+V in the field, then Enter where you want paragraph breaks.[/cyan]"
+                "[cyan]→ on clipboard. Cmd+V in the field, then Enter where you want paragraph breaks.[/cyan]"
             )
         else:
             console.print(
@@ -1950,7 +1948,7 @@ def answer_save(
 def answer_draft(
     company: str = typer.Argument(..., help="Company slug/name, e.g. titan-ai"),
     question: str = typer.Argument(..., help="Exact application question text"),
-    jd: Optional[str] = typer.Option(
+    jd: str | None = typer.Option(
         None,
         "--jd",
         help="JD text or path. If omitted, JobPilot uses latest data/jds match for company.",
@@ -1960,7 +1958,7 @@ def answer_draft(
         "--title",
         help="Target role title. Defaults to latest draft title when company matches.",
     ),
-    question_slug: Optional[str] = typer.Option(
+    question_slug: str | None = typer.Option(
         None,
         "--question-slug",
         help="Filename slug to save under data/answers/<company>/",
@@ -2020,7 +2018,7 @@ def answer_draft(
     for warning in draft.warnings:
         console.print(f"[yellow]{warning}[/yellow]")
 
-    target: Optional[Path] = None
+    target: Path | None = None
     if save:
         target = _answer_path(company, question_slug or question[:72])
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -2076,7 +2074,6 @@ def answer_copy(
 ):
     """Load a saved answer onto your clipboard. `jobpilot answer copy extend q1-vetnav`."""
     import shutil
-    import subprocess as _sp
 
     target = _answer_path(company, question)
     if not target.exists():
@@ -2103,15 +2100,13 @@ def answer_copy(
     chars = len(target.read_text())
     console.print(f"[cyan]✓ on clipboard[/cyan] · {target.name} · {chars} chars")
     console.print(
-        f"[dim]Cmd+V in the field, then Enter where you want paragraph breaks.[/dim]"
+        "[dim]Cmd+V in the field, then Enter where you want paragraph breaks.[/dim]"
     )
 
 
 @answer_app.command("list")
 def answer_list(
-    company: Optional[str] = typer.Argument(
-        None, help="Optional: filter to one company"
-    ),
+    company: str | None = typer.Argument(None, help="Optional: filter to one company"),
 ):
     """List saved answers, grouped by company."""
     from rich.table import Table
@@ -2143,7 +2138,7 @@ def answer_list(
         table.add_row(r[0], r[1], str(r[2]), r[3])
     console.print(table)
     console.print(
-        f"[dim]Copy any of these with: jobpilot answer copy <company> <question>[/dim]"
+        "[dim]Copy any of these with: jobpilot answer copy <company> <question>[/dim]"
     )
 
 
@@ -2174,15 +2169,13 @@ def psyche(
     Fork it for your own preferences — JobPilot's psycho-fit dimension
     (15 of 100 total points) is driven entirely by what's in there.
     """
-    from jobpilot.core.queue_builder import (
-        _load_psyche_profile,
-        _score_psyche_fit,
-        _load_portal_notes,
-        MOAT_COMPANY_TAGS,
-        PSYCHE_PROFILE_PATH,
-    )
     from rich.panel import Panel
     from rich.table import Table
+
+    from jobpilot.core.queue_builder import (
+        PSYCHE_PROFILE_PATH,
+        _load_psyche_profile,
+    )
 
     profile = _load_psyche_profile()
     user = profile.get("user", "(unset)")
@@ -2266,7 +2259,7 @@ def log(
         "-s",
         help="applied | submitted | rejected | interview | abandoned",
     ),
-    date: Optional[str] = typer.Option(
+    date: str | None = typer.Option(
         None, "--date", "-d", help="ISO date (defaults to today)"
     ),
 ):

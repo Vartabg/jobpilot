@@ -6,8 +6,8 @@ import select
 import sys
 import termios
 import tty
+from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Iterator, Optional
 
 
 @contextmanager
@@ -28,7 +28,7 @@ def raw_stdin() -> Iterator[None]:
 _ARROW_FINALS = {"A": "up", "B": "down", "C": "right", "D": "left"}
 
 
-def _read_escape_sequence(timeout: float = 0.02) -> Optional[str]:
+def _read_escape_sequence(timeout: float = 0.02) -> str | None:
     """Parse CSI (\\e[…) or SS3 (\\eO…) arrow sequences from iTerm/macOS."""
     ready, _, _ = select.select([sys.stdin], [], [], timeout)
     if not ready:
@@ -55,7 +55,7 @@ def _read_escape_sequence(timeout: float = 0.02) -> Optional[str]:
     return "esc"
 
 
-def read_key(timeout: float = 0.12) -> Optional[str]:
+def read_key(timeout: float = 0.12) -> str | None:
     """Read one key if available within timeout seconds."""
     if not sys.stdin.isatty():
         return None

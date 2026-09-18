@@ -17,8 +17,8 @@ from jobpilot.core import cover_letter_gen
 from jobpilot.core.application_answerer import ApplicationAnswerer
 from jobpilot.core.job_scorer import JobScorer
 from jobpilot.core.llm_client import LLMUnavailable
-from jobpilot.core.question_matcher import QuestionMatcher
 from jobpilot.core.profile_store import UserProfile
+from jobpilot.core.question_matcher import QuestionMatcher
 
 LONG_REPLY = (
     "I built a small automation tool that handled the exact workflow this "
@@ -39,16 +39,20 @@ class SyntheticProfileStore:
 
 def _answerer(tmp_path: Path) -> ApplicationAnswerer:
     accounts_path = tmp_path / "true_accounts.json"
-    accounts_path.write_text(json.dumps({
-        "accounts": [
+    accounts_path.write_text(
+        json.dumps(
             {
-                "id": "clinic-scheduler",
-                "title": "Improved scheduling at a community clinic",
-                "summary": "Built a scheduling tracker that cut patient wait times.",
-                "skills": ["scheduling", "operations"],
+                "accounts": [
+                    {
+                        "id": "clinic-scheduler",
+                        "title": "Improved scheduling at a community clinic",
+                        "summary": "Built a scheduling tracker that cut patient wait times.",
+                        "skills": ["scheduling", "operations"],
+                    }
+                ]
             }
-        ]
-    }))
+        )
+    )
     return ApplicationAnswerer(
         profile_store=SyntheticProfileStore(),
         accounts_path=accounts_path,
@@ -60,9 +64,15 @@ def _answerer(tmp_path: Path) -> ApplicationAnswerer:
 # ApplicationAnswerer
 # ---------------------------------------------------------------------------
 
+
 class TestAnswererRouting:
-    @patch("jobpilot.core.application_answerer.llm_client.complete", return_value=LONG_REPLY)
-    @patch("jobpilot.core.application_answerer.llm_client.is_available", return_value=True)
+    @patch(
+        "jobpilot.core.application_answerer.llm_client.complete",
+        return_value=LONG_REPLY,
+    )
+    @patch(
+        "jobpilot.core.application_answerer.llm_client.is_available", return_value=True
+    )
     def test_ai_draft_uses_llm_client(self, _avail, mock_complete, tmp_path):
         draft = _answerer(tmp_path).draft("Why are you interested in this role?")
 
@@ -74,7 +84,9 @@ class TestAnswererRouting:
         "jobpilot.core.application_answerer.llm_client.complete",
         side_effect=LLMUnavailable("down"),
     )
-    @patch("jobpilot.core.application_answerer.llm_client.is_available", return_value=True)
+    @patch(
+        "jobpilot.core.application_answerer.llm_client.is_available", return_value=True
+    )
     def test_backend_failure_falls_back_to_accounts(self, _avail, _complete, tmp_path):
         draft = _answerer(tmp_path).draft("Why are you interested in this role?")
 
@@ -82,9 +94,13 @@ class TestAnswererRouting:
         assert draft.answer  # account-grounded fallback still drafts
         assert any("AI backend was unavailable" in w for w in draft.warnings)
 
-    @patch("jobpilot.core.application_answerer.llm_client.is_available", return_value=False)
+    @patch(
+        "jobpilot.core.application_answerer.llm_client.is_available", return_value=False
+    )
     def test_no_backend_skips_ai_entirely(self, _avail, tmp_path):
-        with patch("jobpilot.core.application_answerer.llm_client.complete") as mock_complete:
+        with patch(
+            "jobpilot.core.application_answerer.llm_client.complete"
+        ) as mock_complete:
             draft = _answerer(tmp_path).draft("Why are you interested in this role?")
 
         assert draft.source == "fallback"
@@ -94,6 +110,7 @@ class TestAnswererRouting:
 # ---------------------------------------------------------------------------
 # JobScorer
 # ---------------------------------------------------------------------------
+
 
 class TestScorerRouting:
     def _score(self):
@@ -112,7 +129,9 @@ class TestScorerRouting:
     @patch("jobpilot.core.job_scorer.llm_client.is_available", return_value=True)
     def test_ai_summary_via_llm_client_without_bro(self, _avail, mock_complete, _bro):
         result = self._score()
-        assert result.ai_summary == "Strong operations fit. Watch the clinical-domain gap."
+        assert (
+            result.ai_summary == "Strong operations fit. Watch the clinical-domain gap."
+        )
         # No Bro → no RAG context is passed to the backend.
         assert mock_complete.call_args[1]["context"] is None
 
@@ -132,16 +151,22 @@ class TestScorerRouting:
 # QuestionMatcher
 # ---------------------------------------------------------------------------
 
+
 class TestQuestionMatcherRouting:
     @patch("jobpilot.core.bro_client.is_bro_running", return_value=False)
-    @patch("jobpilot.core.llm_client.complete", return_value="Answer: I bring 7 years of operations work.")
+    @patch(
+        "jobpilot.core.llm_client.complete",
+        return_value="Answer: I bring 7 years of operations work.",
+    )
     @patch("jobpilot.core.llm_client.is_available", return_value=True)
     def test_rag_fallback_works_without_bro_using_profile_context(
         self, _avail, mock_complete, _bro, tmp_path
     ):
         matcher = QuestionMatcher(data_dir=tmp_path)
         with patch.object(
-            QuestionMatcher, "_profile_context", return_value="Current title: Operations Coordinator"
+            QuestionMatcher,
+            "_profile_context",
+            return_value="Current title: Operations Coordinator",
         ):
             result = matcher.match("What do you bring to this team?")
 

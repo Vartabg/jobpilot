@@ -51,7 +51,7 @@ def test_company_hiring_post_is_kept() -> None:
 
 def test_apply_url_prefers_jobs_inbox_mailto() -> None:
     html = (
-        'Acme AI | Staff Engineer | Remote. Email '
+        "Acme AI | Staff Engineer | Remote. Email "
         '<a href="mailto:jobs@acme.ai">jobs@acme.ai</a> with your resume. '
         'Or visit <a href="https://acme.ai">our site</a>.'
     )
@@ -76,10 +76,7 @@ def test_apply_url_falls_back_to_plaintext_jobs_inbox() -> None:
 
 def test_apply_url_falls_back_to_plaintext_ats_url() -> None:
     text = "Apply at https://jobs.lever.co/acme/abc-123 by Friday."
-    assert (
-        _extract_apply_url(text, text)
-        == "https://jobs.lever.co/acme/abc-123"
-    )
+    assert _extract_apply_url(text, text) == "https://jobs.lever.co/acme/abc-123"
 
 
 def test_apply_url_blank_when_no_signal() -> None:

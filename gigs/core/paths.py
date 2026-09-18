@@ -16,7 +16,9 @@ def pipeline_dir() -> Path:
 
 
 def digests_dir() -> Path:
-    return Path(os.environ.get("GIGPILOT_DIGESTS_DIR", icloud_root() / "Gigpilot_Digests"))
+    return Path(
+        os.environ.get("GIGPILOT_DIGESTS_DIR", icloud_root() / "Gigpilot_Digests")
+    )
 
 
 def away_dir() -> Path:

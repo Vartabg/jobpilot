@@ -13,9 +13,8 @@ import asyncio
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
-from playwright.async_api import async_playwright, Page, ElementHandle
+from playwright.async_api import ElementHandle, Page, async_playwright
 
 from jobpilot.core.logger import get_logger
 from jobpilot.core.profile_store import UserProfile
@@ -72,10 +71,10 @@ class FillResult:
     success: bool
     filled_fields: list[str] = field(default_factory=list)
     skipped_fields: list[str] = field(default_factory=list)
-    error: Optional[str] = None
+    error: str | None = None
     stopped_before_submit: bool = True
-    final_url: Optional[str] = None
-    final_title: Optional[str] = None
+    final_url: str | None = None
+    final_title: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -83,7 +82,7 @@ class FillResult:
 # ---------------------------------------------------------------------------
 
 
-def _field_to_value(label: str, profile: UserProfile) -> Optional[str]:
+def _field_to_value(label: str, profile: UserProfile) -> str | None:
     l = label.lower()
 
     if any(k in l for k in ["first name", "firstname", "given name", "first_name"]):
@@ -187,7 +186,7 @@ def _demographic_value(profile: UserProfile, key: str) -> str:
     return DECLINE_TO_SELF_IDENTIFY
 
 
-def _yesno_for_question(label: str, profile: UserProfile) -> Optional[str]:
+def _yesno_for_question(label: str, profile: UserProfile) -> str | None:
     l = label.lower()
     if any(
         p in l
@@ -340,7 +339,7 @@ def _radio_option_matches(candidate: str, radio_label: str, radio_value: str) ->
     return False
 
 
-def _detect_disallowed_form_location(text: str) -> Optional[str]:
+def _detect_disallowed_form_location(text: str) -> str | None:
     normalized = " ".join((text or "").lower().split())
     for pattern in DISALLOWED_FORM_LOCATION_PATTERNS:
         if pattern in normalized:
@@ -548,7 +547,7 @@ async def _verify_upload(page: Page, filename: str) -> bool:
         return False
 
 
-def _preferred_resume_upload(profile: UserProfile) -> tuple[Optional[Path], str]:
+def _preferred_resume_upload(profile: UserProfile) -> tuple[Path | None, str]:
     """Prefer the latest tailored resume PDF, then fall back to profile resume."""
     latest_draft = ResumeTailor.load_latest_draft_summary()
     if latest_draft:
@@ -567,7 +566,7 @@ def _preferred_resume_upload(profile: UserProfile) -> tuple[Optional[Path], str]
     return None, "missing"
 
 
-async def _upload_resume(page: Page, profile: UserProfile) -> Optional[str]:
+async def _upload_resume(page: Page, profile: UserProfile) -> str | None:
     resume, source = _preferred_resume_upload(profile)
     if resume is None:
         return f"Resume not found at {profile.resume_path}"

@@ -3,22 +3,25 @@ Engine helpers — standalone utility functions for the ApplicationEngine.
 
 Pure functions and I/O helpers that don't depend on the engine instance.
 """
+
 from __future__ import annotations
 
 import asyncio
 import json
 import random
-from pathlib import Path
-from typing import Optional
 
 from jobpilot.core.config import (
-    TYPO_CHARS, MIN_DELAY_MS, MAX_DELAY_MS, TYPO_CHANCE, SESSION_FILE,
+    MAX_DELAY_MS,
+    MIN_DELAY_MS,
+    SESSION_FILE,
+    TYPO_CHANCE,
+    TYPO_CHARS,
 )
-
 
 # ---------------------------------------------------------------------------
 # Human-like typing
 # ---------------------------------------------------------------------------
+
 
 async def _human_type(element, text: str) -> None:
     """Type text character-by-character with human-like timing.
@@ -55,16 +58,22 @@ async def _wait_for_stable(element, timeout_ms: int = 2000) -> bool:
 # Session persistence
 # ---------------------------------------------------------------------------
 
+
 def _save_session(url: str, step: int, filled_fields: list[str]) -> None:
     SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
-    SESSION_FILE.write_text(json.dumps({
-        "url": url,
-        "step": step,
-        "filled_fields": filled_fields,
-    }, indent=2))
+    SESSION_FILE.write_text(
+        json.dumps(
+            {
+                "url": url,
+                "step": step,
+                "filled_fields": filled_fields,
+            },
+            indent=2,
+        )
+    )
 
 
-def _load_session() -> Optional[dict]:
+def _load_session() -> dict | None:
     if SESSION_FILE.exists():
         try:
             return json.loads(SESSION_FILE.read_text())
@@ -82,6 +91,7 @@ def _clear_session() -> None:
 # Context builder (pure function, no side effects)
 # ---------------------------------------------------------------------------
 
+
 def _build_job_context(page_info, app_page, parsed_jd=None) -> str:
     """Build rich context string for AI based on current application state."""
     parts = ["User is on LinkedIn."]
@@ -89,27 +99,18 @@ def _build_job_context(page_info, app_page, parsed_jd=None) -> str:
     if parsed_jd:
         parts.append(parsed_jd.summary(300))
     elif page_info and page_info.title:
-        job_title = (
-            page_info.title.replace("Easy Apply", "")
-            .replace("|", "-")
-            .strip()
-        )
+        job_title = page_info.title.replace("Easy Apply", "").replace("|", "-").strip()
         parts.append(f"Job: {job_title}")
 
     if page_info and page_info.is_job_application:
         parts.append("They are in an Easy Apply form.")
         if app_page:
-            parts.append(
-                f"Step {app_page.current_step}/{app_page.total_steps}"
-            )
+            parts.append(f"Step {app_page.current_step}/{app_page.total_steps}")
             if app_page.fields:
                 unfilled = [f for f in app_page.fields if not f.current_value]
                 filled = [f for f in app_page.fields if f.current_value]
                 if unfilled:
-                    names = [
-                        f.label or f.semantic_type.value
-                        for f in unfilled[:3]
-                    ]
+                    names = [f.label or f.semantic_type.value for f in unfilled[:3]]
                     parts.append(f"Unfilled: {', '.join(names)}")
                 if filled:
                     parts.append(f"{len(filled)} fields already filled.")

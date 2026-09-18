@@ -8,16 +8,15 @@ Three modes from conservative to aggressive:
 """
 
 import json
+from dataclasses import dataclass
 from enum import Enum
-from pathlib import Path
-from typing import Optional
-from dataclasses import dataclass, asdict
 
 from jobpilot.core.config import DATA_DIR, SETTINGS_FILE
 
 
 class AutonomyMode(str, Enum):
     """Graduated autonomy levels."""
+
     SUGGEST = "suggest"
     SEMI_AUTO = "semi-auto"
     FULL_AUTO = "full-auto"
@@ -26,10 +25,11 @@ class AutonomyMode(str, Enum):
 @dataclass
 class AutonomyConfig:
     """Runtime configuration for autonomy behavior."""
+
     mode: AutonomyMode = AutonomyMode.SEMI_AUTO
-    auto_fill_threshold: float = 0.85      # Minimum confidence to auto-fill
-    auto_advance_delay_ms: int = 1500      # Delay before clicking Next (ms)
-    never_auto_submit: bool = True         # Safety: never auto-submit final step
+    auto_fill_threshold: float = 0.85  # Minimum confidence to auto-fill
+    auto_advance_delay_ms: int = 1500  # Delay before clicking Next (ms)
+    never_auto_submit: bool = True  # Safety: never auto-submit final step
 
     def should_auto_fill(self, confidence: float) -> bool:
         """Should this field be auto-filled based on confidence?"""
@@ -79,7 +79,7 @@ class AutonomyConfig:
 # ---------------------------------------------------------------------------
 # Global access
 # ---------------------------------------------------------------------------
-_config: Optional[AutonomyConfig] = None
+_config: AutonomyConfig | None = None
 
 
 def get_autonomy_config() -> AutonomyConfig:

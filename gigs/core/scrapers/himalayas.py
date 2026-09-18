@@ -18,7 +18,7 @@ log = get_logger(__name__)
 HIMALAYAS_FEED = "https://himalayas.app/jobs/rss"
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) "
-                  "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
     "Accept": "application/rss+xml, application/xml",
 }
 
@@ -34,9 +34,19 @@ def _id_from_url(url: str) -> str:
 
 # Acronyms / tech tokens that stay uppercase when title-casing a slug.
 # Legal suffixes (inc, llc) get normal Capitalize — "INC" looks wrong.
-_SLUG_UPPER = frozenset({
-    "ai", "io", "ml", "api", "usa", "uk", "us", "eu", "hq",
-})
+_SLUG_UPPER = frozenset(
+    {
+        "ai",
+        "io",
+        "ml",
+        "api",
+        "usa",
+        "uk",
+        "us",
+        "eu",
+        "hq",
+    }
+)
 
 
 def company_from_url(url: str) -> str:
@@ -118,21 +128,23 @@ def scrape_himalayas() -> list[Gig]:
         if not company:
             company = company_from_url(link)
 
-        gigs.append(Gig(
-            id=_id_from_url(link),
-            source="himalayas",
-            title=pos_title,
-            company=company,
-            url=link,
-            description=desc[:800],
-            location=_location_hint(pos_title, desc, link),
-            posted_at=entry.get("published", ""),
-            salary_min=sal_min,
-            salary_max=sal_max,
-            pay_hourly_est=hourly,
-            currency=currency,
-            tags=[],
-        ))
+        gigs.append(
+            Gig(
+                id=_id_from_url(link),
+                source="himalayas",
+                title=pos_title,
+                company=company,
+                url=link,
+                description=desc[:800],
+                location=_location_hint(pos_title, desc, link),
+                posted_at=entry.get("published", ""),
+                salary_min=sal_min,
+                salary_max=sal_max,
+                pay_hourly_est=hourly,
+                currency=currency,
+                tags=[],
+            )
+        )
 
     log.info("Himalayas: %d jobs", len(gigs))
     return gigs

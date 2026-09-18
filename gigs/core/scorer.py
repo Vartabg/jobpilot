@@ -33,11 +33,11 @@ from __future__ import annotations
 
 import re
 
-from jobpilot.gigs.core import preferences
-from jobpilot.gigs.core.models import Gig
 from jobpilot.core.relocation_signals import detect_relocation_offer
 from jobpilot.core.work_style import is_contract_friendly, is_w2_only, score_work_style
+from jobpilot.gigs.core import preferences
 from jobpilot.gigs.core import scoring_rules as _rules
+from jobpilot.gigs.core.models import Gig
 
 
 def _pay_floor_hourly() -> float:
@@ -50,8 +50,13 @@ def _pay_floor_hourly() -> float:
 # Static USD conversion (no network). Rough mid-rates — enough to keep a
 # sub-floor foreign salary (e.g. CAD 125K ≈ USD 91K) from passing the USD floor.
 _USD_PER = {
-    "USD": 1.0, "CAD": 0.73, "AUD": 0.66, "NZD": 0.61,
-    "EUR": 1.08, "GBP": 1.27, "SGD": 0.74,
+    "USD": 1.0,
+    "CAD": 0.73,
+    "AUD": 0.66,
+    "NZD": 0.61,
+    "EUR": 1.08,
+    "GBP": 1.27,
+    "SGD": 0.74,
 }
 
 
@@ -79,12 +84,14 @@ def _posted_age_days(posted_at: str) -> int | None:
     if not posted_at:
         return None
     from datetime import datetime
+
     dt = None
     try:
         dt = datetime.fromisoformat(posted_at.replace("Z", "+00:00"))
     except ValueError:
         try:
             from email.utils import parsedate_to_datetime
+
             dt = parsedate_to_datetime(posted_at)
         except (TypeError, ValueError):
             dt = None
@@ -129,11 +136,19 @@ def apply_friction(gig: Gig) -> int:
     apply = (gig.apply_url or gig.url or "").lower()
     if apply.startswith("mailto:"):
         return 1  # composer opens prefilled, attach resume, send
-    if "boards.greenhouse.io" in apply or "jobs.lever.co" in apply or "ashbyhq.com" in apply:
+    if (
+        "boards.greenhouse.io" in apply
+        or "jobs.lever.co" in apply
+        or "ashbyhq.com" in apply
+    ):
         return 3  # ATS form: autofill + upload + screening Qs + CAPTCHA
     if "google.com/search" in apply:
         return 5  # Google search → find result → land on careers → form
-    if "weworkremotely.com" in apply or "himalayas.app" in apply or "himalayas.co" in apply:
+    if (
+        "weworkremotely.com" in apply
+        or "himalayas.app" in apply
+        or "himalayas.co" in apply
+    ):
         return 6  # paywalled / aggregator detail page
     if "remoteok.com" in apply or "remoteok.io" in apply:
         return 5  # aggregator → off-site apply
@@ -181,7 +196,15 @@ _RESTRICTION_RE = re.compile(
     r"must\s+(?:live|reside|be\s+located|be\s+based|work)\s+(?:in|from|near|within)?\s*([a-z .,/&'-]{2,40})",
     re.IGNORECASE,
 )
-_UNKNOWN_LOC = ("", "see post", "not specified", "n/a", "unspecified", "remote", "worldwide")
+_UNKNOWN_LOC = (
+    "",
+    "see post",
+    "not specified",
+    "n/a",
+    "unspecified",
+    "remote",
+    "worldwide",
+)
 
 # Non-home US metros commonly used as location pins. Matched on title +
 # location + URL only (not full description — HQ noise). An NYC/SF pin must
@@ -230,12 +253,14 @@ _REGION_LOCK_RES = (
 
 def _pin_blob(gig: Gig) -> str:
     """Title + location + URLs — where market pins usually live."""
-    return " ".join([
-        gig.title or "",
-        gig.location or "",
-        gig.url or "",
-        gig.apply_url or "",
-    ]).lower()
+    return " ".join(
+        [
+            gig.title or "",
+            gig.location or "",
+            gig.url or "",
+            gig.apply_url or "",
+        ]
+    ).lower()
 
 
 def _is_home_blob(s: str, home_tags: list[str]) -> bool:
@@ -287,7 +312,9 @@ def _geo_eligible(gig: Gig, *, home_tags: list[str], allow_remote: bool) -> bool
     """
     loc = (gig.location or "").lower().strip()
     pin = _pin_blob(gig)
-    text = " ".join([gig.location or "", gig.title or "", gig.description or ""]).lower()
+    text = " ".join(
+        [gig.location or "", gig.title or "", gig.description or ""]
+    ).lower()
 
     # Home metro in title/location wins.
     if _is_home_blob(pin, home_tags):
@@ -305,10 +332,12 @@ def _geo_eligible(gig: Gig, *, home_tags: list[str], allow_remote: bool) -> bool
         region = m.group(1)
         if _is_home_blob(region, home_tags) or _HOME_OK_RE.search(region):
             # "must live in NYC" is not home-ok for Austin even if "remote" elsewhere
-            if _OTHER_US_METRO_RE.search(region) and not _is_home_blob(region, home_tags):
+            if _OTHER_US_METRO_RE.search(region) and not _is_home_blob(
+                region, home_tags
+            ):
                 return False
             return True
-        return False     # requirement names somewhere else → out of reach
+        return False  # requirement names somewhere else → out of reach
 
     # Fully remote (location field or strong phrasing) — not soft body keywords.
     if allow_remote:
@@ -317,7 +346,9 @@ def _geo_eligible(gig: Gig, *, home_tags: list[str], allow_remote: bool) -> bool
         if _FULLY_REMOTE_RE.search(text) and not _OTHER_US_METRO_RE.search(pin):
             return True
         # Bare location "Remote" with no metro pin
-        if loc in ("remote", "worldwide", "global", "anywhere") or loc.startswith("remote "):
+        if loc in ("remote", "worldwide", "global", "anywhere") or loc.startswith(
+            "remote "
+        ):
             if not _OTHER_US_METRO_RE.search(pin):
                 return True
 
@@ -339,16 +370,27 @@ def _seniority_drag(title: str) -> tuple[int, str | None]:
     best_label: str | None = None
     # Ordered strongest-first so ties prefer the clearer label.
     checks: list[tuple[str, int, re.Pattern[str]]] = [
-        ("staff", _rules.TITLE_SENIORITY_DRAG.get("staff", -18),
-         re.compile(r"\bstaff\b")),
-        ("principal", _rules.TITLE_SENIORITY_DRAG.get("principal", -16),
-         re.compile(r"\bprincipal\b")),
-        ("senior", _rules.TITLE_SENIORITY_DRAG.get("senior", -12),
-         re.compile(r"\bsenior\b")),
-        ("sr", _rules.TITLE_SENIORITY_DRAG.get("sr ", -12),
-         re.compile(r"\bsr\.?\b")),
-        ("lead", _rules.TITLE_SENIORITY_DRAG.get("lead", -10),
-         re.compile(r"\b(?:tech\s+)?lead\b")),
+        (
+            "staff",
+            _rules.TITLE_SENIORITY_DRAG.get("staff", -18),
+            re.compile(r"\bstaff\b"),
+        ),
+        (
+            "principal",
+            _rules.TITLE_SENIORITY_DRAG.get("principal", -16),
+            re.compile(r"\bprincipal\b"),
+        ),
+        (
+            "senior",
+            _rules.TITLE_SENIORITY_DRAG.get("senior", -12),
+            re.compile(r"\bsenior\b"),
+        ),
+        ("sr", _rules.TITLE_SENIORITY_DRAG.get("sr ", -12), re.compile(r"\bsr\.?\b")),
+        (
+            "lead",
+            _rules.TITLE_SENIORITY_DRAG.get("lead", -10),
+            re.compile(r"\b(?:tech\s+)?lead\b"),
+        ),
     ]
     for label, weight, rx in checks:
         if rx.search(title):
@@ -362,12 +404,14 @@ def score_gig(gig: Gig) -> Gig:
     """Mutate gig in place: set fit_score (0-100) and fit_reasons."""
     title = (gig.title or "").lower()
     description = (gig.description or "").lower()
-    full_text = " ".join([
-        title,
-        description,
-        " ".join(gig.tags or []),
-        (gig.company or "").lower(),
-    ])
+    full_text = " ".join(
+        [
+            title,
+            description,
+            " ".join(gig.tags or []),
+            (gig.company or "").lower(),
+        ]
+    )
 
     score = 30  # baseline for existing-at-all
     reasons: list[str] = []
@@ -379,7 +423,9 @@ def score_gig(gig: Gig) -> Gig:
     # longest match scores (weight breaks length ties); every match still
     # counts as a rescue from _rules.TITLE_NEGATIVES and the job-board penalty.
     title_eng_hits = [
-        phrase for phrase in _rules.TITLE_ENGINEERING_PATTERNS if _phrase_in(title, phrase)
+        phrase
+        for phrase in _rules.TITLE_ENGINEERING_PATTERNS
+        if _phrase_in(title, phrase)
     ]
     if title_eng_hits:
         best = max(
@@ -414,7 +460,9 @@ def score_gig(gig: Gig) -> Gig:
             skill_total += w
             reasons.append(f"+{w} {kw}")
     if skill_total > _rules.SKILL_WEIGHTS_CAP:
-        reasons.append(f"cap-{_rules.SKILL_WEIGHTS_CAP} skill bonus capped (raw {skill_total})")
+        reasons.append(
+            f"cap-{_rules.SKILL_WEIGHTS_CAP} skill bonus capped (raw {skill_total})"
+        )
         skill_total = _rules.SKILL_WEIGHTS_CAP
     score += skill_total
 
@@ -500,7 +548,9 @@ def score_gig(gig: Gig) -> Gig:
     # ----- Title-cap -----
     if title_capped:
         if score > _rules.TITLE_NEGATIVE_CAP:
-            reasons.append(f"cap-{_rules.TITLE_NEGATIVE_CAP} title is non-engineering (no AI rescue)")
+            reasons.append(
+                f"cap-{_rules.TITLE_NEGATIVE_CAP} title is non-engineering (no AI rescue)"
+            )
         score = min(score, _rules.TITLE_NEGATIVE_CAP)
 
     gig.fit_score = max(0, min(100, score))
@@ -549,7 +599,8 @@ def filter_and_rank(
     kept = [g for g in scored if g.fit_score >= min_score]
     if contract_first:
         kept = [
-            g for g in kept
+            g
+            for g in kept
             if is_contract_friendly(
                 " ".join([g.description or "", g.title or ""]),
                 title=g.title or "",
@@ -561,7 +612,8 @@ def filter_and_rank(
         ]
     if drop_rigid_schedule:
         kept = [
-            g for g in kept
+            g
+            for g in kept
             if not is_schedule_rigid(
                 " ".join([g.description or "", g.title or ""]),
                 title=g.title or "",
@@ -573,12 +625,18 @@ def filter_and_rank(
     home_tags = [t.lower() for t in loc_cfg.get("home_metro_tags", [])]
     if loc_cfg.get("require_home_or_remote", False) and home_tags:
         allow_remote = loc_cfg.get("allow_remote", True)
-        kept = [g for g in kept if _geo_eligible(g, home_tags=home_tags, allow_remote=allow_remote)]
-    kept.sort(key=lambda g: (
-        -g.fit_score,
-        -_freshness_bucket(g),   # fresher first when fit ties (don't outweigh fit)
-        apply_friction(g),
-        -_source_priority(g),
-        -_normalize_pay(g),
-    ))
+        kept = [
+            g
+            for g in kept
+            if _geo_eligible(g, home_tags=home_tags, allow_remote=allow_remote)
+        ]
+    kept.sort(
+        key=lambda g: (
+            -g.fit_score,
+            -_freshness_bucket(g),  # fresher first when fit ties (don't outweigh fit)
+            apply_friction(g),
+            -_source_priority(g),
+            -_normalize_pay(g),
+        )
+    )
     return kept[:top_n]

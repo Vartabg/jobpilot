@@ -100,10 +100,15 @@ def test_city_state_composition(
 ) -> None:
     # Both parts -> "City, ST"; a lone part -> no stray comma.
     _mock_profile(monkeypatch, city="Queens", state="NY")
-    assert preferences.identity(preferences.load(_missing(tmp_path)))["city"] == "Queens, NY"
+    assert (
+        preferences.identity(preferences.load(_missing(tmp_path)))["city"]
+        == "Queens, NY"
+    )
 
     _mock_profile(monkeypatch, city="Queens", state="")
-    assert preferences.identity(preferences.load(_missing(tmp_path)))["city"] == "Queens"
+    assert (
+        preferences.identity(preferences.load(_missing(tmp_path)))["city"] == "Queens"
+    )
 
     _mock_profile(monkeypatch, city="", state="NY")
     assert preferences.identity(preferences.load(_missing(tmp_path)))["city"] == "NY"

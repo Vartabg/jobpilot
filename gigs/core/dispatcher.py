@@ -20,11 +20,11 @@ from urllib.parse import quote
 import requests  # pyright: ignore[reportMissingModuleSource]
 from requests.utils import requote_uri  # pyright: ignore[reportMissingModuleSource]
 
+from jobpilot.gigs.core import pipeline
 from jobpilot.gigs.core.away import save_latest_leads
 from jobpilot.gigs.core.crib import write_crib_sheet
 from jobpilot.gigs.core.logger import get_logger
 from jobpilot.gigs.core.models import Gig
-from jobpilot.gigs.core import pipeline
 from jobpilot.gigs.core.paths import digests_dir
 from jobpilot.gigs.core.proposals import (
     build_revenue_brief,
@@ -48,9 +48,9 @@ def _cur(g: Gig) -> str:
 
 def _fmt_pay(g: Gig) -> str:
     if g.salary_max and g.salary_min:
-        return f"${g.salary_min/1000:.0f}–${g.salary_max/1000:.0f}K{_cur(g)}/yr"
+        return f"${g.salary_min / 1000:.0f}–${g.salary_max / 1000:.0f}K{_cur(g)}/yr"
     if g.salary_max:
-        return f"up to ${g.salary_max/1000:.0f}K{_cur(g)}/yr"
+        return f"up to ${g.salary_max / 1000:.0f}K{_cur(g)}/yr"
     if g.pay_hourly_est:
         return f"${g.pay_hourly_est:.0f}{_cur(g)}/hr"
     return "pay not stated"
@@ -77,7 +77,7 @@ def _apply_target(g: Gig) -> str:
         # mailto with a dead link; send them to the source post to fill manually.
         return g.url
 
-    addr = base[len("mailto:"):].split("?", 1)[0]
+    addr = base[len("mailto:") :].split("?", 1)[0]
     subject = quote(email_subject(g))
     body = quote(raw_body)
     mailto = f"mailto:{addr}?subject={subject}&body={body}"
@@ -116,7 +116,10 @@ def _build_actions(top: Gig) -> str:
 
 
 def write_markdown(
-    gigs: list[Gig], *, source_warning: str = "", followups: list | None = None,
+    gigs: list[Gig],
+    *,
+    source_warning: str = "",
+    followups: list | None = None,
 ) -> Path:
     """Write today's digest as markdown to iCloud Drive. Returns path."""
     ICLOUD_DIR.mkdir(parents=True, exist_ok=True)
@@ -133,7 +136,9 @@ def write_markdown(
     if followups:
         lines.append(f"## ⏰ Follow up ({len(followups)})")
         lines.append("")
-        lines.append("Sent, no reply yet — a 2nd touch is where most replies come from.")
+        lines.append(
+            "Sent, no reply yet — a 2nd touch is where most replies come from."
+        )
         lines.append("")
         for r in followups:
             who = " — ".join(p for p in (r.company, r.role) if p) or "this lead"
@@ -185,13 +190,18 @@ def write_markdown(
 
 
 def push_ntfy(
-    gigs: list[Gig], topic: str | None = None, *,
-    source_warning: str = "", followup_count: int = 0,
+    gigs: list[Gig],
+    topic: str | None = None,
+    *,
+    source_warning: str = "",
+    followup_count: int = 0,
 ) -> bool:
     """Send a short summary push to the user's ntfy topic (phone)."""
     topic = topic or os.getenv("NTFY_TOPIC", "")
     if not topic:
-        log.info("NTFY_TOPIC not set — skipping push. To enable: install ntfy app on phone, pick a topic, export NTFY_TOPIC=that-topic")
+        log.info(
+            "NTFY_TOPIC not set — skipping push. To enable: install ntfy app on phone, pick a topic, export NTFY_TOPIC=that-topic"
+        )
         return False
 
     if not gigs:
@@ -237,7 +247,9 @@ def push_ntfy(
         return False
 
 
-def push_failure(message: str, *, title: str = "GigPilot digest FAILED", topic: str | None = None) -> bool:
+def push_failure(
+    message: str, *, title: str = "GigPilot digest FAILED", topic: str | None = None
+) -> bool:
     """Push a failure/heartbeat alert to the phone. Best-effort: never raises.
 
     Skips (returns False) when NTFY_TOPIC is unset, matching push_ntfy.
@@ -295,7 +307,9 @@ def dispatch(
     pushed = False
     if push:
         pushed = push_ntfy(
-            gigs, source_warning=source_warning, followup_count=len(followups),
+            gigs,
+            source_warning=source_warning,
+            followup_count=len(followups),
         )
     return {
         "gigs": len(gigs),

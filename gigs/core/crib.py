@@ -24,6 +24,7 @@ from jobpilot.gigs.core.proposals import build_revenue_brief
 
 CRIB_DIR = away_dir()
 
+
 def _veteran_answer() -> str:
     """Veteran-status answer, resolved truthfully from the jobpilot profile's
     demographics (declines if unset). Reversible: clear/edit
@@ -32,6 +33,7 @@ def _veteran_answer() -> str:
     """
     try:
         from jobpilot.core import profile_store
+
         prof = profile_store.get_profile_store().load()
         val = (getattr(prof, "demographics", {}) or {}).get("veteran", "")
     except Exception:
@@ -47,15 +49,25 @@ def _standard_answers() -> list[tuple[str, str]]:
     ident = preferences.identity()
     ws = preferences.work_style()
     city = (ident.get("city") or "").strip()
-    location = f"{city}, USA" if city and "usa" not in city.lower() else (city or "Your City, ST, USA")
+    location = (
+        f"{city}, USA"
+        if city and "usa" not in city.lower()
+        else (city or "Your City, ST, USA")
+    )
     return [
         ("Phone country", "+1"),
         ("Location (city)", location),
         ("Country based in", "USA"),
         ("Authorized to work in the US?", "Yes"),
         ("Require visa sponsorship?", "No"),
-        ("Willing to relocate?", ws.get("relocate_default", "Open to relocation for the right role")),
-        ("In-office acknowledgment", ws.get("in_office_default", "Open to remote, hybrid, or onsite")),
+        (
+            "Willing to relocate?",
+            ws.get("relocate_default", "Open to relocation for the right role"),
+        ),
+        (
+            "In-office acknowledgment",
+            ws.get("in_office_default", "Open to remote, hybrid, or onsite"),
+        ),
         ("Privacy consent", "Consent"),
         ("Gender", "Decline To Self Identify"),
         ("Hispanic/Latino?", "Decline To Self Identify"),
@@ -72,7 +84,9 @@ def _is_home_metro_role(gig: Gig) -> bool:
     tags = preferences.home_metro_tags()
     if not tags:
         return False
-    haystack = " ".join([gig.location or "", gig.title or "", gig.description or ""]).lower()
+    haystack = " ".join(
+        [gig.location or "", gig.title or "", gig.description or ""]
+    ).lower()
     return any(tag in haystack for tag in tags)
 
 
@@ -98,10 +112,10 @@ def _salary_candidate(gig: Gig) -> str:
     if gig.salary_max and gig.salary_min:
         return (
             f"Open to the role; comfortable within your "
-            f"${gig.salary_min/1000:.0f}–${gig.salary_max/1000:.0f}K{_cur(gig)} band"
+            f"${gig.salary_min / 1000:.0f}–${gig.salary_max / 1000:.0f}K{_cur(gig)} band"
         )
     if gig.salary_max:
-        return f"Open / competitive — your posted ${gig.salary_max/1000:.0f}K{_cur(gig)} ceiling works"
+        return f"Open / competitive — your posted ${gig.salary_max / 1000:.0f}K{_cur(gig)} ceiling works"
     if gig.pay_hourly_est:
         return f"${gig.pay_hourly_est:.0f}{_cur(gig)}/hr"
     return "Open / competitive — happy to discuss range for the role"
@@ -113,14 +127,14 @@ def _salary_note(gig: Gig) -> str:
     pct = pay_prefs.get("anchor_within_band_pct", 85) / 100.0
     if gig.salary_max and gig.salary_min:
         target = int(gig.salary_min + pct * (gig.salary_max - gig.salary_min))
-        return f"anchor ~${target/1000:.0f}K{_cur(gig)} ({int(pct*100)}% into the ${gig.salary_min/1000:.0f}–${gig.salary_max/1000:.0f}K band)"
+        return f"anchor ~${target / 1000:.0f}K{_cur(gig)} ({int(pct * 100)}% into the ${gig.salary_min / 1000:.0f}–${gig.salary_max / 1000:.0f}K band)"
     if gig.salary_max:
-        return f"anchor ~${int(0.95 * gig.salary_max)/1000:.0f}K{_cur(gig)} (just under the ${gig.salary_max/1000:.0f}K ceiling)"
+        return f"anchor ~${int(0.95 * gig.salary_max) / 1000:.0f}K{_cur(gig)} (just under the ${gig.salary_max / 1000:.0f}K ceiling)"
     if gig.pay_hourly_est:
         return f"rate ${gig.pay_hourly_est:.0f}{_cur(gig)}/hr"
     target_yr = pay_prefs.get("target_annual_usd", 175000)
     target_hr = pay_prefs.get("target_hourly_usd", 90)
-    return f"target ${target_yr/1000:.0f}K / ${target_hr}/hr equivalent"
+    return f"target ${target_yr / 1000:.0f}K / ${target_hr}/hr equivalent"
 
 
 def _gig_section(index: int, gig: Gig) -> list[str]:
@@ -160,10 +174,7 @@ def mobile_crib(gig: Gig) -> dict:
     """
     ident = preferences.identity()
     ws = preferences.work_style()
-    answers = [
-        {"label": label, "value": value}
-        for label, value in _standard_answers()
-    ]
+    answers = [{"label": label, "value": value} for label, value in _standard_answers()]
     # Per-lead relocate overrides the generic table row for this card.
     relocate = _relocate_answer(gig)
     for row in answers:
@@ -212,7 +223,7 @@ def write_crib_sheet(gigs: list[Gig], crib_dir: Path = CRIB_DIR) -> Path:
         f"- **First name:** {ident['first_name']}",
         f"- **Last name:** {ident['last_name']}",
         f"- **Email:** {ident['email']}",
-        f"- **Phone:** {ident['phone']} {ident.get('phone_note','')}".rstrip(),
+        f"- **Phone:** {ident['phone']} {ident.get('phone_note', '')}".rstrip(),
         f"- **LinkedIn:** {ident['linkedin']}",
         f"- **GitHub:** {ident['github']}",
         f"- **Portfolio:** {ident['portfolio']}",

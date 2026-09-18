@@ -8,35 +8,36 @@ The main watch-loop lives in ``engine_run.py``; standalone helpers live
 in ``engine_helpers.py``.  This file contains the ``ApplicationEngine``
 class itself.
 """
+
 from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import Optional
 
-from jobpilot.core.config import FILL_RETRIES, FILL_RETRY_DELAY_MS
-from jobpilot.core.events import (
-    EventBus,
-    FIELD_FILLED, FIELD_SKIPPED, FIELD_EDITED,
-    INFO,
-)
-from jobpilot.core.linkedin_parser import SemanticType, FieldType
-from jobpilot.core.question_matcher import QuestionMatcher
-from jobpilot.core.profile_store import ProfileStore
+from jobpilot.core import llm_client
 from jobpilot.core.application_tracker import ApplicationTracker
 from jobpilot.core.autonomy import AutonomyConfig, AutonomyMode
-from jobpilot.core.selector_registry import NEXT_BUTTON, FILE_INPUTS
-from jobpilot.core.cover_letter_gen import generate_cover_letter, get_cached_path
-from jobpilot.core.resume_tailor import ResumeTailor
-from jobpilot.core import llm_client
 from jobpilot.core.bro_client import get_health, is_bro_running, query_rag
-from jobpilot.learning.action_recorder import ActionRecorder
 from jobpilot.core.browser_interface import BrowserInterface
-from jobpilot.core.logger import get_logger
-
+from jobpilot.core.config import FILL_RETRIES, FILL_RETRY_DELAY_MS
+from jobpilot.core.cover_letter_gen import generate_cover_letter, get_cached_path
 from jobpilot.core.engine_helpers import (
-    _human_type, _wait_for_stable, _build_job_context,
+    _build_job_context,
+    _human_type,
+    _wait_for_stable,
 )
+from jobpilot.core.events import (
+    FIELD_FILLED,
+    INFO,
+    EventBus,
+)
+from jobpilot.core.linkedin_parser import FieldType
+from jobpilot.core.logger import get_logger
+from jobpilot.core.profile_store import ProfileStore
+from jobpilot.core.question_matcher import QuestionMatcher
+from jobpilot.core.resume_tailor import ResumeTailor
+from jobpilot.core.selector_registry import FILE_INPUTS, NEXT_BUTTON
+from jobpilot.learning.action_recorder import ActionRecorder
 
 log = get_logger(__name__)
 
@@ -81,8 +82,11 @@ class ApplicationEngine:
                     raise RuntimeError("Element not stable")
 
                 if field.field_type in (
-                    FieldType.TEXT, FieldType.EMAIL, FieldType.PHONE,
-                    FieldType.NUMBER, FieldType.TEXTAREA,
+                    FieldType.TEXT,
+                    FieldType.EMAIL,
+                    FieldType.PHONE,
+                    FieldType.NUMBER,
+                    FieldType.TEXTAREA,
                 ):
                     await field.element.fill("")
                     await _human_type(field.element, value)
@@ -99,9 +103,7 @@ class ApplicationEngine:
                     wanted = " ".join(value.lower().split())
                     for lbl in await parent.query_selector_all("label"):
                         try:
-                            text = " ".join(
-                                (await lbl.inner_text()).lower().split()
-                            )
+                            text = " ".join((await lbl.inner_text()).lower().split())
                         except Exception:
                             continue
                         if wanted and wanted in text:
@@ -113,7 +115,10 @@ class ApplicationEngine:
                         await field.element.click()
                 elif field.field_type == FieldType.CHECKBOX:
                     should_check = value.lower() in (
-                        "yes", "true", "1", "checked",
+                        "yes",
+                        "true",
+                        "1",
+                        "checked",
                     )
                     is_checked = await field.element.is_checked()
                     if should_check and not is_checked:
@@ -129,13 +134,17 @@ class ApplicationEngine:
                 if attempt < FILL_RETRIES:
                     log.warning(
                         "Fill attempt %d failed for %s: %s — retrying",
-                        attempt, field.label, e,
+                        attempt,
+                        field.label,
+                        e,
                     )
                     await asyncio.sleep(FILL_RETRY_DELAY_MS / 1000.0)
                 else:
                     log.warning(
                         "Could not fill %s after %d attempts: %s",
-                        field.label, FILL_RETRIES, e,
+                        field.label,
+                        FILL_RETRIES,
+                        e,
                     )
                     return False
         return False
@@ -143,7 +152,7 @@ class ApplicationEngine:
     # -- file uploads --------------------------------------------------------
 
     @staticmethod
-    def _preferred_resume_upload(profile) -> tuple[Optional[Path], str]:
+    def _preferred_resume_upload(profile) -> tuple[Path | None, str]:
         """Pick the best available resume file for an upload field."""
         latest_draft = ResumeTailor.load_latest_draft_summary()
         if latest_draft:
@@ -204,7 +213,8 @@ class ApplicationEngine:
                     if letter:
                         cl_path = get_cached_path(parsed_jd.raw_text)
                         self.events.emit(
-                            INFO, message="📝 Generated tailored cover letter",
+                            INFO,
+                            message="📝 Generated tailored cover letter",
                         )
 
             if cl_path and cl_path.exists():
@@ -223,17 +233,21 @@ class ApplicationEngine:
         """Auto-click Next/Continue if autonomy settings allow it."""
         is_final = "submit" in (app_page.submit_button_text or "").lower()
         if is_final:
-            self.events.emit(INFO, message="✓ Final submit requires manual click in Chrome")
+            self.events.emit(
+                INFO, message="✓ Final submit requires manual click in Chrome"
+            )
             log.info("Auto-advance blocked on final submit button")
             return
         if not self.autonomy_config.should_auto_advance(is_final):
             return
-        
+
         # Proactive Intuition: Show countdown in status
         delay_s = self.autonomy_config.auto_advance_delay_ms / 1000.0
         for i in range(int(delay_s * 2), 0, -1):
             if self.overlay:
-                await self.overlay.update_status(f"⏩ Auto-advancing in {i/2:.1f}s...")
+                await self.overlay.update_status(
+                    f"⏩ Auto-advancing in {i / 2:.1f}s..."
+                )
             await asyncio.sleep(0.5)
 
         try:
@@ -261,9 +275,7 @@ class ApplicationEngine:
             bro = "✓" if h.get("status") == "ok" else "✗"
             whisper = "✓" if h.get("whisper") == "ready" else "✗"
             fast = (
-                "✓"
-                if any("mistral" in m for m in h.get("ollama_models", []))
-                else "✗"
+                "✓" if any("mistral" in m for m in h.get("ollama_models", [])) else "✗"
             )
             await self.chat.send_message(
                 f"Bro:{bro} Whisper:{whisper} FastModel:{fast} "
@@ -291,25 +303,21 @@ class ApplicationEngine:
         elif msg_lower == "profile":
             p = self.profile_store.load()
             await self.chat.send_message(
-                f"{p.first_name} {p.last_name} | {p.email} | "
-                f"{p.current_title}"
+                f"{p.first_name} {p.last_name} | {p.email} | {p.current_title}"
             )
         elif msg_lower.startswith("mode "):
             new_mode = msg_lower.split(" ", 1)[1].strip()
             try:
                 from jobpilot.core.autonomy import set_autonomy_mode
-                self.autonomy_config = set_autonomy_mode(
-                    AutonomyMode(new_mode)
-                )
+
+                self.autonomy_config = set_autonomy_mode(AutonomyMode(new_mode))
                 await self.chat.send_message(f"Mode set to: {new_mode}")
                 log.info("Autonomy mode changed to %s", new_mode)
             except ValueError:
                 await self.chat.send_message(
                     "Valid modes: suggest, semi-auto, full-auto"
                 )
-        elif msg_lower.startswith("advice") or msg_lower.startswith(
-            "help me with"
-        ):
+        elif msg_lower.startswith("advice") or msg_lower.startswith("help me with"):
             if app_page and app_page.fields:
                 current_field = next(
                     (f for f in app_page.fields if not f.current_value), None
@@ -385,7 +393,8 @@ Provide a concise, professional answer suggestion."""
                     if value:
                         await self.fill_field(field, value)
                         self.events.emit(
-                            FIELD_FILLED, label=field.label,
+                            FIELD_FILLED,
+                            label=field.label,
                         )
                         self.action_recorder.record_field_approved(
                             field.label,
@@ -393,9 +402,7 @@ Provide a concise, professional answer suggestion."""
                             value,
                             field.confidence,
                         )
-                await self.chat.send_message(
-                    "Approved and filled all fields."
-                )
+                await self.chat.send_message("Approved and filled all fields.")
 
         elif cmd_name == "skip":
             if app_page and app_page.fields:
@@ -434,4 +441,5 @@ Provide a concise, professional answer suggestion."""
     async def run(self, *, watch: bool) -> None:
         """Main watch loop — delegates to engine_run.run_watch_loop."""
         from jobpilot.core.engine_run import run_watch_loop
+
         await run_watch_loop(self, watch=watch)

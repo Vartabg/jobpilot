@@ -5,16 +5,15 @@ Uses fuzzy string matching to find the best answer for custom questions.
 Learns from your corrections over time.
 """
 
-import json
-from pathlib import Path
 from dataclasses import dataclass
-from typing import Optional
+from pathlib import Path
+
 from rapidfuzz import fuzz, process
 from rich.console import Console
 
 from jobpilot.core.config import DATA_DIR
-from jobpilot.learning.learning_db import get_learning_db
 from jobpilot.core.logger import get_logger
+from jobpilot.learning.learning_db import get_learning_db
 
 console = Console()
 log = get_logger(__name__)
@@ -23,11 +22,12 @@ log = get_logger(__name__)
 @dataclass
 class MatchResult:
     """Result of matching a question to a template"""
+
     question: str
-    matched_template: Optional[str]
-    answer: Optional[str]
+    matched_template: str | None
+    answer: str | None
     confidence: float  # 0.0 to 1.0
-    
+
     @property
     def confidence_level(self) -> str:
         """Get human-readable confidence level"""
@@ -39,23 +39,18 @@ class MatchResult:
             return "low"
         else:
             return "none"
-    
+
     @property
     def confidence_emoji(self) -> str:
         """Get emoji indicator for confidence"""
         level = self.confidence_level
-        return {
-            "high": "🟢",
-            "medium": "🟡", 
-            "low": "🟠",
-            "none": "🔴"
-        }[level]
+        return {"high": "🟢", "medium": "🟡", "low": "🟠", "none": "🔴"}[level]
 
 
 class QuestionMatcher:
     """
     Matches screening questions to saved answer templates.
-    
+
     Templates are stored as:
     {
         "questions": {
@@ -65,8 +60,8 @@ class QuestionMatcher:
         }
     }
     """
-    
-    def __init__(self, data_dir: Optional[Path] = None):
+
+    def __init__(self, data_dir: Path | None = None):
         self.data_dir = data_dir or DATA_DIR
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self._db = get_learning_db(self.data_dir / "learning.db")
@@ -75,18 +70,20 @@ class QuestionMatcher:
     def _reload_templates(self):
         """Refresh the in-memory cache from SQLite."""
         self._templates = self._db.get_all_templates()
-    
-    def match(self, question: str, threshold: float = 0.45, use_rag: bool = True) -> MatchResult:
+
+    def match(
+        self, question: str, threshold: float = 0.45, use_rag: bool = True
+    ) -> MatchResult:
         """
         Find the best matching template for a question.
         Falls back to the AI backend (RAG-grounded when Bro is up) if no good
         template match.
-        
+
         Args:
             question: The question text to match
             threshold: Minimum similarity score (0-1) to consider a match
             use_rag: Whether to try RAG fallback if no template matches
-            
+
         Returns:
             MatchResult with the best match (or AI-generated if RAG fallback used)
         """
@@ -95,26 +92,24 @@ class QuestionMatcher:
             normalized = self._normalize(question)
             template_questions = list(self._templates.keys())
             normalized_templates = [self._normalize(q) for q in template_questions]
-            
+
             result = process.extractOne(
-                normalized,
-                normalized_templates,
-                scorer=fuzz.token_sort_ratio
+                normalized, normalized_templates, scorer=fuzz.token_sort_ratio
             )
-            
+
             if result:
                 matched_normalized, score, idx = result
                 confidence = score / 100.0
-                
+
                 if confidence >= threshold:
                     original_question = template_questions[idx]
                     return MatchResult(
                         question=question,
                         matched_template=original_question,
                         answer=self._templates[original_question],
-                        confidence=confidence
+                        confidence=confidence,
                     )
-        
+
         # No template match - try RAG + Ollama fallback
         if use_rag:
             rag_result = self._rag_answer(question)
@@ -123,17 +118,14 @@ class QuestionMatcher:
                     question=question,
                     matched_template="[AI Generated from Resume]",
                     answer=rag_result,
-                    confidence=0.6  # Medium confidence for AI answers
+                    confidence=0.6,  # Medium confidence for AI answers
                 )
-        
+
         return MatchResult(
-            question=question,
-            matched_template=None,
-            answer=None,
-            confidence=0.0
+            question=question, matched_template=None, answer=None, confidence=0.0
         )
-    
-    def _rag_answer(self, question: str) -> Optional[str]:
+
+    def _rag_answer(self, question: str) -> str | None:
         """
         Generate a grounded answer via the AI backend (local Bro or Gemini).
 
@@ -206,7 +198,7 @@ Answer:"""
             if saved_question and saved_answer:
                 lines.append(f"{saved_question}: {saved_answer}")
         return "\n".join(lines)
-    
+
     def add_template(self, question: str, answer: str):
         """Add or update an answer template"""
         self._db.upsert_template(question, answer)
@@ -223,16 +215,16 @@ Answer:"""
     def get_all_templates(self) -> dict[str, str]:
         """Get all saved templates"""
         return self._templates.copy()
-    
+
     def learn_from_correction(self, question: str, user_answer: str):
         """
         Learn from a user correction.
-        
+
         If the user edits a suggested answer, save their version as the new template.
         """
         # Check if this is a correction to an existing template
         match_result = self.match(question, threshold=0.7)
-        
+
         if match_result.matched_template and match_result.answer != user_answer:
             # User corrected our suggestion - update the template
             log.info("Learning from correction: %s", question[:50])
@@ -273,10 +265,22 @@ Answer:"""
 
         # Decide whether this question benefits from contextualisation
         contextual_keywords = [
-            "why", "interest", "motivat", "excit", "strength",
-            "challenge", "experience with", "tell us about",
-            "describe", "bring to", "fit for", "contribution",
-            "goals", "philosophy", "achieve", "situation where",
+            "why",
+            "interest",
+            "motivat",
+            "excit",
+            "strength",
+            "challenge",
+            "experience with",
+            "tell us about",
+            "describe",
+            "bring to",
+            "fit for",
+            "contribution",
+            "goals",
+            "philosophy",
+            "achieve",
+            "situation where",
         ]
         q_lower = question.lower()
         needs_context = any(kw in q_lower for kw in contextual_keywords)
@@ -303,7 +307,7 @@ Answer:"""
             if enriched and len(enriched) > 10:
                 enriched = enriched.strip()
                 if enriched.lower().startswith("tailored answer:"):
-                    enriched = enriched[len("tailored answer:"):].strip()
+                    enriched = enriched[len("tailored answer:") :].strip()
                 return MatchResult(
                     question=question,
                     matched_template=base.matched_template,
@@ -314,38 +318,50 @@ Answer:"""
             log.warning("Context enrichment failed: %s", e)
 
         return base
-    
+
     def _normalize(self, text: str) -> str:
         """Normalize text for matching"""
         # Lowercase and strip
         text = text.lower().strip()
-        
+
         # Remove common filler words that don't affect meaning
-        filler_words = ["please", "kindly", "briefly", "the", "a", "an", "your", "you", "are"]
+        filler_words = [
+            "please",
+            "kindly",
+            "briefly",
+            "the",
+            "a",
+            "an",
+            "your",
+            "you",
+            "are",
+        ]
         words = text.split()
         words = [w for w in words if w not in filler_words]
-        
+
         return " ".join(words)
-    
+
     def display_templates(self):
         """Display all saved templates"""
         from rich.table import Table
-        
+
         if not self._templates:
             console.print("[dim]No answer templates saved yet.[/dim]")
-            console.print("They'll be created automatically as you fill out applications.")
+            console.print(
+                "They'll be created automatically as you fill out applications."
+            )
             return
-        
+
         table = Table(title=f"Answer Templates ({len(self._templates)} saved)")
         table.add_column("Question", style="cyan", max_width=50)
         table.add_column("Answer", style="white", max_width=50)
-        
+
         for question, answer in self._templates.items():
             # Truncate long text
             q_display = question[:47] + "..." if len(question) > 50 else question
             a_display = answer[:47] + "..." if len(answer) > 50 else answer
             table.add_row(q_display, a_display)
-        
+
         console.print(table)
 
 
@@ -365,7 +381,8 @@ COMMON_QUESTIONS = {
 
 
 # Global instance
-_matcher: Optional[QuestionMatcher] = None
+_matcher: QuestionMatcher | None = None
+
 
 def get_question_matcher() -> QuestionMatcher:
     """Get the global question matcher instance"""

@@ -118,7 +118,9 @@ def _complete_gemini(prompt: str, *, context: str | None = None) -> str:
     try:
         payload = response.json()
     except ValueError as exc:
-        raise LLMUnavailable("Gemini returned a response that was not valid JSON.") from exc
+        raise LLMUnavailable(
+            "Gemini returned a response that was not valid JSON."
+        ) from exc
 
     return _parse_gemini_payload(payload)
 

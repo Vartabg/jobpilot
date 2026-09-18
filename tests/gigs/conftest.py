@@ -37,21 +37,25 @@ os.environ["GIGPILOT_AWAY_DIR"] = str(_TMP / "icloud" / "Gigpilot_Away")
 # unaffected; this only backs the global preferences.load() default path.)
 _DATA_DIR = _TMP / "data"
 _DATA_DIR.mkdir(parents=True, exist_ok=True)
-(_DATA_DIR / "preferences.json").write_text(json.dumps({
-    "identity": {
-        "first_name": "Test",
-        "last_name": "Applicant",
-        "email": "test.applicant@resolved.test",
-        "phone": "555-000-1234",
-        "phone_note": "(text preferred)",
-        "linkedin": "https://www.linkedin.com/in/test-applicant",
-        "github": "https://github.com/test-applicant",
-        "portfolio": "https://resolved.test",
-        "city": "Austin, TX",
-        "tagline": "Builder who ships",
-    },
-    "links": {
-        "service_page": "https://resolved.test/services",
-        "work_page": "https://resolved.test/work",
-    },
-}))
+(_DATA_DIR / "preferences.json").write_text(
+    json.dumps(
+        {
+            "identity": {
+                "first_name": "Test",
+                "last_name": "Applicant",
+                "email": "test.applicant@resolved.test",
+                "phone": "555-000-1234",
+                "phone_note": "(text preferred)",
+                "linkedin": "https://www.linkedin.com/in/test-applicant",
+                "github": "https://github.com/test-applicant",
+                "portfolio": "https://resolved.test",
+                "city": "Austin, TX",
+                "tagline": "Builder who ships",
+            },
+            "links": {
+                "service_page": "https://resolved.test/services",
+                "work_page": "https://resolved.test/work",
+            },
+        }
+    )
+)

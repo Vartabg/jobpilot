@@ -43,7 +43,9 @@ def _ats_host(apply_url: str) -> str:
 
 def company_title_key(company: str, title: str, source: str = "") -> str:
     """Normalized company+title key (company falls back to source)."""
-    return f"co:{_normalize_text(company) or _normalize_text(source)}|{_norm_title(title)}"
+    return (
+        f"co:{_normalize_text(company) or _normalize_text(source)}|{_norm_title(title)}"
+    )
 
 
 def cross_source_key(gig: Gig) -> str:
@@ -55,7 +57,11 @@ def cross_source_key(gig: Gig) -> str:
 
 
 def listing_keys(
-    *, title: str, company: str = "", apply_url: str = "", source: str = "",
+    *,
+    title: str,
+    company: str = "",
+    apply_url: str = "",
+    source: str = "",
 ) -> set[str]:
     """Every key this listing can match under: always the company+title
     form, plus the ATS host+title form when the apply URL is a known ATS.

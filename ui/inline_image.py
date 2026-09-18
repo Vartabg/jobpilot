@@ -11,14 +11,14 @@ from __future__ import annotations
 import base64
 import os
 import sys
-from typing import Optional, TextIO
+from typing import TextIO
 
 # OSC 1337 control bytes.
 _ESC = "\033"
 _BEL = "\007"
 
 
-def supports_inline_images(stream: Optional[TextIO] = None) -> bool:
+def supports_inline_images(stream: TextIO | None = None) -> bool:
     """True when the current terminal can render imgcat inline images.
 
     Honors JOBPILOT_FORCE_INLINE_IMAGES=1/0 as an override (handy for tests and
@@ -47,8 +47,8 @@ def format_inline_image(
     data: bytes,
     *,
     name: str = "image.png",
-    width: Optional[str] = None,
-    height: Optional[str] = None,
+    width: str | None = None,
+    height: str | None = None,
     preserve_aspect_ratio: bool = True,
 ) -> str:
     """Build the OSC 1337 inline-image string for `data` (raw image bytes).
@@ -82,9 +82,9 @@ def print_inline_image(
     data: bytes,
     *,
     name: str = "image.png",
-    width: Optional[str] = None,
-    height: Optional[str] = None,
-    stream: Optional[TextIO] = None,
+    width: str | None = None,
+    height: str | None = None,
+    stream: TextIO | None = None,
 ) -> None:
     """Write an inline image to the terminal, followed by a newline."""
     out = stream or sys.stdout

@@ -68,9 +68,7 @@ li{margin:3px 0}
     html_doc = (
         '<!doctype html><html><head><meta charset="utf-8">'
         "<title>Tailored Resume</title>"
-        f"<style>{css}</style></head><body>"
-        + "\n".join(body)
-        + "</body></html>"
+        f"<style>{css}</style></head><body>" + "\n".join(body) + "</body></html>"
     )
     html_path.write_text(html_doc)
     return html_path

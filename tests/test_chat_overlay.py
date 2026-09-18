@@ -4,13 +4,19 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from jobpilot.ui.chat_overlay import ChatOverlay, build_chat_quick_actions, build_chat_welcome_message
+from jobpilot.ui.chat_overlay import (
+    ChatOverlay,
+    build_chat_quick_actions,
+    build_chat_welcome_message,
+)
 
 
 def test_quick_actions_cover_operator_basics():
     actions = build_chat_quick_actions()
     labels = {action.label for action in actions}
-    assert {"Status", "Advice", "Profile", "Role Fit", "Resume", "Interview"}.issubset(labels)
+    assert {"Status", "Advice", "Profile", "Role Fit", "Resume", "Interview"}.issubset(
+        labels
+    )
 
     prompts = {action.label: action.command for action in actions}
     assert "status" in prompts["Status"].lower()
@@ -44,7 +50,9 @@ async def test_chat_overlay_reuses_unified_surface_when_available():
     await overlay.ensure_injected()
 
     evaluated = [call.args[0] for call in page.evaluate.call_args_list]
-    assert any("typeof window.jobpilotChat !== 'undefined'" in script for script in evaluated)
+    assert any(
+        "typeof window.jobpilotChat !== 'undefined'" in script for script in evaluated
+    )
     assert not any("jobpilot-chat-host" in script for script in evaluated)
 
 

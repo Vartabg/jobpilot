@@ -18,7 +18,7 @@ import json
 from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from jobpilot.core.config import DATA_DIR
 from jobpilot.core.logger import get_logger
@@ -131,7 +131,9 @@ class Policy:
 
     scoring: ScoringPolicy = field(default_factory=ScoringPolicy)
     queue: QueuePolicy = field(default_factory=QueuePolicy)
-    application_evidence: ApplicationEvidencePolicy = field(default_factory=ApplicationEvidencePolicy)
+    application_evidence: ApplicationEvidencePolicy = field(
+        default_factory=ApplicationEvidencePolicy
+    )
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -183,7 +185,7 @@ def _str_map(value: Any, *, lower_values: bool = False) -> dict[str, str]:
     return result
 
 
-def policy_from_dict(data: Optional[dict[str, Any]]) -> Policy:
+def policy_from_dict(data: dict[str, Any] | None) -> Policy:
     """Build a `Policy` from a raw dict, deep-merged over neutral DEFAULTS."""
     merged = _deep_merge(DEFAULTS, data or {})
     scoring_raw = merged.get("scoring") or {}
@@ -209,16 +211,28 @@ def policy_from_dict(data: Optional[dict[str, Any]]) -> Policy:
         enabled=bool(transport_raw.get("enabled", False)),
         mode=str(transport_raw.get("mode", "")).strip().lower(),
         mobile_title_keywords=_term_tuple(transport_raw.get("mobile_title_keywords")),
-        fixed_site_title_keywords=_term_tuple(transport_raw.get("fixed_site_title_keywords")),
+        fixed_site_title_keywords=_term_tuple(
+            transport_raw.get("fixed_site_title_keywords")
+        ),
     )
     queue = QueuePolicy(
         title_kill_keywords=_term_tuple(queue_raw.get("title_kill_keywords")),
         title_allow_keywords=_term_tuple(queue_raw.get("title_allow_keywords")),
-        title_deprioritize_keywords=_term_tuple(queue_raw.get("title_deprioritize_keywords")),
-        title_deprioritize_penalty=int(queue_raw.get("title_deprioritize_penalty", 18) or 18),
-        moat_company_tags=_str_map(queue_raw.get("moat_company_tags"), lower_values=True),
-        high_moat_industries=frozenset(_term_tuple(queue_raw.get("high_moat_industries"))),
-        excluded_industries=frozenset(_term_tuple(queue_raw.get("excluded_industries"))),
+        title_deprioritize_keywords=_term_tuple(
+            queue_raw.get("title_deprioritize_keywords")
+        ),
+        title_deprioritize_penalty=int(
+            queue_raw.get("title_deprioritize_penalty", 18) or 18
+        ),
+        moat_company_tags=_str_map(
+            queue_raw.get("moat_company_tags"), lower_values=True
+        ),
+        high_moat_industries=frozenset(
+            _term_tuple(queue_raw.get("high_moat_industries"))
+        ),
+        excluded_industries=frozenset(
+            _term_tuple(queue_raw.get("excluded_industries"))
+        ),
         company_hq=_str_map(queue_raw.get("company_hq")),
         location_gate=gate,
         transport_gate=transport,
@@ -234,7 +248,7 @@ def policy_from_dict(data: Optional[dict[str, Any]]) -> Policy:
     return Policy(scoring=scoring, queue=queue, application_evidence=evidence)
 
 
-def load_policy(path: Optional[Path] = None) -> Policy:
+def load_policy(path: Path | None = None) -> Policy:
     """Load the policy file (default ``data/policy.json``).
 
     A missing or unparseable file yields the neutral defaults — the tool
@@ -248,13 +262,17 @@ def load_policy(path: Optional[Path] = None) -> Policy:
             if isinstance(loaded, dict):
                 raw = loaded
             else:
-                log.warning("Ignoring %s — top level must be a JSON object.", policy_path)
+                log.warning(
+                    "Ignoring %s — top level must be a JSON object.", policy_path
+                )
         except Exception as exc:
-            log.warning("Could not parse %s (%s) — using neutral defaults.", policy_path, exc)
+            log.warning(
+                "Could not parse %s (%s) — using neutral defaults.", policy_path, exc
+            )
     return policy_from_dict(raw)
 
 
-_policy_cache: Optional[Policy] = None
+_policy_cache: Policy | None = None
 
 
 def get_policy() -> Policy:
@@ -265,7 +283,7 @@ def get_policy() -> Policy:
     return _policy_cache
 
 
-def set_policy(policy: Optional[Policy]) -> None:
+def set_policy(policy: Policy | None) -> None:
     """Override the active policy (tests); pass ``None`` to force a re-read."""
     global _policy_cache
     _policy_cache = policy

@@ -15,7 +15,9 @@ def _store_with_profile(tmp_path: Path, **overrides) -> ProfileStore:
     profile.state = "OH"
     profile.current_title = "Field Service Engineer"
     profile.current_company = "Example Labs"
-    profile.custom_answers = {"skills": "troubleshooting field service python electronics"}
+    profile.custom_answers = {
+        "skills": "troubleshooting field service python electronics"
+    }
     for key, value in overrides.items():
         setattr(profile, key, value)
     store.save(profile)
@@ -24,7 +26,9 @@ def _store_with_profile(tmp_path: Path, **overrides) -> ProfileStore:
 
 def test_prep_generates_html_brief(tmp_path: Path):
     store = _store_with_profile(tmp_path)
-    generator = InterviewPrepGenerator(profile_store=store, output_dir=tmp_path, use_bro=False)
+    generator = InterviewPrepGenerator(
+        profile_store=store, output_dir=tmp_path, use_bro=False
+    )
 
     result = generator.generate_from_text(
         "Field Service Engineer. Requirements: troubleshooting, on-site repair, customer support.",
@@ -46,7 +50,9 @@ def test_prep_generates_html_brief(tmp_path: Path):
 
 def test_prep_always_has_star_themes_and_questions(tmp_path: Path):
     store = _store_with_profile(tmp_path)
-    generator = InterviewPrepGenerator(profile_store=store, output_dir=tmp_path, use_bro=False)
+    generator = InterviewPrepGenerator(
+        profile_store=store, output_dir=tmp_path, use_bro=False
+    )
 
     result = generator.generate_from_text("Some role with minimal detail.")
 
@@ -58,7 +64,9 @@ def test_prep_always_has_star_themes_and_questions(tmp_path: Path):
 
 def test_prep_flags_onsite_location_mismatch(tmp_path: Path):
     store = _store_with_profile(tmp_path)  # candidate is in Rivertown, OH
-    generator = InterviewPrepGenerator(profile_store=store, output_dir=tmp_path, use_bro=False)
+    generator = InterviewPrepGenerator(
+        profile_store=store, output_dir=tmp_path, use_bro=False
+    )
 
     result = generator.generate_from_text(
         "Service Engineer. This is an on-site role based in Metro City. "
@@ -76,7 +84,9 @@ def test_prep_flags_onsite_location_mismatch(tmp_path: Path):
 
 def test_prep_no_location_flag_for_remote_role(tmp_path: Path):
     store = _store_with_profile(tmp_path)
-    generator = InterviewPrepGenerator(profile_store=store, output_dir=tmp_path, use_bro=False)
+    generator = InterviewPrepGenerator(
+        profile_store=store, output_dir=tmp_path, use_bro=False
+    )
 
     result = generator.generate_from_text(
         "Fully remote Field Service coordinator. Requirements: scheduling, dispatch.",
@@ -89,7 +99,9 @@ def test_prep_no_location_flag_for_remote_role(tmp_path: Path):
 
 def test_prep_writes_latest_manifest(tmp_path: Path):
     store = _store_with_profile(tmp_path)
-    generator = InterviewPrepGenerator(profile_store=store, output_dir=tmp_path, use_bro=False)
+    generator = InterviewPrepGenerator(
+        profile_store=store, output_dir=tmp_path, use_bro=False
+    )
 
     generator.generate_from_text("A role.", title="Role", company="Co")
 

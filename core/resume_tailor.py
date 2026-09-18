@@ -135,7 +135,9 @@ class ResumeTailor:
         if resume_lanes is not None:
             self.resume_lanes = resume_lanes
         else:
-            self.resume_lanes = _load_resume_lanes(getattr(self.profile_store, "data_dir", None))
+            self.resume_lanes = _load_resume_lanes(
+                getattr(self.profile_store, "data_dir", None)
+            )
         self.scorer = JobScorer(profile_store=self.profile_store, use_bro=use_bro)
 
     def generate_from_text(
@@ -214,7 +216,9 @@ class ResumeTailor:
             html_path.write_text(html_content)
 
             if export_pdf:
-                pdf_path = self._export_pdf(html_content, target_path.with_suffix(".pdf"))
+                pdf_path = self._export_pdf(
+                    html_content, target_path.with_suffix(".pdf")
+                )
 
         result = ResumeDraftResult(
             output_path=target_path,
@@ -286,7 +290,9 @@ class ResumeTailor:
             return snippets[:4]
 
         parsed = fit_result.parsed_jd
-        focus_terms = ", ".join(fit_result.matched_skills[:4] or self._build_keywords(fit_result)[:4])
+        focus_terms = ", ".join(
+            fit_result.matched_skills[:4] or self._build_keywords(fit_result)[:4]
+        )
         if not focus_terms:
             focus_terms = "delivery, collaboration, and execution"
 
@@ -301,15 +307,19 @@ class ResumeTailor:
         ]
 
         if profile.github_url:
-            highlights.append(f"Code samples and shipped work available via {profile.github_url}.")
+            highlights.append(
+                f"Code samples and shipped work available via {profile.github_url}."
+            )
 
         return [line for line in highlights if line]
 
     def _build_keywords(self, fit_result: JobFitResult) -> list[str]:
         parsed = fit_result.parsed_jd
-        keywords = list(dict.fromkeys(
-            [*fit_result.matched_skills, *parsed.skills, *fit_result.missing_skills]
-        ))
+        keywords = list(
+            dict.fromkeys(
+                [*fit_result.matched_skills, *parsed.skills, *fit_result.missing_skills]
+            )
+        )
 
         if not keywords:
             # Fall back to short requirement *phrases*, not individual words —
@@ -335,8 +345,20 @@ class ResumeTailor:
         keywords: list[str],
     ) -> str:
         parsed = fit_result.parsed_jd
-        full_name = (f"{profile.first_name} {profile.last_name}").strip() or "Candidate Name"
-        header_bits = [bit for bit in [profile.email, profile.phone, profile.linkedin_url, profile.github_url, profile.portfolio_url] if bit]
+        full_name = (
+            f"{profile.first_name} {profile.last_name}"
+        ).strip() or "Candidate Name"
+        header_bits = [
+            bit
+            for bit in [
+                profile.email,
+                profile.phone,
+                profile.linkedin_url,
+                profile.github_url,
+                profile.portfolio_url,
+            ]
+            if bit
+        ]
         header = " | ".join(header_bits)
 
         lines = [
@@ -347,17 +369,25 @@ class ResumeTailor:
         if header:
             lines.extend([header, ""])
 
-        lines.extend([
-            "## Target Role",
-            f"- **Role:** {parsed.title or 'Not specified'}",
-            f"- **Company:** {parsed.company or 'Not specified'}",
-            f"- **Fit Snapshot:** {fit_result.score}/100 — {fit_result.recommendation}",
-            "",
-            "## Professional Summary",
-        ])
+        lines.extend(
+            [
+                "## Target Role",
+                f"- **Role:** {parsed.title or 'Not specified'}",
+                f"- **Company:** {parsed.company or 'Not specified'}",
+                f"- **Fit Snapshot:** {fit_result.score}/100 — {fit_result.recommendation}",
+                "",
+                "## Professional Summary",
+            ]
+        )
         lines.extend([f"- {line}" for line in summary_lines])
 
-        lines.extend(["", "## Core Skills", f"{ ' • '.join(keywords[:10]) if keywords else 'Add role-relevant skills here after review.'}"])
+        lines.extend(
+            [
+                "",
+                "## Core Skills",
+                f"{' • '.join(keywords[:10]) if keywords else 'Add role-relevant skills here after review.'}",
+            ]
+        )
 
         lines.extend(["", "## Tailored Experience Highlights"])
         lines.extend([f"- {line}" for line in highlight_bullets])
@@ -366,14 +396,16 @@ class ResumeTailor:
             lines.extend(["", "## Gaps to Address in Review"])
             lines.extend([f"- {line}" for line in fit_result.risks[:3]])
 
-        lines.extend([
-            "",
-            "## ATS Notes",
-            "- Keep the wording truthful and review before submitting.",
-            "- Mirror the job description naturally; do not keyword-stuff.",
-            "- Save as PDF after your final edits if the employer requests PDF upload.",
-            "",
-        ])
+        lines.extend(
+            [
+                "",
+                "## ATS Notes",
+                "- Keep the wording truthful and review before submitting.",
+                "- Mirror the job description naturally; do not keyword-stuff.",
+                "- Save as PDF after your final edits if the employer requests PDF upload.",
+                "",
+            ]
+        )
 
         return "\n".join(lines).strip() + "\n"
 
@@ -388,19 +420,33 @@ class ResumeTailor:
     ) -> str:
         """Render a styled HTML version of the tailored resume."""
         parsed = fit_result.parsed_jd
-        full_name = escape((f"{profile.first_name} {profile.last_name}").strip() or "Candidate Name")
-        role_title = escape(profile.current_title or parsed.title or "Professional Resume Draft")
+        full_name = escape(
+            (f"{profile.first_name} {profile.last_name}").strip() or "Candidate Name"
+        )
+        role_title = escape(
+            profile.current_title or parsed.title or "Professional Resume Draft"
+        )
         contact_bits = [
             escape(bit)
-            for bit in [profile.email, profile.phone, profile.linkedin_url, profile.github_url, profile.portfolio_url]
+            for bit in [
+                profile.email,
+                profile.phone,
+                profile.linkedin_url,
+                profile.github_url,
+                profile.portfolio_url,
+            ]
             if bit
         ]
         contact_html = " &nbsp;•&nbsp; ".join(contact_bits)
 
         summary_html = "".join(f"<li>{escape(line)}</li>" for line in summary_lines)
-        highlights_html = "".join(f"<li>{escape(line)}</li>" for line in highlight_bullets)
+        highlights_html = "".join(
+            f"<li>{escape(line)}</li>" for line in highlight_bullets
+        )
         gaps_html = "".join(f"<li>{escape(line)}</li>" for line in fit_result.risks[:3])
-        keyword_html = "".join(f"<span class='chip'>{escape(word)}</span>" for word in keywords[:10])
+        keyword_html = "".join(
+            f"<span class='chip'>{escape(word)}</span>" for word in keywords[:10]
+        )
 
         return f"""<!doctype html>
 <html lang='en'>
@@ -451,8 +497,8 @@ class ResumeTailor:
     <section>
       <h2>Target Role</h2>
       <div class='meta'>
-        <div class='meta-card'><div class='meta-label'>Role</div><div class='meta-value'>{escape(parsed.title or 'Not specified')}</div></div>
-        <div class='meta-card'><div class='meta-label'>Company</div><div class='meta-value'>{escape(parsed.company or 'Not specified')}</div></div>
+        <div class='meta-card'><div class='meta-label'>Role</div><div class='meta-value'>{escape(parsed.title or "Not specified")}</div></div>
+        <div class='meta-card'><div class='meta-label'>Company</div><div class='meta-value'>{escape(parsed.company or "Not specified")}</div></div>
         <div class='meta-card'><div class='meta-label'>Fit Snapshot</div><div class='meta-value'>{fit_result.score}/100 — {escape(fit_result.recommendation)}</div></div>
       </div>
     </section>
@@ -503,7 +549,12 @@ class ResumeTailor:
                     path=str(pdf_path),
                     format="Letter",
                     print_background=True,
-                    margin={"top": "0.45in", "right": "0.45in", "bottom": "0.45in", "left": "0.45in"},
+                    margin={
+                        "top": "0.45in",
+                        "right": "0.45in",
+                        "bottom": "0.45in",
+                        "left": "0.45in",
+                    },
                 )
                 browser.close()
             return pdf_path
@@ -581,10 +632,14 @@ class ResumeTailor:
         if profile.authorized_to_work and not profile.requires_sponsorship:
             return "Authorized to work in the United States without sponsorship."
         if profile.requires_sponsorship:
-            return "Requires sponsorship; review job authorization requirements carefully."
+            return (
+                "Requires sponsorship; review job authorization requirements carefully."
+            )
         return "Review work authorization wording before submitting."
 
-    def _select_resume_source(self, profile: UserProfile, fit_result: JobFitResult) -> str:
+    def _select_resume_source(
+        self, profile: UserProfile, fit_result: JobFitResult
+    ) -> str:
         """Choose the strongest local base resume for the target lane.
 
         Lanes come from the user's ``resume_lanes`` config. With no config the
@@ -743,8 +798,12 @@ class ResumeTailor:
         parsed = result.fit_result.parsed_jd
         payload = {
             "markdown_path": str(result.output_path.expanduser().resolve()),
-            "html_path": str(result.html_path.expanduser().resolve()) if result.html_path else "",
-            "pdf_path": str(result.pdf_path.expanduser().resolve()) if result.pdf_path else "",
+            "html_path": str(result.html_path.expanduser().resolve())
+            if result.html_path
+            else "",
+            "pdf_path": str(result.pdf_path.expanduser().resolve())
+            if result.pdf_path
+            else "",
             "title": parsed.title or "",
             "company": parsed.company or "",
             "fit_score": result.fit_result.score,
@@ -759,7 +818,9 @@ class ResumeTailor:
             log.debug("Could not save latest tailored resume manifest: %s", exc)
 
     @staticmethod
-    def load_latest_draft_summary(output_dir: Path | None = None) -> dict[str, object] | None:
+    def load_latest_draft_summary(
+        output_dir: Path | None = None,
+    ) -> dict[str, object] | None:
         """Load the most recent tailored resume metadata if available."""
         manifest_path = (output_dir or OUTPUT_DIR) / LATEST_DRAFT_FILENAME
         if not manifest_path.exists():
@@ -793,7 +854,9 @@ class ResumeTailor:
 
     def _default_output_path(self, fit_result: JobFitResult) -> Path:
         parsed = fit_result.parsed_jd
-        stamp = hashlib.sha256((parsed.raw_text or parsed.summary()).encode()).hexdigest()[:8]
+        stamp = hashlib.sha256(
+            (parsed.raw_text or parsed.summary()).encode()
+        ).hexdigest()[:8]
         company = self._slugify(parsed.company or "company")
         title = self._slugify(parsed.title or "role")
         return self.output_dir / f"resume_{company}_{title}_{stamp}.md"

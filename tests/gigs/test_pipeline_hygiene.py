@@ -5,6 +5,7 @@ still-`new` rows, the one-time hygiene migration (duplicate collapse +
 legacy ID regeneration), auto-archive of stale `new` rows, and the
 archive-aware shrink guard in write().
 """
+
 from __future__ import annotations
 
 import json
@@ -53,8 +54,9 @@ def _point_store_at(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_merge_skips_repost_with_fresh_id_same_company_role() -> None:
-    existing = [Row(gig_id="wwr-111", status="new", company="Fusemachines",
-                    role="AI Engineer")]
+    existing = [
+        Row(gig_id="wwr-111", status="new", company="Fusemachines", role="AI Engineer")
+    ]
     repost = _gig(id="wwr-999")  # new ID, same company+title
     merged = merge_new_gigs(existing, [repost])
     assert len(merged) == 1
@@ -65,11 +67,19 @@ def test_merge_skips_repost_matched_via_ats_host() -> None:
     # The pipeline row was saved with an enriched greenhouse link; the
     # repost arrives with a different company spelling but the same ATS
     # apply URL host + title.
-    existing = [Row(gig_id="wwr-111", status="new", company="Fusemachines",
-                    role="AI Engineer",
-                    apply="https://boards.greenhouse.io/fuse/jobs/1")]
+    existing = [
+        Row(
+            gig_id="wwr-111",
+            status="new",
+            company="Fusemachines",
+            role="AI Engineer",
+            apply="https://boards.greenhouse.io/fuse/jobs/1",
+        )
+    ]
     repost = _gig(
-        id="rok-7", source="remoteok", company="Fusemachines Inc.",
+        id="rok-7",
+        source="remoteok",
+        company="Fusemachines Inc.",
         apply_url="https://boards.greenhouse.io/fuse/jobs/1",
     )
     merged = merge_new_gigs(existing, [repost])
@@ -79,14 +89,16 @@ def test_merge_skips_repost_matched_via_ats_host() -> None:
 def test_merge_collapses_key_duplicates_within_one_batch() -> None:
     # Two fresh gigs in the same batch sharing a key: only one row lands.
     merged = merge_new_gigs(
-        [], [_gig(id="wwr-1"), _gig(id="rok-2", source="remoteok")],
+        [],
+        [_gig(id="wwr-1"), _gig(id="rok-2", source="remoteok")],
     )
     assert len(merged) == 1
 
 
 def test_merge_still_adds_genuinely_new_roles() -> None:
-    existing = [Row(gig_id="wwr-111", status="new", company="Fusemachines",
-                    role="AI Engineer")]
+    existing = [
+        Row(gig_id="wwr-111", status="new", company="Fusemachines", role="AI Engineer")
+    ]
     other = _gig(id="wwr-222", title="Data Engineer")
     merged = merge_new_gigs(existing, [other])
     assert len(merged) == 2
@@ -98,8 +110,9 @@ def test_merge_still_adds_genuinely_new_roles() -> None:
 
 def test_rescore_updates_new_rows_from_collected_listing() -> None:
     gig = _gig()
-    rows = [Row(gig_id=gig.id, status="new", company=gig.company,
-                role=gig.title, score=999)]
+    rows = [
+        Row(gig_id=gig.id, status="new", company=gig.company, role=gig.title, score=999)
+    ]
     changed = rescore_new_rows(rows, [gig])
     assert changed == 1
     assert rows[0].score == score_gig(gig).fit_score
@@ -108,8 +121,16 @@ def test_rescore_updates_new_rows_from_collected_listing() -> None:
 
 def test_rescore_leaves_decided_rows_alone() -> None:
     gig = _gig()
-    rows = [Row(gig_id=gig.id, status="saved", company=gig.company,
-                role=gig.title, score=999, notes="mine")]
+    rows = [
+        Row(
+            gig_id=gig.id,
+            status="saved",
+            company=gig.company,
+            role=gig.title,
+            score=999,
+            notes="mine",
+        )
+    ]
     assert rescore_new_rows(rows, [gig]) == 0
     assert rows[0].score == 999
     assert rows[0].status == "saved"
@@ -118,15 +139,23 @@ def test_rescore_leaves_decided_rows_alone() -> None:
 
 def test_rescore_matches_by_key_when_listing_has_fresh_id() -> None:
     repost = _gig(id="wwr-fresh")
-    rows = [Row(gig_id="wwr-stale", status="new", company=repost.company,
-                role=repost.title, score=999)]
+    rows = [
+        Row(
+            gig_id="wwr-stale",
+            status="new",
+            company=repost.company,
+            role=repost.title,
+            score=999,
+        )
+    ]
     assert rescore_new_rows(rows, [repost]) == 1
     assert rows[0].score == score_gig(repost).fit_score
 
 
 def test_rescore_reconstructs_gig_when_listing_is_gone() -> None:
-    row = Row(gig_id="wwr-gone", status="new", company="Acme",
-              role="AI Engineer", score=999)
+    row = Row(
+        gig_id="wwr-gone", status="new", company="Acme", role="AI Engineer", score=999
+    )
     expected = score_gig(pipeline._gig_from_row(row)).fit_score
     assert rescore_new_rows([row], []) == 1
     assert row.score == expected
@@ -139,20 +168,36 @@ _LEGACY_ID = "wwr-1234567890123456789"
 
 
 def test_collapse_keeps_row_with_user_data() -> None:
-    fresh = Row(gig_id="wwr-aaa", status="new", company="Fusemachines",
-                role="AI Engineer", score=90)
-    decided = Row(gig_id="wwr-bbb", status="saved", company="Fusemachines",
-                  role="AI Engineer", notes="emailed Sam", score=10)
+    fresh = Row(
+        gig_id="wwr-aaa",
+        status="new",
+        company="Fusemachines",
+        role="AI Engineer",
+        score=90,
+    )
+    decided = Row(
+        gig_id="wwr-bbb",
+        status="saved",
+        company="Fusemachines",
+        role="AI Engineer",
+        notes="emailed Sam",
+        score=10,
+    )
     kept, removed, _ = hygiene_migration([fresh, decided])
     assert kept == [decided]
     assert removed == [fresh]
 
 
 def test_collapse_prefers_modern_id_when_neither_has_user_data() -> None:
-    legacy = Row(gig_id=_LEGACY_ID, status="new", company="Fusemachines",
-                 role="AI Engineer")
-    modern = Row(gig_id="wwr-deadbeef1234", status="new",
-                 company="Fusemachines", role="AI Engineer")
+    legacy = Row(
+        gig_id=_LEGACY_ID, status="new", company="Fusemachines", role="AI Engineer"
+    )
+    modern = Row(
+        gig_id="wwr-deadbeef1234",
+        status="new",
+        company="Fusemachines",
+        role="AI Engineer",
+    )
     kept, removed, _ = hygiene_migration([legacy, modern])
     assert kept == [modern]
     assert removed == [legacy]
@@ -168,8 +213,9 @@ def test_collapse_leaves_distinct_roles_alone() -> None:
 
 def test_legacy_id_regenerated_from_url() -> None:
     url = "https://weworkremotely.com/remote-jobs/acme-ai-engineer"
-    row = Row(gig_id=_LEGACY_ID, status="new", company="Acme",
-              role="AI Engineer", apply=url)
+    row = Row(
+        gig_id=_LEGACY_ID, status="new", company="Acme", role="AI Engineer", apply=url
+    )
     kept, _, remapped = hygiene_migration([row])
     new_id = f"wwr-{stable_url_suffix(url)}"
     assert remapped == {_LEGACY_ID: new_id}
@@ -177,16 +223,26 @@ def test_legacy_id_regenerated_from_url() -> None:
 
 
 def test_legacy_id_kept_when_no_http_url() -> None:
-    row = Row(gig_id=_LEGACY_ID, status="new", company="Acme",
-              role="AI Engineer", apply="mailto:jobs@acme.io")
+    row = Row(
+        gig_id=_LEGACY_ID,
+        status="new",
+        company="Acme",
+        role="AI Engineer",
+        apply="mailto:jobs@acme.io",
+    )
     kept, _, remapped = hygiene_migration([row])
     assert remapped == {}
     assert kept[0].gig_id == _LEGACY_ID
 
 
 def test_modern_ids_never_remapped() -> None:
-    row = Row(gig_id="wwr-deadbeef1234", status="new", company="Acme",
-              role="AI Engineer", apply="https://acme.io/jobs/1")
+    row = Row(
+        gig_id="wwr-deadbeef1234",
+        status="new",
+        company="Acme",
+        role="AI Engineer",
+        apply="https://acme.io/jobs/1",
+    )
     _, _, remapped = hygiene_migration([row])
     assert remapped == {}
 
@@ -200,15 +256,27 @@ def test_migrate_pipeline_hygiene_end_to_end(tmp_path: Path, monkeypatch) -> Non
     url = "https://weworkremotely.com/remote-jobs/fuse-ai-engineer"
     rows = [
         # Three Fusemachines duplicates: one decided, two stale `new`.
-        Row(gig_id="wwr-keep", status="saved", company="Fusemachines",
-            role="AI Engineer", notes="follow up"),
-        Row(gig_id="wwr-dup1", status="new", company="Fusemachines",
-            role="AI Engineer"),
-        Row(gig_id=_LEGACY_ID, status="new", company="Fusemachines",
-            role="AI Engineer"),
+        Row(
+            gig_id="wwr-keep",
+            status="saved",
+            company="Fusemachines",
+            role="AI Engineer",
+            notes="follow up",
+        ),
+        Row(
+            gig_id="wwr-dup1", status="new", company="Fusemachines", role="AI Engineer"
+        ),
+        Row(
+            gig_id=_LEGACY_ID, status="new", company="Fusemachines", role="AI Engineer"
+        ),
         # Unrelated legacy row whose ID gets regenerated.
-        Row(gig_id="wwr-9876543210987654321", status="new", company="Beta",
-            role="Data Engineer", apply=url),
+        Row(
+            gig_id="wwr-9876543210987654321",
+            status="new",
+            company="Beta",
+            role="Data Engineer",
+            apply=url,
+        ),
     ]
     write(rows, md)
 
@@ -232,7 +300,8 @@ def test_migrate_pipeline_hygiene_end_to_end(tmp_path: Path, monkeypatch) -> Non
 
     # Second run is a no-op (marker-gated).
     assert migrate_pipeline_hygiene(md, archive, marker) == {
-        "collapsed": 0, "ids_regenerated": 0,
+        "collapsed": 0,
+        "ids_regenerated": 0,
     }
     assert len(parse(md)) == 2
 
@@ -277,8 +346,9 @@ def test_split_archivable_never_touches_decided_rows() -> None:
 
 def test_split_archivable_uses_saved_date_when_no_stamp() -> None:
     now = datetime(2026, 6, 11)
-    dated = Row(gig_id="a", status="new",
-                saved=(now - timedelta(days=20)).strftime("%-m/%-d"))
+    dated = Row(
+        gig_id="a", status="new", saved=(now - timedelta(days=20)).strftime("%-m/%-d")
+    )
     keep, stale = split_archivable([dated], {}, now=now)
     assert stale == [dated]
     assert keep == []
@@ -333,10 +403,14 @@ def test_archive_stale_new_end_to_end(tmp_path: Path, monkeypatch) -> None:
     write([old, young], pipe_path)
     # Seed first_seen so age archive fires for old only (after store path patch)
     store.FIRST_SEEN_PATH.parent.mkdir(parents=True, exist_ok=True)
-    store.FIRST_SEEN_PATH.write_text(json.dumps({
-        "old": _iso_days_ago(10),
-        "young": _iso_days_ago(1),
-    }))
+    store.FIRST_SEEN_PATH.write_text(
+        json.dumps(
+            {
+                "old": _iso_days_ago(10),
+                "young": _iso_days_ago(1),
+            }
+        )
+    )
     # Bypass prefs so test is deterministic regardless of local preferences.json
     monkeypatch.setattr(pipe, "archive_after_days", lambda: 7)
     monkeypatch.setattr(pipe, "max_live_new", lambda: 30)
@@ -352,14 +426,16 @@ def test_append_to_archive_creates_documented_header_once(
     tmp_path: Path,
 ) -> None:
     archive = tmp_path / "pipeline_archive.md"
-    append_to_archive([Row(gig_id="a", status="new", company="Acme",
-                           role="X", notes="why")], archive)
+    append_to_archive(
+        [Row(gig_id="a", status="new", company="Acme", role="X", notes="why")], archive
+    )
     text = archive.read_text()
     assert text.startswith("# GigPilot Pipeline Archive")
     assert "sidecar" in text  # the header documents the format choice
 
-    append_to_archive([Row(gig_id="b", status="new", company="Beta",
-                           role="Y")], archive)
+    append_to_archive(
+        [Row(gig_id="b", status="new", company="Beta", role="Y")], archive
+    )
     text = archive.read_text()
     assert text.count("# GigPilot Pipeline Archive") == 1
     rows = parse_text(text)  # rows stay copy-back-able
@@ -372,8 +448,7 @@ def test_append_to_archive_creates_documented_header_once(
 
 def _five_rows() -> list[Row]:
     return [
-        Row(status="new", score=90 - i, company=f"Co{i}", role=f"R{i}",
-            gig_id=f"g-{i}")
+        Row(status="new", score=90 - i, company=f"Co{i}", role=f"R{i}", gig_id=f"g-{i}")
         for i in range(5)
     ]
 
@@ -397,7 +472,8 @@ def test_write_with_removed_ids_archives_past_the_guard(tmp_path: Path) -> None:
 
 
 def test_write_guard_still_trips_beyond_declared_removals(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path,
+    monkeypatch,
 ) -> None:
     out = tmp_path / "pipeline.md"
     rows = _five_rows()
@@ -406,21 +482,28 @@ def test_write_guard_still_trips_beyond_declared_removals(
     # Preservation disabled: simulate a buggy merge that loses rows beyond
     # the ones deliberately archived.
     monkeypatch.setattr(
-        pipeline, "_preserve_user_edits", lambda merged, on_disk, **kw: merged,
+        pipeline,
+        "_preserve_user_edits",
+        lambda merged, on_disk, **kw: merged,
     )
     write([], out, removed_ids={"g-0"})  # 5 lost, only 1 declared + 2 tolerance
     assert out.read_text() == before
 
 
 def test_archived_ids_survive_seen_prune_and_stay_filtered(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path,
+    monkeypatch,
 ) -> None:
     _point_store_at(tmp_path, monkeypatch)
     ancient = _iso_days_ago(store.MAX_RETAIN_DAYS + 10)
-    (tmp_path / "seen.json").write_text(json.dumps({
-        "forgettable": ancient,
-        "kept-forever": f"{store.ARCHIVED_PREFIX}{ancient}",
-    }))
+    (tmp_path / "seen.json").write_text(
+        json.dumps(
+            {
+                "forgettable": ancient,
+                "kept-forever": f"{store.ARCHIVED_PREFIX}{ancient}",
+            }
+        )
+    )
     store.mark_seen(["fresh"])  # any write runs the prune
     seen = json.loads((tmp_path / "seen.json").read_text())
     assert "forgettable" not in seen

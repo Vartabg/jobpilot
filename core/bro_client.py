@@ -14,24 +14,28 @@ Features:
 - Graceful degradation when Bro unavailable
 """
 
-import requests
 import time
-from typing import Optional
-from pathlib import Path
 from functools import wraps
+from pathlib import Path
+
+import requests
 
 from jobpilot.core.config import (
     BRO_BASE_URL,
+    HEALTH_CACHE_TTL,
+    MAX_RETRIES,
+    RETRY_DELAY,
     TIMEOUT_CHAT,
     TIMEOUT_FAST,
     TIMEOUT_SHORT,
-    MAX_RETRIES,
-    RETRY_DELAY,
-    HEALTH_CACHE_TTL,
 )
 
 # Cache for health status (avoid hammering /health)
-_health_cache: dict[str, object] = {"status": None, "timestamp": 0, "ttl": HEALTH_CACHE_TTL}
+_health_cache: dict[str, object] = {
+    "status": None,
+    "timestamp": 0,
+    "ttl": HEALTH_CACHE_TTL,
+}
 
 
 class BroUnavailable(Exception):
@@ -40,6 +44,7 @@ class BroUnavailable(Exception):
 
 def _retry_on_failure(max_retries: int = MAX_RETRIES, delay: float = RETRY_DELAY):
     """Decorator for automatic retry with exponential backoff."""
+
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -50,21 +55,26 @@ def _retry_on_failure(max_retries: int = MAX_RETRIES, delay: float = RETRY_DELAY
                 except requests.exceptions.ConnectionError as e:
                     last_error = e
                     if attempt < max_retries:
-                        time.sleep(delay * (2 ** attempt))
+                        time.sleep(delay * (2**attempt))
                 except Exception as e:
                     last_error = e
                     break  # Don't retry on non-connection errors
             raise last_error if last_error else Exception("Unknown error")
+
         return wrapper
+
     return decorator
 
 
 def get_health() -> dict[str, object]:
     """Get Bro health status (cached for 5 seconds)."""
     now = time.time()
-    if _health_cache["status"] and now - _health_cache["timestamp"] < _health_cache["ttl"]:
+    if (
+        _health_cache["status"]
+        and now - _health_cache["timestamp"] < _health_cache["ttl"]
+    ):
         return _health_cache["status"]
-    
+
     try:
         r = requests.get(f"{BRO_BASE_URL}/health", timeout=3)
         if r.status_code == 200:
@@ -74,7 +84,7 @@ def get_health() -> dict[str, object]:
             return status
     except Exception:
         pass
-    
+
     return {"status": "unreachable", "ollama": "unknown", "whisper": "unknown"}
 
 
@@ -106,7 +116,9 @@ def _post_with_retry(path: str, **kwargs) -> requests.Response:
     return requests.post(f"{BRO_BASE_URL}{path}", **kwargs)
 
 
-def chat_or_raise(message: str, context: Optional[str] = None, force_smart: bool = False) -> str:
+def chat_or_raise(
+    message: str, context: str | None = None, force_smart: bool = False
+) -> str:
     """
     Send a message to Bro's /chat endpoint (Ollama + RAG).
 
@@ -149,7 +161,7 @@ def chat_or_raise(message: str, context: Optional[str] = None, force_smart: bool
     raise BroUnavailable(f"Error: {r.status_code}")
 
 
-def chat(message: str, context: Optional[str] = None, force_smart: bool = False) -> str:
+def chat(message: str, context: str | None = None, force_smart: bool = False) -> str:
     """
     Like chat_or_raise(), but returns the error message as a string instead of
     raising — the legacy contract some callers still rely on. New code should
@@ -168,19 +180,17 @@ def speak(text: str) -> bool:
     """
     if not text or not text.strip():
         return False
-    
+
     try:
         r = requests.post(
-            f"{BRO_BASE_URL}/speak",
-            json={"text": text[:5000]},
-            timeout=TIMEOUT_SHORT
+            f"{BRO_BASE_URL}/speak", json={"text": text[:5000]}, timeout=TIMEOUT_SHORT
         )
         return r.status_code == 200
     except Exception:
         return False
 
 
-def send_command(command: str, args: Optional[dict] = None) -> dict:
+def send_command(command: str, args: dict | None = None) -> dict:
     """
     Send a command to Bro's /jobpilot/command endpoint.
     Used for voice → JobPilot control.
@@ -189,7 +199,7 @@ def send_command(command: str, args: Optional[dict] = None) -> dict:
         r = requests.post(
             f"{BRO_BASE_URL}/jobpilot/command",
             json={"command": command, "args": args or {}},
-            timeout=TIMEOUT_SHORT
+            timeout=TIMEOUT_SHORT,
         )
         return r.json() if r.status_code == 200 else {"error": r.status_code}
     except Exception as e:
@@ -202,10 +212,7 @@ def get_pending_commands() -> list[dict]:
     Returns list of {command, args} dicts.
     """
     try:
-        r = requests.get(
-            f"{BRO_BASE_URL}/jobpilot/commands",
-            timeout=TIMEOUT_SHORT
-        )
+        r = requests.get(f"{BRO_BASE_URL}/jobpilot/commands", timeout=TIMEOUT_SHORT)
         if r.status_code == 200:
             return r.json().get("commands", [])
         return []
@@ -222,7 +229,7 @@ def query_rag(query: str, top_k: int = 5) -> str:
         r = _post_with_retry(
             "/jobpilot/rag",
             json={"query": query, "top_k": top_k},
-            timeout=TIMEOUT_SHORT
+            timeout=TIMEOUT_SHORT,
         )
         if r.status_code == 200:
             return r.json().get("context", "")
@@ -234,27 +241,27 @@ def query_rag(query: str, top_k: int = 5) -> str:
 def transcribe(audio_path: Path) -> str:
     """
     Transcribe audio file using Bro's local whisper.cpp STT.
-    
+
     Args:
         audio_path: Path to audio file (wav, mp3, m4a, webm, ogg)
-        
+
     Returns:
         Transcribed text, or error message
     """
     if not audio_path.exists():
         return "[Error: audio file not found]"
-    
+
     if not is_whisper_ready():
         return "[STT unavailable: whisper not ready]"
-    
+
     try:
         with open(audio_path, "rb") as f:
             r = requests.post(
                 f"{BRO_BASE_URL}/transcribe",
                 files={"audio": (audio_path.name, f, "audio/wav")},
-                timeout=60
+                timeout=60,
             )
-        
+
         if r.status_code == 200:
             return r.json().get("text", "")
         elif r.status_code == 503:
@@ -270,27 +277,27 @@ def transcribe(audio_path: Path) -> str:
 def transcribe_bytes(audio_bytes: bytes, filename: str = "audio.webm") -> str:
     """
     Transcribe raw audio bytes using Bro's local whisper.cpp STT.
-    
+
     Args:
         audio_bytes: Raw audio data
         filename: Filename hint for format detection
-        
+
     Returns:
         Transcribed text, or error message
     """
     if not audio_bytes:
         return ""
-    
+
     if not is_whisper_ready():
         return "[STT unavailable: whisper not ready]"
-    
+
     try:
         r = requests.post(
             f"{BRO_BASE_URL}/transcribe",
             files={"audio": (filename, audio_bytes, "audio/webm")},
-            timeout=60
+            timeout=60,
         )
-        
+
         if r.status_code == 200:
             return r.json().get("text", "")
         elif r.status_code == 503:

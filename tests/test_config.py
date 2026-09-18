@@ -5,22 +5,21 @@ Tests for core/config.py — verify all constants are importable and sane.
 from pathlib import Path
 
 from jobpilot.core.config import (
+    BRO_BASE_URL,
     DATA_DIR,
+    FILL_RETRIES,
+    FILL_RETRY_DELAY_MS,
+    MAX_DELAY_MS,
+    MAX_RETRIES,
+    MIN_DELAY_MS,
+    RETRY_DELAY,
     SESSION_FILE,
     SETTINGS_FILE,
-    BRO_BASE_URL,
     TIMEOUT_CHAT,
     TIMEOUT_FAST,
     TIMEOUT_SHORT,
-    MAX_RETRIES,
-    RETRY_DELAY,
-    HEALTH_CACHE_TTL,
-    TYPO_CHARS,
-    MIN_DELAY_MS,
-    MAX_DELAY_MS,
     TYPO_CHANCE,
-    FILL_RETRIES,
-    FILL_RETRY_DELAY_MS,
+    TYPO_CHARS,
     WATCH_LOOP_INTERVAL,
 )
 
@@ -62,7 +61,7 @@ class TestTypingSimulation:
         assert 0.0 <= TYPO_CHANCE < 1.0
 
     def test_typo_chars_all_lowercase(self):
-        assert TYPO_CHARS == TYPO_CHARS.lower()
+        assert TYPO_CHARS.lower() == TYPO_CHARS
         assert len(TYPO_CHARS) == 26
 
 

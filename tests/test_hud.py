@@ -7,11 +7,12 @@ from jobpilot.ui.hud import (
     export_hud_text,
 )
 from jobpilot.ui.hud_state import HudState
-from jobpilot.ui.income_data import IncomeViewOptions, gig_badges, gig_pay_label
+from jobpilot.ui.income_data import IncomeViewOptions, gig_pay_label
 
 
 def test_gig_pay_label_hourly():
     from jobpilot.gigs.core.models import Gig
+
     g = Gig(id="x", source="hn", title="T", url="u", pay_hourly_est=45)
     assert gig_pay_label(g) == "$45/hr"
 
@@ -21,21 +22,36 @@ def test_export_hud_text_with_mocks(monkeypatch):
     from jobpilot.gigs.core.models import Gig
 
     gig = Gig(
-        id="hn-1", source="hn", title="Founding Engineer", url="https://example.com",
-        company="Acme", fit_score=90, apply_url="mailto:a@b.com",
+        id="hn-1",
+        source="hn",
+        title="Founding Engineer",
+        url="https://example.com",
+        company="Acme",
+        fit_score=90,
+        apply_url="mailto:a@b.com",
     )
     job = QueueJob(
-        id="abc", company="Civitech", title="Analytics Engineer",
-        url="https://jobs.lever.co/x", location="Austin, TX or Remote",
-        portal="lever", track="tech", fit_score=46, keywords=[], status="queued",
+        id="abc",
+        company="Civitech",
+        title="Analytics Engineer",
+        url="https://jobs.lever.co/x",
+        location="Austin, TX or Remote",
+        portal="lever",
+        track="tech",
+        fit_score=46,
+        keywords=[],
+        status="queued",
     )
     from jobpilot.ui.hud_state import HudData
 
     monkeypatch.setattr(
         "jobpilot.ui.hud.load_hud_data",
         lambda opts, **kw: HudData(
-            gigs=[gig], jobs=[job], gigs_meta={"shown": 1, "collected": 1},
-            pipe_rows=[], pipe_counts={},
+            gigs=[gig],
+            jobs=[job],
+            gigs_meta={"shown": 1, "collected": 1},
+            pipe_rows=[],
+            pipe_counts={},
         ),
     )
 
@@ -51,14 +67,33 @@ def test_build_hud_layout_renders(monkeypatch):
     monkeypatch.setattr(
         "jobpilot.ui.hud.load_hud_data",
         lambda opts, **kw: HudData(
-            gigs=[], jobs=[], gigs_meta={"shown": 0, "collected": 0, "fresh_count": 0},
-            pipe_rows=[], pipe_counts={},
+            gigs=[],
+            jobs=[],
+            gigs_meta={"shown": 0, "collected": 0, "fresh_count": 0},
+            pipe_rows=[],
+            pipe_counts={},
         ),
     )
-    monkeypatch.setattr("jobpilot.ui.hud.get_profile_store", lambda: type("S", (), {"load": lambda self: type("P", (), {"first_name": "G", "last_name": "V"})()})())
+    monkeypatch.setattr(
+        "jobpilot.ui.hud.get_profile_store",
+        lambda: type(
+            "S",
+            (),
+            {
+                "load": lambda self: type(
+                    "P", (), {"first_name": "G", "last_name": "V"}
+                )()
+            },
+        )(),
+    )
     monkeypatch.setattr("jobpilot.ui.hud.check_dashboard", lambda _p: False)
     monkeypatch.setattr("jobpilot.ui.hud.check_chrome", lambda _p=9222: False)
-    monkeypatch.setattr("jobpilot.ui.hud.get_application_tracker", lambda: type("T", (), {"get_stats": lambda self: {}, "close": lambda self: None})())
+    monkeypatch.setattr(
+        "jobpilot.ui.hud.get_application_tracker",
+        lambda: type(
+            "T", (), {"get_stats": lambda self: {}, "close": lambda self: None}
+        )(),
+    )
 
     layout = build_hud_layout(IncomeViewOptions())
     assert layout.name == "root"
@@ -84,20 +119,51 @@ def test_build_hud_layout_plain_mode(monkeypatch):
     from jobpilot.gigs.core.models import Gig
 
     gig = Gig(
-        id="g1", source="hn", title="Engineer", url="https://x.com",
-        company="Acme", fit_score=80, fit_reasons=["+10 async"],
+        id="g1",
+        source="hn",
+        title="Engineer",
+        url="https://x.com",
+        company="Acme",
+        fit_score=80,
+        fit_reasons=["+10 async"],
     )
     monkeypatch.setattr(
         "jobpilot.ui.hud.load_hud_data",
-        lambda opts, **kw: __import__("jobpilot.ui.hud_state", fromlist=["HudData"]).HudData(
-            gigs=[gig], jobs=[], gigs_meta={"shown": 1, "collected": 1, "fresh_count": 1},
-            pipe_rows=[], pipe_counts={},
+        lambda opts, **kw: __import__(
+            "jobpilot.ui.hud_state", fromlist=["HudData"]
+        ).HudData(
+            gigs=[gig],
+            jobs=[],
+            gigs_meta={"shown": 1, "collected": 1, "fresh_count": 1},
+            pipe_rows=[],
+            pipe_counts={},
         ),
     )
-    monkeypatch.setattr("jobpilot.ui.hud.get_profile_store", lambda: type("S", (), {"load": lambda self: type("P", (), {"first_name": "G", "last_name": "V"})()})())
+    monkeypatch.setattr(
+        "jobpilot.ui.hud.get_profile_store",
+        lambda: type(
+            "S",
+            (),
+            {
+                "load": lambda self: type(
+                    "P", (), {"first_name": "G", "last_name": "V"}
+                )()
+            },
+        )(),
+    )
     monkeypatch.setattr("jobpilot.ui.hud.check_dashboard", lambda _p: True)
     monkeypatch.setattr("jobpilot.ui.hud.check_chrome", lambda _p=9222: True)
-    monkeypatch.setattr("jobpilot.ui.hud.get_application_tracker", lambda: type("T", (), {"get_stats": lambda self: {"total": 1, "submitted": 0}, "close": lambda self: None})())
+    monkeypatch.setattr(
+        "jobpilot.ui.hud.get_application_tracker",
+        lambda: type(
+            "T",
+            (),
+            {
+                "get_stats": lambda self: {"total": 1, "submitted": 0},
+                "close": lambda self: None,
+            },
+        )(),
+    )
 
     layout = build_hud_layout(IncomeViewOptions(), plain=True)
     assert layout.name == "root"
@@ -106,14 +172,47 @@ def test_build_hud_layout_plain_mode(monkeypatch):
 def test_build_hud_layout_interactive_state(monkeypatch):
     from jobpilot.gigs.core.models import Gig
 
-    gig = Gig(id="g1", source="hn", title="Role", url="https://x.com", company="Co", fit_score=70, fit_reasons=["+10 async"])
-    monkeypatch.setattr("jobpilot.ui.hud.load_hud_data", lambda opts, **kw: __import__("jobpilot.ui.hud_state", fromlist=["HudData"]).HudData(
-        gigs=[gig], jobs=[], gigs_meta={"shown": 1, "collected": 1, "fresh_count": 1}, pipe_rows=[], pipe_counts={},
-    ))
-    monkeypatch.setattr("jobpilot.ui.hud.get_profile_store", lambda: type("S", (), {"load": lambda self: type("P", (), {"first_name": "G", "last_name": "V"})()})())
+    gig = Gig(
+        id="g1",
+        source="hn",
+        title="Role",
+        url="https://x.com",
+        company="Co",
+        fit_score=70,
+        fit_reasons=["+10 async"],
+    )
+    monkeypatch.setattr(
+        "jobpilot.ui.hud.load_hud_data",
+        lambda opts, **kw: __import__(
+            "jobpilot.ui.hud_state", fromlist=["HudData"]
+        ).HudData(
+            gigs=[gig],
+            jobs=[],
+            gigs_meta={"shown": 1, "collected": 1, "fresh_count": 1},
+            pipe_rows=[],
+            pipe_counts={},
+        ),
+    )
+    monkeypatch.setattr(
+        "jobpilot.ui.hud.get_profile_store",
+        lambda: type(
+            "S",
+            (),
+            {
+                "load": lambda self: type(
+                    "P", (), {"first_name": "G", "last_name": "V"}
+                )()
+            },
+        )(),
+    )
     monkeypatch.setattr("jobpilot.ui.hud.check_dashboard", lambda _p: False)
     monkeypatch.setattr("jobpilot.ui.hud.check_chrome", lambda _p=9222: False)
-    monkeypatch.setattr("jobpilot.ui.hud.get_application_tracker", lambda: type("T", (), {"get_stats": lambda self: {}, "close": lambda self: None})())
+    monkeypatch.setattr(
+        "jobpilot.ui.hud.get_application_tracker",
+        lambda: type(
+            "T", (), {"get_stats": lambda self: {}, "close": lambda self: None}
+        )(),
+    )
 
     state = HudState(lane="gig", gig_index=0)
     layout = build_hud_layout(IncomeViewOptions(), state=state, interactive=True)
