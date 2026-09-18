@@ -17,3 +17,12 @@ Mitigation: email uses a persistent native link with focus moved to it;
 blocked web popups leave the card unchanged and explain how to retry. No live
 ATS forms or email composers were exercised by the tests. Run the phone and
 VoiceOver release checks before calling the mobile experience verified.
+
+# Product preview limitations — 2026-09-07
+
+- Accessibility: keyboard navigation, skip links, automated WCAG AA checks, forced-color interaction and responsive 320/390/640/844px checks passed. A real VoiceOver session, physical-device testing and browser UI zoom at 400% have not been completed. Affected users: screen-reader, touch and low-vision users. Owner: Garo / product accessibility review. Mitigation: semantic HTML, visible focus, 44px targets, reduced motion, quick-copy fallback and source availability. Target: before a public accessibility-conformance claim; review by 2026-09-21.
+- Distribution: Apple Silicon macOS bundle is tested locally and includes dependency notices, but lacks Developer ID signing/notarization. Windows and Intel Mac installers are not verified. Owner: Garo / release packaging. Mitigation: explicit preview/platform labels and separate source download. Target: before promotion as a stable cross-platform product.
+- Product limits: no full-workspace restore, OCR, automatic follow-up reminders, AI rewriting, universal ATS filling, eligibility guesses, consent or submission. Text matching is not validated career guidance. Owner: Garo / product. Mitigation: limits in the UI and product guide. Revisit using observed user friction rather than speculative features.
+- Maintainability exceptions: the standalone bookmark function stays in one file so it can be directly embedded without a runtime dependency. The static HTML/CSS and browser acceptance script exceed 200 formatted lines as cohesive documents. `jobs.js` is 207 lines after extracting drafts. Owner: product maintainer; split further when feature additions introduce another responsibility. Reviewed 2026-09-07.
+
+BridgeBot was not found in the bounded local project search. No integration with it is claimed. Reused public-board and native-input approaches came from existing JobPilot code, then were independently tested within the standalone product.
