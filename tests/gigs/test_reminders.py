@@ -50,22 +50,34 @@ def test_format_for_applescript_is_locale_safe_numeric() -> None:
 
 
 def test_create_reminder_skips_when_osascript_missing() -> None:
-    with patch("jobpilot.gigs.core.reminders.shutil.which", return_value=None):
+    with (
+        patch("jobpilot.gigs.core.reminders.shutil.which", return_value=None),
+        patch("jobpilot.gigs.core.reminders.subprocess.run") as run,
+    ):
         result = create_reminder_for_gig(_gig())
     assert result is False
+    run.assert_not_called()
 
 
 def test_create_reminder_returns_false_on_subprocess_error() -> None:
     err = subprocess.CalledProcessError(1, ["osascript"], stderr="boom")
-    with patch("jobpilot.gigs.core.reminders.subprocess.run", side_effect=err):
+    with (
+        patch("jobpilot.gigs.core.reminders.shutil.which", return_value="/usr/bin/osascript"),
+        patch("jobpilot.gigs.core.reminders.subprocess.run", side_effect=err) as run,
+    ):
         result = create_reminder_for_gig(_gig())
     assert result is False
+    run.assert_called_once()
 
 
 def test_create_reminder_invokes_osascript_with_expected_payload() -> None:
-    with patch("jobpilot.gigs.core.reminders.subprocess.run") as run:
+    with (
+        patch("jobpilot.gigs.core.reminders.shutil.which", return_value="/usr/bin/osascript"),
+        patch("jobpilot.gigs.core.reminders.subprocess.run") as run,
+    ):
         result = create_reminder_for_gig(_gig())
     assert result is True
+    run.assert_called_once()
     args, _kwargs = run.call_args
     cmd = args[0]
     assert cmd[0] == "osascript" and cmd[1] == "-e"

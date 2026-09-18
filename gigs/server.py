@@ -19,12 +19,14 @@ from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
+from jobpilot.core.server_auth import access_url, install_authentication
 from jobpilot.gigs.core import swipe
 from jobpilot.gigs.core.logger import get_logger
 from jobpilot.gigs.core.models import Gig
 
 log = get_logger(__name__)
 app = FastAPI(title="GigPilot Swipe", version="1.0.0")
+install_authentication(app)
 
 _PAGE = Path(__file__).parent / "swipe.html"
 
@@ -142,13 +144,13 @@ def run_server(host: str = "127.0.0.1", port: int = 8799) -> None:
     import uvicorn
 
     ts = _tailscale_ip()
-    phone_url = f"http://{ts}:{port}/" if ts and host == ts else ""
+    phone_url = access_url(ts, port) if ts and host == ts else ""
     print("\n  GigPilot Swipe — open on your phone:")
     if phone_url:
         print(f"    {phone_url}   (Tailscale — works anywhere)")
-    print(f"    http://localhost:{port}/   (this Mac)\n")
+    if not phone_url:
+        print(f"    {access_url(host, port)}\n")
     if phone_url:
         _print_qr(phone_url)
-    # info level so page visits are logged — needed to confirm the phone is
-    # actually reaching the server.
-    uvicorn.run(app, host=host, port=port, log_level="info")
+    # Access URLs contain credentials; do not write them to request logs.
+    uvicorn.run(app, host=host, port=port, log_level="info", access_log=False)

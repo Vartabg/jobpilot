@@ -29,7 +29,7 @@
   .primary { background:var(--blue); color:#04122b; font-size:19px; }
   .ghost { background:transparent; color:var(--dim); border:1px solid var(--line); }
   .copybtn { background:#1f2630; color:var(--blue); border:1px solid var(--line);
-    border-radius:10px; padding:8px 12px; font-size:13px; font-weight:600; min-height:40px; }
+    border-radius:10px; padding:8px 12px; font-size:13px; font-weight:600; min-height:44px; }
   .copybtn:active { background:#2a3340; }
   .spinner { width:38px; height:38px; border:4px solid var(--line); border-top-color:var(--blue); border-radius:50%; animation:spin 0.9s linear infinite; }
   @keyframes spin { to { transform:rotate(360deg); } }
@@ -70,7 +70,7 @@
   .apply { background:var(--green); color:#04140a; }
   .hint { color:var(--dim); font-size:13px; text-align:center; padding:6px 0 0; }
   .srcrow { display:flex; gap:16px; align-items:center; font-size:14px; color:var(--dim); padding:4px 0; flex-wrap:wrap; }
-  .srcrow a { color:var(--blue); text-decoration:none; padding:8px 0; min-height:40px; display:inline-flex; align-items:center; }
+  .srcrow a { color:var(--blue); text-decoration:none; padding:8px 0; min-height:44px; display:inline-flex; align-items:center; }
   #snack { position:fixed; left:50%; bottom:88px; transform:translateX(-50%); max-width:92%;
     background:#1f2630; border:1px solid var(--line); color:var(--txt); padding:10px 14px;
     border-radius:12px; font-size:14px; display:flex; gap:14px; align-items:center; z-index:50; box-shadow:0 6px 20px rgba(0,0,0,.4); }
@@ -79,12 +79,23 @@
   .stamp { position:absolute; top:24px; font-size:30px; font-weight:800; padding:4px 14px; border-radius:10px; border:3px solid; opacity:0; transition:opacity .1s; z-index:2; }
   .stamp.apply { right:24px; color:var(--green); border-color:var(--green); transform:rotate(12deg); }
   .stamp.pass { left:24px; color:var(--red); border-color:var(--red); transform:rotate(-12deg); }
+  :focus-visible { outline:3px solid var(--blue); outline-offset:3px; }
+  .skip-link { position:absolute; left:8px; top:-100px; z-index:100; color:var(--txt); background:var(--bg); padding:12px; }
+  .skip-link:focus { top:8px; }
+  #snack { flex-wrap:wrap; }
+  #snack a { color:var(--blue); min-height:44px; display:inline-flex; align-items:center; }
+  #snack button { min-height:44px; }
+  @media (prefers-reduced-motion:reduce) {
+    *, *::before, *::after { animation:none !important; transition:none !important; }
+  }
+  @media (forced-colors:active) { button, a { border:1px solid ButtonText; } }
   .start-notes { color:var(--dim); font-size:13px; text-align:left; max-width:100%; }
   .start-notes li { margin:4px 0; }
 </style>
 </head>
 <body>
-<div id="app">
+<a class="skip-link" href="#app">Skip to jobs</a>
+<main id="app" tabindex="-1">
   <header><h1>GigPilot</h1><span id="count"></span></header>
   <div id="criteria"></div>
   <div id="start" class="screen">
@@ -95,14 +106,14 @@
     <div id="start-resume" class="resume" hidden></div>
     <button class="primary" onclick="load(0)">Get jobs</button>
   </div>
-  <div id="loading" class="screen" hidden><div class="spinner"></div><div style="color:var(--dim)">Scanning sources…</div></div>
+  <div id="loading" class="screen" role="status" hidden><div class="spinner"></div><div style="color:var(--dim)">Scanning sources…</div></div>
   <div id="deck" hidden></div>
   <div id="actions" class="actions" hidden>
     <button class="pass" onclick="decide('pass')">✕ Pass</button>
     <button class="apply" onclick="decide('apply')">★ Apply</button>
   </div>
   <div id="acthint" class="hint" hidden>Apply opens email or ATS. Expand Crib to paste answers.</div>
-  <div id="error" class="screen" hidden>
+  <div id="error" class="screen" role="alert" hidden>
     <div style="font-size:42px">⚠️</div>
     <div id="errmsg" style="color:var(--dim)">Couldn't reach the server.</div>
     <button class="primary" onclick="load(1)">Try again</button>
@@ -112,10 +123,11 @@
     <div id="donemsg" style="color:var(--dim)">All caught up.</div>
     <button class="ghost" onclick="load(1)">Rescan</button>
   </div>
-  <div id="snack" hidden></div>
-</div>
+  <div id="snack" role="status" aria-live="polite" hidden></div>
+</main>
 <script>
 let cards = [], i = 0, busy = false, last = null, snackTimer = null, meta = null;
+const authHeaders = () => ({ "X-JobPilot-Request": "1" });
 const $ = id => document.getElementById(id);
 const show = (id, on) => $(id).hidden = !on;
 const safeUrl = u => /^https?:\/\//i.test(u || "");
@@ -179,7 +191,7 @@ async function load(refresh) {
   show("loading", true);
   let data = null, ok = false;
   try {
-    const r = await fetch("/api/queue?refresh=" + (refresh ? 1 : 0));
+    const r = await fetch("/api/queue?refresh=" + (refresh ? 1 : 0), { headers: authHeaders() });
     ok = r.ok;
     data = await r.json();
   } catch (e) { ok = false; }
@@ -270,49 +282,93 @@ function render() {
     : "Apply opens the form — use Crib Copy buttons for paste fields.";
 }
 
+function restoreCard() {
+  const el = $("card");
+  if (el) { el.style.transform = ""; el.style.opacity = 1; }
+}
+
 async function decide(action, viaFling) {
   if (busy) return;
   const c = cards[i];
   if (!c) return;
   busy = true;
+  let applyWindow = null;
   if (action === "apply") {
-    if (c.is_mailto) window.location.href = c.apply_target;
-    else if (safeUrl(c.apply_target)) window.open(c.apply_target, "_blank", "noopener,noreferrer");
+    const validTarget = c.is_mailto ? /^mailto:/i.test(c.apply_target || "") : safeUrl(c.apply_target);
+    if (!validTarget) {
+      busy = false; restoreCard();
+      toast("No usable application link. Open the posting instead.", null);
+      return;
+    }
+    if (!c.is_mailto) {
+      // Reserve during the tap. Opening after fetch can lose user activation.
+      // Do not pass noopener here: it makes the returned handle null even when
+      // opening succeeds. Sever the opener before navigating the blank page.
+      applyWindow = window.open("about:blank", "_blank");
+      if (!applyWindow) {
+        busy = false; restoreCard();
+        toast("Allow pop-ups for JobPilot, then tap Apply again.", null);
+        return;
+      }
+      applyWindow.opener = null;
+      applyWindow.document.head.innerHTML = '<meta name="referrer" content="no-referrer">';
+      applyWindow.document.title = "Preparing application";
+      applyWindow.document.body.textContent = "Saving your choice. Your application will open here shortly.";
+    }
   }
   let ok = false;
   try {
-    const r = await fetch("/api/decision", { method:"POST", headers:{"Content-Type":"application/json"},
+    const r = await fetch("/api/decision", { method:"POST", headers:{"Content-Type":"application/json", ...authHeaders()},
       body: JSON.stringify({ id: c.id, action }) });
     ok = r.ok;
   } catch (e) { ok = false; }
   if (!ok) {
-    busy = false;
-    const el = $("card"); if (el) { el.style.transform = ""; el.style.opacity = 1; }
+    if (applyWindow && !applyWindow.closed) applyWindow.close();
+    busy = false; restoreCard();
     toast("Couldn't save — try again", null);
     return;
+  }
+  let followUp = null;
+  if (action === "apply") {
+    if (applyWindow && !applyWindow.closed) applyWindow.location.replace(c.apply_target);
+    else followUp = c.apply_target; // Mail and manually closed tabs need a fresh tap.
   }
   last = c;
   if (!viaFling) flingNow(action);
   setTimeout(() => {
     i++; busy = false; render();
-    toast(action === "apply" ? "Applied" : "Passed", undo);
+    toast(action === "apply" ? (followUp ? "Saved — ready to open" : "Application opened") : "Passed", undo, followUp);
   }, 220);
 }
 
 async function undo() {
-  if (!last) return;
-  const c = last; last = null; hideSnack();
-  try { await fetch("/api/undo", { method:"POST", headers:{"Content-Type":"application/json"},
-    body: JSON.stringify({ id: c.id }) }); } catch (e) {}
+  if (!last || busy) return;
+  const c = last;
+  busy = true;
+  let ok = false;
+  try {
+    const r = await fetch("/api/undo", { method:"POST", headers:{"Content-Type":"application/json", ...authHeaders()},
+      body: JSON.stringify({ id: c.id }) });
+    ok = r.ok;
+  } catch (e) { ok = false; }
+  busy = false;
+  if (!ok) { toast("Couldn't undo — try again", undo); return; }
+  last = null; hideSnack();
   cards.splice(i, 0, c);
   render();
 }
 
-function toast(msg, onUndo) {
-  $("snack").innerHTML = `<span>${esc(msg)}</span>` + (onUndo ? `<button id="undo-btn">Undo</button>` : "");
+function toast(msg, onUndo, target = null) {
+  const mail = /^mailto:/i.test(target || "");
+  const link = target && (mail || safeUrl(target))
+    ? `<a id="open-application" href="${esc(target)}" ${mail ? "" : 'target="_blank"'} rel="noopener noreferrer">${mail ? "Open email draft" : "Open application"}</a>` : "";
+  $("snack").innerHTML = `<span>${esc(msg)}</span>` + link + (onUndo ? `<button id="undo-btn">Undo</button>` : "");
   show("snack", true);
   if (onUndo) $("undo-btn").onclick = onUndo;
-  clearTimeout(snackTimer); snackTimer = setTimeout(hideSnack, 4000);
+  clearTimeout(snackTimer);
+  // Keep follow-up links available until the user acts.
+  if (!target) snackTimer = setTimeout(hideSnack, 4000);
+  else $("open-application").focus();
 }
 function hideSnack() { show("snack", false); }
 function flingNow(action) { const el = $("card"); if (el) flingEl(el, action === "apply" ? 1 : -1); }
@@ -336,12 +392,12 @@ function wireSwipe(el) {
     x0 = null; dx = 0;
   });
 }
-function flingEl(el, dir) { el.style.transform = `translateX(${dir * 600}px) rotate(${dir * 30}deg)`; el.style.opacity = 0; }
+function flingEl(el, dir) { if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return; el.style.transform = `translateX(${dir * 600}px) rotate(${dir * 30}deg)`; el.style.opacity = 0; }
 
 // Prefetch criteria for the start screen without a full scan.
 (async () => {
   try {
-    const r = await fetch("/api/meta");
+    const r = await fetch("/api/meta", { headers: authHeaders() });
     if (r.ok) setCriteria(await r.json());
   } catch (e) {}
 })();
