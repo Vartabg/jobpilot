@@ -5,12 +5,12 @@ SQLite-backed store of every application with URL deduplication,
 status tracking, and stats queries.
 """
 
+import re
 import sqlite3
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
-from dataclasses import dataclass
-import re
+
 from rich.console import Console
 from rich.table import Table
 
@@ -34,6 +34,7 @@ VALID_STATUSES = {
 @dataclass
 class TrackedApplication:
     """A single tracked application."""
+
     job_url: str
     job_title: str
     company: str
@@ -49,10 +50,10 @@ class ApplicationTracker:
     The database lives alongside other data files in data/applications.db.
     """
 
-    def __init__(self, data_dir: Optional[Path] = None):
+    def __init__(self, data_dir: Path | None = None):
         self.db_path = (data_dir or DB_DIR) / "applications.db"
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn: Optional[sqlite3.Connection] = None
+        self._conn: sqlite3.Connection | None = None
         self._ensure_schema()
 
     def _get_conn(self) -> sqlite3.Connection:
@@ -89,6 +90,7 @@ class ApplicationTracker:
     def _normalize_url(self, url: str) -> str:
         """Strip query params and fragments for dedup comparison."""
         from urllib.parse import urlparse, urlunparse
+
         if not url:
             return ""
         parsed = urlparse(url)
@@ -111,11 +113,14 @@ class ApplicationTracker:
         source: str = "manual",
     ) -> str:
         """Build a stable synthetic URL for external/manual applications."""
-        slug = re.sub(
-            r"[^a-z0-9]+",
-            "-",
-            f"{company}-{title or 'role'}".lower(),
-        ).strip("-") or "unknown"
+        slug = (
+            re.sub(
+                r"[^a-z0-9]+",
+                "-",
+                f"{company}-{title or 'role'}".lower(),
+            ).strip("-")
+            or "unknown"
+        )
         date = (applied_at or datetime.now().date().isoformat())[:10]
         source_slug = re.sub(r"[^a-z0-9]+", "-", source.lower()).strip("-") or "manual"
         return f"{source_slug}://{slug}/{date}"
@@ -123,19 +128,27 @@ class ApplicationTracker:
     def has_applied(self, url: str) -> bool:
         """Check if we've already started/submitted this job."""
         normalized = self._normalize_url(url)
-        row = self._get_conn().execute(
-            "SELECT status FROM applications WHERE job_url = ?",
-            (normalized,),
-        ).fetchone()
+        row = (
+            self._get_conn()
+            .execute(
+                "SELECT status FROM applications WHERE job_url = ?",
+                (normalized,),
+            )
+            .fetchone()
+        )
         return row is not None
 
-    def get_status(self, url: str) -> Optional[str]:
+    def get_status(self, url: str) -> str | None:
         """Get the status of a previous application."""
         normalized = self._normalize_url(url)
-        row = self._get_conn().execute(
-            "SELECT status FROM applications WHERE job_url = ?",
-            (normalized,),
-        ).fetchone()
+        row = (
+            self._get_conn()
+            .execute(
+                "SELECT status FROM applications WHERE job_url = ?",
+                (normalized,),
+            )
+            .fetchone()
+        )
         return row["status"] if row else None
 
     def has_applied_to_company(self, company: str) -> bool:
@@ -148,23 +161,31 @@ class ApplicationTracker:
         """
         if not company or not company.strip():
             return False
-        row = self._get_conn().execute(
-            "SELECT 1 FROM applications WHERE LOWER(company) = LOWER(?) LIMIT 1",
-            (company.strip(),),
-        ).fetchone()
+        row = (
+            self._get_conn()
+            .execute(
+                "SELECT 1 FROM applications WHERE LOWER(company) = LOWER(?) LIMIT 1",
+                (company.strip(),),
+            )
+            .fetchone()
+        )
         return row is not None
 
-    def company_status(self, company: str) -> Optional[str]:
+    def company_status(self, company: str) -> str | None:
         """Latest application status for a company (rejected > applied > queued)."""
         if not company or not company.strip():
             return None
         # Prefer terminal/interview states for company-first dedup. This is
         # intentionally conservative because JobPilot should steer toward one
         # best role per company, not repeated applications to the same firm.
-        rows = self._get_conn().execute(
-            "SELECT status FROM applications WHERE LOWER(company) = LOWER(?)",
-            (company.strip(),),
-        ).fetchall()
+        rows = (
+            self._get_conn()
+            .execute(
+                "SELECT status FROM applications WHERE LOWER(company) = LOWER(?)",
+                (company.strip(),),
+            )
+            .fetchall()
+        )
         if not rows:
             return None
         statuses = {r["status"] for r in rows}
@@ -182,7 +203,7 @@ class ApplicationTracker:
         title: str = "",
         url: str = "",
         status: str = "applied",
-        applied_at: Optional[str] = None,
+        applied_at: str | None = None,
         source: str = "manual",
     ) -> TrackedApplication:
         """Log an application from any source.
@@ -199,7 +220,11 @@ class ApplicationTracker:
         normalized_status = self._normalize_status(status)
         date_value = applied_at or datetime.now().date().isoformat()
         has_real_url = bool(url and url.strip())
-        raw_url = url.strip() if has_real_url else self._synthetic_url(company, title, date_value, source)
+        raw_url = (
+            url.strip()
+            if has_real_url
+            else self._synthetic_url(company, title, date_value, source)
+        )
         normalized_url = self._normalize_url(raw_url)
         now = datetime.now().isoformat()
         conn = self._get_conn()
@@ -233,7 +258,14 @@ class ApplicationTracker:
                            status = ?,
                            updated_at = ?
                        WHERE id = ?""",
-                    (stored_url, title, company, normalized_status, now, existing["id"]),
+                    (
+                        stored_url,
+                        title,
+                        company,
+                        normalized_status,
+                        now,
+                        existing["id"],
+                    ),
                 )
             except sqlite3.IntegrityError:
                 # The URL already belongs to a different row — it's the same
@@ -276,7 +308,8 @@ class ApplicationTracker:
         normalized = self._normalize_url(url)
         now = datetime.now().isoformat()
         conn = self._get_conn()
-        conn.execute("""
+        conn.execute(
+            """
             INSERT INTO applications (job_url, job_title, company, applied_at, status, updated_at)
             VALUES (?, ?, ?, ?, 'started', ?)
             ON CONFLICT(job_url) DO UPDATE SET
@@ -284,7 +317,9 @@ class ApplicationTracker:
                 company = excluded.company,
                 status = 'started',
                 updated_at = excluded.updated_at
-        """, (normalized, title, company, now, now))
+        """,
+            (normalized, title, company, now, now),
+        )
         conn.commit()
 
     def mark_submitted(self, url: str):
@@ -292,10 +327,13 @@ class ApplicationTracker:
         normalized = self._normalize_url(url)
         now = datetime.now().isoformat()
         conn = self._get_conn()
-        conn.execute("""
+        conn.execute(
+            """
             UPDATE applications SET status = 'submitted', updated_at = ?
             WHERE job_url = ?
-        """, (now, normalized))
+        """,
+            (now, normalized),
+        )
         conn.commit()
 
     def mark_applied(self, url: str, title: str = "", company: str = ""):
@@ -305,12 +343,15 @@ class ApplicationTracker:
         an upsert that stores the company/title and marks the row as applied.
         """
         if company:
-            self.log_application(company=company, title=title, url=url, status="applied", source="queue")
+            self.log_application(
+                company=company, title=title, url=url, status="applied", source="queue"
+            )
             return
         normalized = self._normalize_url(url)
         now = datetime.now().isoformat()
         conn = self._get_conn()
-        conn.execute("""
+        conn.execute(
+            """
             INSERT INTO applications (job_url, job_title, company, applied_at, status, updated_at)
             VALUES (?, ?, ?, ?, 'applied', ?)
             ON CONFLICT(job_url) DO UPDATE SET
@@ -318,7 +359,9 @@ class ApplicationTracker:
                 company = excluded.company,
                 status = 'applied',
                 updated_at = excluded.updated_at
-        """, (normalized, title, company, now, now))
+        """,
+            (normalized, title, company, now, now),
+        )
         conn.commit()
 
     def mark_abandoned(self, url: str, step_reached: int = 1):
@@ -326,10 +369,13 @@ class ApplicationTracker:
         normalized = self._normalize_url(url)
         now = datetime.now().isoformat()
         conn = self._get_conn()
-        conn.execute("""
+        conn.execute(
+            """
             UPDATE applications SET status = 'abandoned', step_reached = ?, updated_at = ?
             WHERE job_url = ?
-        """, (step_reached, now, normalized))
+        """,
+            (step_reached, now, normalized),
+        )
         conn.commit()
 
     def update_progress(self, url: str, fields_filled: int = 0):
@@ -337,31 +383,44 @@ class ApplicationTracker:
         normalized = self._normalize_url(url)
         now = datetime.now().isoformat()
         conn = self._get_conn()
-        conn.execute("""
+        conn.execute(
+            """
             UPDATE applications SET fields_filled = ?, updated_at = ?
             WHERE job_url = ?
-        """, (fields_filled, now, normalized))
+        """,
+            (fields_filled, now, normalized),
+        )
         conn.commit()
 
     # ------------------------------------------------------------------
     # Queries
     # ------------------------------------------------------------------
 
-    def get_recent(self, limit: int = 10, status: Optional[str] = None) -> list[TrackedApplication]:
+    def get_recent(
+        self, limit: int = 10, status: str | None = None
+    ) -> list[TrackedApplication]:
         """Get the most recent applications."""
         if status:
             normalized_status = self._normalize_status(status)
-            rows = self._get_conn().execute(
-                "SELECT job_url, job_title, company, applied_at, status "
-                "FROM applications WHERE status = ? ORDER BY applied_at DESC LIMIT ?",
-                (normalized_status, limit),
-            ).fetchall()
+            rows = (
+                self._get_conn()
+                .execute(
+                    "SELECT job_url, job_title, company, applied_at, status "
+                    "FROM applications WHERE status = ? ORDER BY applied_at DESC LIMIT ?",
+                    (normalized_status, limit),
+                )
+                .fetchall()
+            )
         else:
-            rows = self._get_conn().execute(
-                "SELECT job_url, job_title, company, applied_at, status "
-                "FROM applications ORDER BY applied_at DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
+            rows = (
+                self._get_conn()
+                .execute(
+                    "SELECT job_url, job_title, company, applied_at, status "
+                    "FROM applications ORDER BY applied_at DESC LIMIT ?",
+                    (limit,),
+                )
+                .fetchall()
+            )
         return [TrackedApplication(**dict(r)) for r in rows]
 
     def get_stats(self) -> dict[str, int]:
@@ -398,9 +457,13 @@ class ApplicationTracker:
 
     def get_status_counts(self) -> dict[str, int]:
         """Return counts by stored status."""
-        rows = self._get_conn().execute(
-            "SELECT status, COUNT(*) AS count FROM applications GROUP BY status"
-        ).fetchall()
+        rows = (
+            self._get_conn()
+            .execute(
+                "SELECT status, COUNT(*) AS count FROM applications GROUP BY status"
+            )
+            .fetchall()
+        )
         return {r["status"]: int(r["count"]) for r in rows}
 
     def display_recent(self, limit: int = 10):
@@ -444,7 +507,7 @@ class ApplicationTracker:
 # ---------------------------------------------------------------------------
 # Global singleton
 # ---------------------------------------------------------------------------
-_tracker: Optional[ApplicationTracker] = None
+_tracker: ApplicationTracker | None = None
 
 
 def get_application_tracker() -> ApplicationTracker:

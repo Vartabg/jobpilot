@@ -62,6 +62,7 @@ async def test_submit_application_is_disabled_by_policy():
 # Radio option matching — exact / word-boundary, never loose substring
 # ---------------------------------------------------------------------------
 
+
 def test_radio_no_does_not_match_none_of_the_above():
     assert _radio_option_matches("No", "None of the above", "") is False
     assert _radio_option_matches("No", "Not sure", "") is False
@@ -76,16 +77,20 @@ def test_radio_matches_value_attribute_exactly():
 def test_radio_word_boundary_matches_verbose_labels():
     assert _radio_option_matches("No", "No, I do not require sponsorship", "") is True
     assert _radio_option_matches("Yes", "Yes, I am authorized", "") is True
-    assert _radio_option_matches(
-        "Protected veteran",
-        "I identify as one or more of the classifications of a protected veteran",
-        "",
-    ) is True
+    assert (
+        _radio_option_matches(
+            "Protected veteran",
+            "I identify as one or more of the classifications of a protected veteran",
+            "",
+        )
+        is True
+    )
 
 
 # ---------------------------------------------------------------------------
 # Fakes for the async DOM helpers
 # ---------------------------------------------------------------------------
+
 
 class _FakeRadio:
     def __init__(self, label: str, value: str = ""):
@@ -165,6 +170,7 @@ async def test_answer_radios_picks_exact_no_not_none_of_the_above():
 # Demographics — never hardcoded, profile-driven, decline by default
 # ---------------------------------------------------------------------------
 
+
 def test_demographics_default_to_decline_when_unset():
     profile = UserProfile()
 
@@ -181,9 +187,12 @@ def test_demographics_default_to_decline_when_unset():
         assert answer == DECLINE_TO_SELF_IDENTIFY, question
 
     # The old hardcoded veteran claim must be gone
-    assert "protected veteran" not in _yesno_for_question(
-        "Are you a protected veteran?", UserProfile()
-    ).lower()
+    assert (
+        "protected veteran"
+        not in _yesno_for_question(
+            "Are you a protected veteran?", UserProfile()
+        ).lower()
+    )
 
 
 def test_demographics_override_from_profile_demographics_block():
@@ -212,6 +221,7 @@ def test_demographics_fall_back_to_custom_answers():
 # ---------------------------------------------------------------------------
 # Acknowledgment checkboxes — auto-checks must be surfaced for review
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_auto_checked_acknowledgments_are_tagged_for_review():

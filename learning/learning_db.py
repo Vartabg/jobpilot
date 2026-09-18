@@ -10,10 +10,8 @@ from __future__ import annotations
 import sqlite3
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 from jobpilot.core.config import DATA_DIR
-
 
 _DB_FILE = DATA_DIR / "learning.db"
 
@@ -54,7 +52,7 @@ class LearningDB:
     async application where DB calls happen from the same event loop.
     """
 
-    def __init__(self, db_path: Optional[Path] = None) -> None:
+    def __init__(self, db_path: Path | None = None) -> None:
         self.db_path = db_path or _DB_FILE
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(
@@ -72,7 +70,7 @@ class LearningDB:
     # Templates
     # -------------------------------------------------------------------
 
-    def get_template(self, question: str) -> Optional[str]:
+    def get_template(self, question: str) -> str | None:
         """Return the answer for *question*, or ``None``."""
         row = self._conn.execute(
             "SELECT answer FROM templates WHERE question = ?",
@@ -97,16 +95,15 @@ class LearningDB:
     def delete_template(self, question: str) -> bool:
         """Delete a template. Returns True if a row was deleted."""
         cur = self._conn.execute(
-            "DELETE FROM templates WHERE question = ?", (question,),
+            "DELETE FROM templates WHERE question = ?",
+            (question,),
         )
         self._conn.commit()
         return cur.rowcount > 0
 
     def get_all_templates(self) -> dict[str, str]:
         """Return all templates as ``{question: answer}``."""
-        rows = self._conn.execute(
-            "SELECT question, answer FROM templates"
-        ).fetchall()
+        rows = self._conn.execute("SELECT question, answer FROM templates").fetchall()
         return {r["question"]: r["answer"] for r in rows}
 
     def increment_usage(self, question: str) -> None:
@@ -130,17 +127,17 @@ class LearningDB:
         self,
         *,
         action_type: str,
-        timestamp: Optional[str] = None,
-        job_url: Optional[str] = None,
-        job_title: Optional[str] = None,
-        company: Optional[str] = None,
-        field_label: Optional[str] = None,
-        field_type: Optional[str] = None,
-        suggested_value: Optional[str] = None,
-        final_value: Optional[str] = None,
-        confidence: Optional[float] = None,
-        time_spent_ms: Optional[int] = None,
-        step_number: Optional[int] = None,
+        timestamp: str | None = None,
+        job_url: str | None = None,
+        job_title: str | None = None,
+        company: str | None = None,
+        field_label: str | None = None,
+        field_type: str | None = None,
+        suggested_value: str | None = None,
+        final_value: str | None = None,
+        confidence: float | None = None,
+        time_spent_ms: int | None = None,
+        step_number: int | None = None,
     ) -> int:
         """Insert an action row. Returns the new row id."""
         ts = timestamp or datetime.now().isoformat()
@@ -153,9 +150,18 @@ class LearningDB:
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                ts, action_type, job_url, job_title, company,
-                field_label, field_type, suggested_value, final_value,
-                confidence, time_spent_ms, step_number,
+                ts,
+                action_type,
+                job_url,
+                job_title,
+                company,
+                field_label,
+                field_type,
+                suggested_value,
+                final_value,
+                confidence,
+                time_spent_ms,
+                step_number,
             ),
         )
         self._conn.commit()
@@ -214,7 +220,9 @@ class LearningDB:
         ).fetchall()
         return {r["field_label"]: r["ok"] / r["total"] for r in rows if r["total"]}
 
-    def low_confidence_templates(self, threshold: float = 0.6) -> list[dict[str, object]]:
+    def low_confidence_templates(
+        self, threshold: float = 0.6
+    ) -> list[dict[str, object]]:
         """Templates whose most recent fill had confidence below *threshold*."""
         rows = self._conn.execute(
             """
@@ -260,16 +268,18 @@ class LearningDB:
         for r in rows:
             total = r["total_actions"] or 0
             ok = r["approved"] or 0
-            result.append({
-                "question": r["question"],
-                "answer": r["answer"],
-                "times_used": r["times_used"],
-                "created_at": r["created_at"],
-                "total_actions": total,
-                "approved": ok,
-                "edited": r["edited"] or 0,
-                "approval_rate": ok / total if total > 0 else None,
-            })
+            result.append(
+                {
+                    "question": r["question"],
+                    "answer": r["answer"],
+                    "times_used": r["times_used"],
+                    "created_at": r["created_at"],
+                    "total_actions": total,
+                    "approved": ok,
+                    "edited": r["edited"] or 0,
+                    "approval_rate": ok / total if total > 0 else None,
+                }
+            )
         return result
 
 
@@ -280,7 +290,7 @@ class LearningDB:
 _dbs: dict[str, LearningDB] = {}
 
 
-def get_learning_db(db_path: Optional[Path] = None) -> LearningDB:
+def get_learning_db(db_path: Path | None = None) -> LearningDB:
     """Return (and lazily create) a ``LearningDB`` instance for *db_path*."""
     resolved = str(db_path or _DB_FILE)
     if resolved not in _dbs:

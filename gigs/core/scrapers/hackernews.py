@@ -30,9 +30,22 @@ HEADERS = {
 
 KEYWORDS_ANY = [
     # Tech + AI tags the target profile matches
-    "ai", "ml", "python", "automation", "devops", "sre", "infrastructure",
-    "backend", "systems", "field", "deployed", "forward", "security",
-    "claude", "llm", "agent",
+    "ai",
+    "ml",
+    "python",
+    "automation",
+    "devops",
+    "sre",
+    "infrastructure",
+    "backend",
+    "systems",
+    "field",
+    "deployed",
+    "forward",
+    "security",
+    "claude",
+    "llm",
+    "agent",
 ]
 REMOTE_TAGS = ["remote", "distributed", "anywhere", "nyc", "new york"]
 SEEKING_WORK_SIGNALS = (
@@ -62,10 +75,27 @@ _APPLY_HOST_HINTS = (
     "join.com",
 )
 _APPLY_PATH_HINTS = (
-    "/careers", "/career", "/jobs", "/job/", "/apply",
-    "/hiring", "/work-with-us", "/openings", "/positions", "/join-us",
+    "/careers",
+    "/career",
+    "/jobs",
+    "/job/",
+    "/apply",
+    "/hiring",
+    "/work-with-us",
+    "/openings",
+    "/positions",
+    "/join-us",
 )
-_APPLY_INBOX_HINTS = ("jobs@", "hiring@", "careers@", "apply@", "hr@", "recruiting@", "recruit@", "talent@")
+_APPLY_INBOX_HINTS = (
+    "jobs@",
+    "hiring@",
+    "careers@",
+    "apply@",
+    "hr@",
+    "recruiting@",
+    "recruit@",
+    "talent@",
+)
 
 
 def _score_apply_target(href: str, label: str) -> int:
@@ -81,7 +111,9 @@ def _score_apply_target(href: str, label: str) -> int:
         return 70
     if any(p in href_l for p in _APPLY_PATH_HINTS):
         return 60
-    if any(t in label_l for t in ("apply", "careers", "open positions", "we're hiring")):
+    if any(
+        t in label_l for t in ("apply", "careers", "open positions", "we're hiring")
+    ):
         return 40
     return 0
 
@@ -108,13 +140,17 @@ def _extract_apply_url(html: str, plain_text: str) -> str:
 
     for email in _EMAIL_RE.findall(plain_text or ""):
         local = email.split("@", 1)[0].lower() + "@"
-        if any(local == hint or local.startswith(hint[:-1]) for hint in _APPLY_INBOX_HINTS):
+        if any(
+            local == hint or local.startswith(hint[:-1]) for hint in _APPLY_INBOX_HINTS
+        ):
             return f"mailto:{email}"
 
     for url in _PLAIN_URL_RE.findall(plain_text or ""):
         u = url.rstrip(".,);:")
         u_l = u.lower()
-        if any(h in u_l for h in _APPLY_HOST_HINTS) or any(p in u_l for p in _APPLY_PATH_HINTS):
+        if any(h in u_l for h in _APPLY_HOST_HINTS) or any(
+            p in u_l for p in _APPLY_PATH_HINTS
+        ):
             return u
 
     if best_score > 0:
@@ -146,8 +182,12 @@ def _find_latest_thread_id() -> int | None:
     for hit in hits:
         title = hit.get("title", "")
         if "who is hiring" in title.lower() and "freelancer" not in title.lower():
-            log.info("Latest Who's Hiring thread: %s (id=%s, %s)",
-                     title, hit.get("objectID"), hit.get("created_at"))
+            log.info(
+                "Latest Who's Hiring thread: %s (id=%s, %s)",
+                title,
+                hit.get("objectID"),
+                hit.get("created_at"),
+            )
             return int(hit.get("objectID"))
     return None
 
@@ -245,22 +285,28 @@ def scrape_hn_hiring() -> list[Gig]:
         title = role or header[:120]
         apply_url = _extract_apply_url(raw_html, text)
 
-        gigs.append(Gig(
-            id=f"hn-{child.get('id')}",
-            source="hn",
-            title=title or "HN hiring post",
-            company=company,
-            url=f"https://news.ycombinator.com/item?id={child.get('id')}",
-            apply_url=apply_url,
-            description=text[:1200],
-            location="Remote" if remote else "See post",
-            posted_at=datetime.fromtimestamp(child.get("created_at_i", 0)).isoformat() if child.get("created_at_i") else "",
-            salary_min=sal_min,
-            salary_max=sal_max,
-            pay_hourly_est=hourly,
-            currency=detect_currency(text),
-            tags=hits + (["remote"] if remote else []),
-        ))
+        gigs.append(
+            Gig(
+                id=f"hn-{child.get('id')}",
+                source="hn",
+                title=title or "HN hiring post",
+                company=company,
+                url=f"https://news.ycombinator.com/item?id={child.get('id')}",
+                apply_url=apply_url,
+                description=text[:1200],
+                location="Remote" if remote else "See post",
+                posted_at=datetime.fromtimestamp(
+                    child.get("created_at_i", 0)
+                ).isoformat()
+                if child.get("created_at_i")
+                else "",
+                salary_min=sal_min,
+                salary_max=sal_max,
+                pay_hourly_est=hourly,
+                currency=detect_currency(text),
+                tags=hits + (["remote"] if remote else []),
+            )
+        )
 
     log.info("HN: %d posts in thread %s", len(gigs), thread_id)
     return gigs

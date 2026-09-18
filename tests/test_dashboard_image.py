@@ -41,8 +41,13 @@ def test_render_scale_one_is_smaller_canvas():
 
 def test_ascii_dashboard_has_all_sections():
     txt = ascii_dashboard(_sample())
-    for section in ("Gigs pipeline", "Job applications", "Source health",
-                    "Income velocity", "What's hot"):
+    for section in (
+        "Gigs pipeline",
+        "Job applications",
+        "Source health",
+        "Income velocity",
+        "What's hot",
+    ):
         assert section in txt
     assert "Acme — AI Engineer" in txt
     assert "✗ HN Who's Hiring" in txt  # failed source marked

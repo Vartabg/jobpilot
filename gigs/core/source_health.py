@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import datetime, timedelta
-from pathlib import Path
+from datetime import datetime
 
 from jobpilot.gigs.core.io_lock import atomic_write_text, file_lock
 from jobpilot.gigs.core.paths import data_dir
@@ -120,5 +119,7 @@ def format_dashboard() -> str:
     stale = stale_zero_sources()
     if stale:
         lines.append("")
-        lines.append(f"Alert: zero results {ZERO_ALERT_STREAK}+ runs: {', '.join(stale)}")
+        lines.append(
+            f"Alert: zero results {ZERO_ALERT_STREAK}+ runs: {', '.join(stale)}"
+        )
     return "\n".join(lines)

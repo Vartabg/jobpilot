@@ -13,6 +13,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+
 from jobpilot.core.cdp_bridge import CDPBridge
 
 
@@ -93,6 +94,7 @@ async def test_get_active_page_returns_none_when_only_chrome_internal_pages():
 # was left live in the browser and the application ended up submitted anyway.
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_neutralize_page_matches_by_exact_url_among_other_tabs():
     """Must navigate the specific staged tab, not whatever get_active_page() would pick."""
@@ -115,7 +117,9 @@ async def test_neutralize_page_falls_back_to_last_page_when_url_not_found():
     fallback = _make_page("https://jobs.ashbyhq.com/acme/apply/123")
     bridge._page = fallback
 
-    result = await bridge.neutralize_page("https://jobs.ashbyhq.com/apply/already-closed")
+    result = await bridge.neutralize_page(
+        "https://jobs.ashbyhq.com/apply/already-closed"
+    )
 
     assert result is True
     fallback.goto.assert_awaited_once_with("about:blank", timeout=5000)
@@ -133,7 +137,9 @@ async def test_neutralize_page_returns_false_with_no_page_available():
 async def test_neutralize_page_swallows_goto_failure():
     """A tab that's already closed must not blow up the caller — best-effort only."""
     staged = _make_page("https://jobs.ashbyhq.com/acme/apply/123")
-    staged.goto = AsyncMock(side_effect=Exception("Target page, context or browser has been closed"))
+    staged.goto = AsyncMock(
+        side_effect=Exception("Target page, context or browser has been closed")
+    )
     bridge = _bridge_with_pages([staged])
 
     result = await bridge.neutralize_page("https://jobs.ashbyhq.com/acme/apply/123")

@@ -16,6 +16,7 @@ file.
 Usage:
     make_paste_sheet.py <answers.md> [-o OUTPUT.txt]
 """
+
 from __future__ import annotations
 
 import argparse
@@ -74,7 +75,12 @@ def parse_answers(md_text: str) -> dict:
             buf.append(line)
     flush()
 
-    return {"title": title, "source": source, "form_values": form_values, "sections": sections}
+    return {
+        "title": title,
+        "source": source,
+        "form_values": form_values,
+        "sections": sections,
+    }
 
 
 def render_sheet(parsed: dict) -> str:
@@ -107,7 +113,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Generate a human paste sheet from a JobPilot answers markdown file."
     )
-    parser.add_argument("answers", type=Path, help="Path to data/answers/<company>/<role>.md")
+    parser.add_argument(
+        "answers", type=Path, help="Path to data/answers/<company>/<role>.md"
+    )
     parser.add_argument(
         "-o",
         "--output",
@@ -123,13 +131,18 @@ def main(argv: list[str] | None = None) -> int:
 
     parsed = parse_answers(args.answers.read_text())
     if not parsed["sections"] and not parsed["form_values"]:
-        print(f"error: no form values or Q&A sections parsed from {args.answers}", file=sys.stderr)
+        print(
+            f"error: no form values or Q&A sections parsed from {args.answers}",
+            file=sys.stderr,
+        )
         return 1
 
     sheet = render_sheet(parsed)
     out = args.output or (args.answers.parent / "PASTE_SHEET.txt")
     out.write_text(sheet)
-    print(f"wrote {out} ({len(sheet)} chars, {len(parsed['sections'])} answer sections)")
+    print(
+        f"wrote {out} ({len(sheet)} chars, {len(parsed['sections'])} answer sections)"
+    )
     return 0
 
 

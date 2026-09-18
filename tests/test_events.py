@@ -2,7 +2,6 @@
 Tests for core/events.py — EventBus pub/sub.
 """
 
-import pytest
 from jobpilot.core.events import EventBus
 
 

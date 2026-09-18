@@ -13,7 +13,6 @@ import textwrap
 import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 from jobpilot.core import llm_client
 from jobpilot.core.config import DATA_DIR
@@ -74,9 +73,9 @@ class ApplicationAnswerer:
 
     def __init__(
         self,
-        profile_store: Optional[ProfileStore] = None,
+        profile_store: ProfileStore | None = None,
         *,
-        accounts_path: Optional[Path] = None,
+        accounts_path: Path | None = None,
         use_bro: bool = True,
     ) -> None:
         self.profile_store = profile_store or get_profile_store()
@@ -96,7 +95,9 @@ class ApplicationAnswerer:
         clean_question = " ".join((question or "").split())
         profile = self.profile_store.load()
         accounts = self.load_accounts()
-        selected = self.select_accounts(clean_question, jd_text=jd_text, company=company, title=title)
+        selected = self.select_accounts(
+            clean_question, jd_text=jd_text, company=company, title=title
+        )
 
         if not selected:
             return AnswerDraft(
@@ -104,7 +105,9 @@ class ApplicationAnswerer:
                 answer="",
                 company=company,
                 title=title,
-                warnings=["No true accounts are available. Add data/true_accounts.json entries before drafting."],
+                warnings=[
+                    "No true accounts are available. Add data/true_accounts.json entries before drafting."
+                ],
             )
 
         ai_answer = ""
@@ -138,7 +141,9 @@ class ApplicationAnswerer:
 
         warnings: list[str] = []
         if source == "fallback":
-            warnings.append("AI backend was unavailable or disabled; used account-grounded fallback drafting.")
+            warnings.append(
+                "AI backend was unavailable or disabled; used account-grounded fallback drafting."
+            )
         if len(answer.split()) > max_words:
             answer = " ".join(answer.split()[:max_words]).rstrip(",.;") + "."
             warnings.append(f"Trimmed answer to {max_words} words.")
@@ -176,11 +181,27 @@ class ApplicationAnswerer:
                     source=str(item.get("source", "")).strip(),
                     summary=str(item.get("summary", "")).strip(),
                     label=str(item.get("label", "")).strip(),
-                    details=[str(v).strip() for v in item.get("details", []) if str(v).strip()],
-                    skills=[str(v).strip() for v in item.get("skills", []) if str(v).strip()],
-                    question_fit=[str(v).strip() for v in item.get("question_fit", []) if str(v).strip()],
-                    truth_boundaries=[str(v).strip() for v in item.get("truth_boundaries", []) if str(v).strip()],
-                    tags=[str(v).strip() for v in item.get("tags", []) if str(v).strip()],
+                    details=[
+                        str(v).strip()
+                        for v in item.get("details", [])
+                        if str(v).strip()
+                    ],
+                    skills=[
+                        str(v).strip() for v in item.get("skills", []) if str(v).strip()
+                    ],
+                    question_fit=[
+                        str(v).strip()
+                        for v in item.get("question_fit", [])
+                        if str(v).strip()
+                    ],
+                    truth_boundaries=[
+                        str(v).strip()
+                        for v in item.get("truth_boundaries", [])
+                        if str(v).strip()
+                    ],
+                    tags=[
+                        str(v).strip() for v in item.get("tags", []) if str(v).strip()
+                    ],
                 )
             )
         return accounts
@@ -199,7 +220,11 @@ class ApplicationAnswerer:
         narrative = raw.get("narrative", {}) if isinstance(raw, dict) else {}
         if not isinstance(narrative, dict):
             return {}
-        return {str(key): str(value).strip() for key, value in narrative.items() if str(value).strip()}
+        return {
+            str(key): str(value).strip()
+            for key, value in narrative.items()
+            if str(value).strip()
+        }
 
     def select_accounts(
         self,
@@ -217,25 +242,38 @@ class ApplicationAnswerer:
         haystack = self._tokenize(" ".join([question, jd_text[:4000], company, title]))
         scored: list[tuple[int, TrueAccount]] = []
         for account in accounts:
-            account_text = " ".join([
-                account.id,
-                account.title,
-                account.summary,
-                " ".join(account.details),
-                " ".join(account.skills),
-                " ".join(account.question_fit),
-            ])
+            account_text = " ".join(
+                [
+                    account.id,
+                    account.title,
+                    account.summary,
+                    " ".join(account.details),
+                    " ".join(account.skills),
+                    " ".join(account.question_fit),
+                ]
+            )
             account_tokens = self._tokenize(account_text)
             overlap = len(haystack & account_tokens)
             phrase_hits = sum(
-                2 for phrase in account.question_fit + account.skills
-                if phrase and phrase.lower() in " ".join([question, jd_text, title]).lower()
+                2
+                for phrase in account.question_fit + account.skills
+                if phrase
+                and phrase.lower() in " ".join([question, jd_text, title]).lower()
             )
             score = overlap + phrase_hits
             if "why" in question.lower() and "headline" in account.tags:
                 score += 2
             role_text = " ".join([question, jd_text, title]).lower()
-            if any(token in role_text for token in ("forward deployed", "client", "customer", "travel", "deployment")):
+            if any(
+                token in role_text
+                for token in (
+                    "forward deployed",
+                    "client",
+                    "customer",
+                    "travel",
+                    "deployment",
+                )
+            ):
                 if "field-primary" in account.tags:
                     score += 6
                 elif "field" in account.tags:
@@ -246,7 +284,9 @@ class ApplicationAnswerer:
 
         scored.sort(key=lambda item: item[0], reverse=True)
         selected = [account for score, account in scored if score > 0][:limit]
-        return selected or [account for _score, account in scored[: min(limit, len(scored))]]
+        return selected or [
+            account for _score, account in scored[: min(limit, len(scored))]
+        ]
 
     def _draft_with_ai(
         self,
@@ -273,7 +313,9 @@ class ApplicationAnswerer:
         except llm_client.LLMUnavailable:
             return ""
         reply = reply.strip()
-        reply = re.sub(r"^(answer|draft answer)\s*:\s*", "", reply, flags=re.IGNORECASE).strip()
+        reply = re.sub(
+            r"^(answer|draft answer)\s*:\s*", "", reply, flags=re.IGNORECASE
+        ).strip()
         if len(reply.split()) < 12:
             return ""
         return reply
@@ -292,18 +334,20 @@ class ApplicationAnswerer:
         account_blocks = []
         for account in accounts:
             account_blocks.append(
-                "\n".join([
-                    f"ACCOUNT ID: {account.id}",
-                    f"TITLE: {account.title}",
-                    f"TIMEFRAME: {account.timeframe}",
-                    f"SUMMARY: {account.summary}",
-                    "DETAILS:",
-                    *[f"- {detail}" for detail in account.details],
-                    "SKILLS:",
-                    *[f"- {skill}" for skill in account.skills],
-                    "TRUTH BOUNDARIES:",
-                    *[f"- {boundary}" for boundary in account.truth_boundaries],
-                ])
+                "\n".join(
+                    [
+                        f"ACCOUNT ID: {account.id}",
+                        f"TITLE: {account.title}",
+                        f"TIMEFRAME: {account.timeframe}",
+                        f"SUMMARY: {account.summary}",
+                        "DETAILS:",
+                        *[f"- {detail}" for detail in account.details],
+                        "SKILLS:",
+                        *[f"- {skill}" for skill in account.skills],
+                        "TRUTH BOUNDARIES:",
+                        *[f"- {boundary}" for boundary in account.truth_boundaries],
+                    ]
+                )
             )
 
         profile_bits = [
@@ -311,8 +355,12 @@ class ApplicationAnswerer:
             f"Current title: {profile.current_title}",
             f"Location: {profile.city}, {profile.state}",
             f"Years of experience: {profile.years_of_experience}",
-            "US work authorized: yes" if profile.authorized_to_work else "US work authorized: no",
-            "Requires sponsorship: yes" if profile.requires_sponsorship else "Requires sponsorship: no",
+            "US work authorized: yes"
+            if profile.authorized_to_work
+            else "US work authorized: no",
+            "Requires sponsorship: yes"
+            if profile.requires_sponsorship
+            else "Requires sponsorship: no",
         ]
 
         return textwrap.dedent(f"""
@@ -376,14 +424,31 @@ class ApplicationAnswerer:
                 f"The clearest account is {self._account_label(primary)}: {self._first_person_summary(primary)}",
             ]
             if field_account and field_account.id != primary.id:
-                parts.append(f"I also bring field experience from {self._account_label(field_account)}, where the work required customer-site execution, debugging, and ownership under pressure.")
+                parts.append(
+                    f"I also bring field experience from {self._account_label(field_account)}, where the work required customer-site execution, debugging, and ownership under pressure."
+                )
             elif secondary:
-                parts.append(f"A second relevant account is {self._account_label(secondary)}: {self._first_person_summary(secondary)}")
-            parts.append("That mix is why the role feels like a practical fit rather than just a keyword match.")
+                parts.append(
+                    f"A second relevant account is {self._account_label(secondary)}: {self._first_person_summary(secondary)}"
+                )
+            parts.append(
+                "That mix is why the role feels like a practical fit rather than just a keyword match."
+            )
             return " ".join(parts)
 
-        if any(token in q for token in ("experience", "tell us about", "describe", "project", "challenge")):
-            details = " ".join(self._first_person_detail(detail) for detail in primary.details[:3])
+        if any(
+            token in q
+            for token in (
+                "experience",
+                "tell us about",
+                "describe",
+                "project",
+                "challenge",
+            )
+        ):
+            details = " ".join(
+                self._first_person_detail(detail) for detail in primary.details[:3]
+            )
             answer = f"One relevant account is {self._account_label(primary)}. {self._first_person_summary(primary)}"
             if details:
                 answer += f" In practice, that meant: {details}"
@@ -393,13 +458,18 @@ class ApplicationAnswerer:
 
         if any(token in q for token in ("strength", "bring", "contribution", "fit")):
             skills = ", ".join(primary.skills[:5])
-            opener = narrative.get("strengths_opener", "") or "My strengths come from documented work rather than generic claims."
+            opener = (
+                narrative.get("strengths_opener", "")
+                or "My strengths come from documented work rather than generic claims."
+            )
             if skills:
                 answer = f"{opener} From {self._account_label(primary)}, I can point to hands-on work across {skills}. "
             else:
                 answer = f"{opener} From {self._account_label(primary)}, I can point to documented hands-on work. "
             if secondary:
-                secondary_pitch = narrative.get("strengths_secondary", "") or ", ".join(secondary.skills[:4])
+                secondary_pitch = narrative.get("strengths_secondary", "") or ", ".join(
+                    secondary.skills[:4]
+                )
                 if secondary_pitch:
                     answer += f"From {self._account_label(secondary)}, I bring {secondary_pitch}."
                 else:
@@ -429,7 +499,9 @@ class ApplicationAnswerer:
         current_title = (profile.current_title or "").strip()
         years = profile.years_of_experience or 0
         if current_title and years:
-            parts.append(f"I am {self._with_article(current_title)} with {years}+ years of experience.")
+            parts.append(
+                f"I am {self._with_article(current_title)} with {years}+ years of experience."
+            )
         elif current_title:
             parts.append(f"I am {self._with_article(current_title)}.")
         elif years:
@@ -445,8 +517,11 @@ class ApplicationAnswerer:
     @staticmethod
     def _tokenize(text: str) -> set[str]:
         return {
-            token for token in re.sub(r"[^a-z0-9+#.]+", " ", (text or "").lower()).split()
-            if len(token) > 2 and token not in {"the", "and", "for", "with", "this", "that", "role", "job"}
+            token
+            for token in re.sub(r"[^a-z0-9+#.]+", " ", (text or "").lower()).split()
+            if len(token) > 2
+            and token
+            not in {"the", "and", "for", "with", "this", "that", "role", "job"}
         }
 
     @staticmethod
@@ -462,7 +537,11 @@ class ApplicationAnswerer:
         }
         for old, new in replacements.items():
             text = text.replace(old, new)
-        text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
+        text = (
+            unicodedata.normalize("NFKD", text)
+            .encode("ascii", "ignore")
+            .decode("ascii")
+        )
         return re.sub(r"\s+", " ", text).strip()
 
     @staticmethod
@@ -470,7 +549,10 @@ class ApplicationAnswerer:
         cleaned = re.sub(r"[-_]+", " ", (company or "")).strip()
         if not cleaned:
             return ""
-        words = ["AI" if word.lower() == "ai" else word.capitalize() for word in cleaned.split()]
+        words = [
+            "AI" if word.lower() == "ai" else word.capitalize()
+            for word in cleaned.split()
+        ]
         label = " ".join(words)
         return label.replace("P 1 AI", "P-1 AI")
 
@@ -500,7 +582,7 @@ class ApplicationAnswerer:
         }
         for old, new in replacements.items():
             if summary.startswith(old):
-                return new + summary[len(old):]
+                return new + summary[len(old) :]
         return summary
 
     @staticmethod
@@ -523,6 +605,6 @@ class ApplicationAnswerer:
         }
         for old, new in replacements.items():
             if cleaned.startswith(old):
-                cleaned = new + cleaned[len(old):]
+                cleaned = new + cleaned[len(old) :]
                 break
         return f"{cleaned}."

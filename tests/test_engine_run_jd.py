@@ -10,7 +10,6 @@ and contextual answer matching (``match_with_context``) was never reached.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -43,13 +42,14 @@ Salary: $150,000 - $180,000 /yr. This role is remote.
 # Lightweight fakes
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class FakePageInfo:
     url: str = JOB_URL
     title: str = "Senior Python Engineer - Easy Apply"
     is_linkedin: bool = True
     is_job_application: bool = True
-    application_step: Optional[int] = 1
+    application_step: int | None = 1
 
 
 @dataclass
@@ -107,6 +107,7 @@ class FakeBrokenJDPage(FakeJDPage):
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def events():
@@ -179,15 +180,23 @@ def mock_tracker():
     tracker = MagicMock()
     tracker.get_status.return_value = None
     tracker.get_stats.return_value = {
-        "submitted": 0, "abandoned": 0, "in_progress": 0, "total": 0,
+        "submitted": 0,
+        "abandoned": 0,
+        "in_progress": 0,
+        "total": 0,
     }
     return tracker
 
 
 @pytest.fixture
 def engine(
-    mock_bridge, events, mock_overlay, mock_chat,
-    mock_profile_store, mock_question_matcher, mock_tracker,
+    mock_bridge,
+    events,
+    mock_overlay,
+    mock_chat,
+    mock_profile_store,
+    mock_question_matcher,
+    mock_tracker,
 ):
     return ApplicationEngine(
         bridge=mock_bridge,
@@ -232,8 +241,14 @@ async def _run_one_iteration(engine, *, app_page=None, scorer=None):
         patch("jobpilot.core.engine_run._save_session"),
         patch("jobpilot.core.engine_run._clear_session"),
         patch("jobpilot.core.engine_run.get_pending_commands", return_value=[]),
-        patch("jobpilot.core.engine.get_health", return_value={"status": "ok", "whisper": "ready"}),
-        patch("jobpilot.core.engine_run.asyncio.sleep", new=AsyncMock(side_effect=KeyboardInterrupt)),
+        patch(
+            "jobpilot.core.engine.get_health",
+            return_value={"status": "ok", "whisper": "ready"},
+        ),
+        patch(
+            "jobpilot.core.engine_run.asyncio.sleep",
+            new=AsyncMock(side_effect=KeyboardInterrupt),
+        ),
     ):
         await run_watch_loop(engine, watch=True)
 
@@ -242,10 +257,14 @@ async def _run_one_iteration(engine, *, app_page=None, scorer=None):
 # Tests
 # ---------------------------------------------------------------------------
 
+
 class TestWatchLoopParsesJD:
     @pytest.mark.asyncio
     async def test_jd_is_parsed_and_feeds_fit_score(
-        self, engine, page_info, mock_scorer,
+        self,
+        engine,
+        page_info,
+        mock_scorer,
     ):
         """Landing on a job page must produce a real parsed_jd and a
         non-zero fit score (previously parsed_jd stayed None forever)."""
@@ -271,7 +290,10 @@ class TestWatchLoopParsesJD:
 
     @pytest.mark.asyncio
     async def test_parsed_jd_threads_into_uploads_and_answers(
-        self, engine, mock_question_matcher, mock_scorer,
+        self,
+        engine,
+        mock_question_matcher,
+        mock_scorer,
     ):
         """With form fields present, parsed_jd must reach upload_files and
         the contextual answer matcher (match_with_context)."""
@@ -295,7 +317,11 @@ class TestWatchLoopParsesJD:
 
     @pytest.mark.asyncio
     async def test_jd_parse_failure_does_not_crash_loop(
-        self, engine, mock_bridge, page_info, mock_scorer,
+        self,
+        engine,
+        mock_bridge,
+        page_info,
+        mock_scorer,
     ):
         """A blown-up JD parse must log and continue with parsed_jd=None."""
         mock_bridge.page = FakeBrokenJDPage()
@@ -309,7 +335,10 @@ class TestWatchLoopParsesJD:
 
     @pytest.mark.asyncio
     async def test_no_parse_on_non_job_pages(
-        self, engine, mock_bridge, mock_scorer,
+        self,
+        engine,
+        mock_bridge,
+        mock_scorer,
     ):
         """Off job pages the parser must not run and no fit score is set."""
         info = FakePageInfo(

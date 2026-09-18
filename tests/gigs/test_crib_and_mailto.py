@@ -1,4 +1,5 @@
 """Tests for the prefilled-mailto path and the crib sheet generator."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -153,7 +154,10 @@ def test_crib_sheet_relocate_answer_flips_for_non_home_metro_role(
 def test_crib_sheet_relocate_answer_is_data_driven(tmp_path: Path, monkeypatch) -> None:
     # The relocate answer comes from preferences work_style — never hardcoded.
     prefs = dict(preferences.DEFAULTS)
-    prefs["work_style"] = {"relocate_default": "Based in Testville", "in_office_default": "x"}
+    prefs["work_style"] = {
+        "relocate_default": "Based in Testville",
+        "in_office_default": "x",
+    }
     monkeypatch.setattr(preferences, "load", lambda path=None: prefs)
     g = _gig(location="New York, NY")
     text = write_crib_sheet([g], crib_dir=tmp_path).read_text()

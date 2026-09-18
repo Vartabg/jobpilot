@@ -23,9 +23,9 @@ from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 
+from jobpilot.gigs.core import pipeline
 from jobpilot.gigs.core.io_lock import atomic_write_text, file_lock
 from jobpilot.gigs.core.models import Gig
-from jobpilot.gigs.core import pipeline
 from jobpilot.gigs.core.paths import data_dir
 from jobpilot.gigs.core.reminders import create_reminder_for_gig
 

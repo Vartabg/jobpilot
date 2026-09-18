@@ -53,17 +53,24 @@ def test_reconcile_suppresses_employment_packet(monkeypatch, tmp_path: Path):
 
 
 def test_policy_blocks_refused_company_and_mobile_transit_role():
-    set_policy(policy_from_dict({
-        "scoring": {"refused_companies": {"honeywell": "user exclusion"}},
-        "queue": {
-            "transport_gate": {
-                "enabled": True,
-                "mode": "transit",
-                "mobile_title_keywords": ["field service", "route technician"],
-                "fixed_site_title_keywords": ["data center", "critical environments"],
-            },
-        },
-    }))
+    set_policy(
+        policy_from_dict(
+            {
+                "scoring": {"refused_companies": {"honeywell": "user exclusion"}},
+                "queue": {
+                    "transport_gate": {
+                        "enabled": True,
+                        "mode": "transit",
+                        "mobile_title_keywords": ["field service", "route technician"],
+                        "fixed_site_title_keywords": [
+                            "data center",
+                            "critical environments",
+                        ],
+                    },
+                },
+            }
+        )
+    )
 
     assert qb.policy_block_reason("Honeywell", "Solutions Engineer")
     assert qb.policy_block_reason("Acme", "Field Service Technician")
@@ -72,11 +79,19 @@ def test_policy_blocks_refused_company_and_mobile_transit_role():
 
 
 def test_policy_allowlist_removes_keyword_noise_outside_role_lane():
-    set_policy(policy_from_dict({
-        "queue": {
-            "title_allow_keywords": ["solutions", "implementation", "forward deployed"],
-        },
-    }))
+    set_policy(
+        policy_from_dict(
+            {
+                "queue": {
+                    "title_allow_keywords": [
+                        "solutions",
+                        "implementation",
+                        "forward deployed",
+                    ],
+                },
+            }
+        )
+    )
 
     assert qb.policy_block_reason("Acme", "Founding Product Designer")
     assert qb.policy_block_reason("Acme", "Lead QA Engineer")

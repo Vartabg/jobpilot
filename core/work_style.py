@@ -10,45 +10,112 @@ from __future__ import annotations
 import json
 import re
 from functools import lru_cache
-from pathlib import Path
-from typing import Any
 
 from jobpilot.core.config import DATA_DIR
 
 PSYCHE_PATH = DATA_DIR / "psyche_profile.json"
 
 CONTRACT_GREEN = (
-    "contract", "1099", "freelance", "consultant", "hourly", "fractional",
-    "project-based", "project based", "c2c", "corp-to-corp", "independent contractor",
-    "contractor", "part-time", "part time", "retainer", "sow", "statement of work",
+    "contract",
+    "1099",
+    "freelance",
+    "consultant",
+    "hourly",
+    "fractional",
+    "project-based",
+    "project based",
+    "c2c",
+    "corp-to-corp",
+    "independent contractor",
+    "contractor",
+    "part-time",
+    "part time",
+    "retainer",
+    "sow",
+    "statement of work",
 )
 W2_ONLY_RED = (
-    "full-time employee only", "full time employee only", "w2 only", "w-2 only",
-    "benefits eligible", "full time w2", "salaried full-time", "salaried full time",
-    "fte only", "permanent employee",
+    "full-time employee only",
+    "full time employee only",
+    "w2 only",
+    "w-2 only",
+    "benefits eligible",
+    "full time w2",
+    "salaried full-time",
+    "salaried full time",
+    "fte only",
+    "permanent employee",
 )
 AUTONOMY_GREEN = (
-    "async", "asynchronous", "flexible hours", "flexible schedule",
-    "own your schedule", "results-oriented", "results oriented", "milestone",
-    "project deadline", "self-directed", "self directed", "minimal meetings",
-    "no micromanagement", "outcome-based", "outcome based", "work autonomously",
-    "set your own hours", "choose your hours", "deadline-driven", "deliverable",
+    "async",
+    "asynchronous",
+    "flexible hours",
+    "flexible schedule",
+    "own your schedule",
+    "results-oriented",
+    "results oriented",
+    "milestone",
+    "project deadline",
+    "self-directed",
+    "self directed",
+    "minimal meetings",
+    "no micromanagement",
+    "outcome-based",
+    "outcome based",
+    "work autonomously",
+    "set your own hours",
+    "choose your hours",
+    "deadline-driven",
+    "deliverable",
 )
 SCHEDULE_RED = (
-    "9-5", "9 to 5", "nine to five", "core hours", "daily standup", "daily stand-up",
-    "daily standups", "synchronous", "overlap hours", "hours of overlap",
-    "must be online", "in-office 5 days", "on-site 5 days", "on site 5 days",
-    "five days in office", "5 days in office", "fixed schedule", "shift work",
-    "punch in", "clock in", "attendance policy", "time tracking required",
+    "9-5",
+    "9 to 5",
+    "nine to five",
+    "core hours",
+    "daily standup",
+    "daily stand-up",
+    "daily standups",
+    "synchronous",
+    "overlap hours",
+    "hours of overlap",
+    "must be online",
+    "in-office 5 days",
+    "on-site 5 days",
+    "on site 5 days",
+    "five days in office",
+    "5 days in office",
+    "fixed schedule",
+    "shift work",
+    "punch in",
+    "clock in",
+    "attendance policy",
+    "time tracking required",
 )
 URGENCY_GREEN = (
-    "start immediately", "asap", "as soon as possible", "urgent", "2-week",
-    "two week", "short sprint", "start next week", "immediate start",
+    "start immediately",
+    "asap",
+    "as soon as possible",
+    "urgent",
+    "2-week",
+    "two week",
+    "short sprint",
+    "start next week",
+    "immediate start",
 )
 JACK_OF_ALL_TRADES_GREEN = (
-    "implementation", "integration", "deployment", "solutions", "generalist",
-    "technical support", "field service", "customer engineer", "customer-facing",
-    "wear many hats", "multi-disciplinary", "cross-functional builder",
+    "implementation",
+    "integration",
+    "deployment",
+    "solutions",
+    "generalist",
+    "technical support",
+    "field service",
+    "customer engineer",
+    "customer-facing",
+    "wear many hats",
+    "multi-disciplinary",
+    "cross-functional builder",
 )
 
 
@@ -131,7 +198,9 @@ def score_work_style(text: str, *, title: str = "") -> tuple[int, list[str]]:
     return delta, reasons[:6]
 
 
-def title_seniority_penalty(title: str, deprioritize_keywords: tuple[str, ...]) -> tuple[int, str]:
+def title_seniority_penalty(
+    title: str, deprioritize_keywords: tuple[str, ...]
+) -> tuple[int, str]:
     """Penalty when the title matches configured senior-IC deprioritize terms."""
     title_l = (title or "").lower()
     for kw in deprioritize_keywords:

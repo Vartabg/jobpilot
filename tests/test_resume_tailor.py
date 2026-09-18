@@ -14,13 +14,16 @@ from jobpilot.core.resume_tailor import ResumeTailor
 def _write_minimal_text_pdf(pdf_path: Path, text: str) -> None:
     """Create a small valid PDF containing extractable text for tests."""
     safe_text = text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
-    stream = f"BT /F1 12 Tf 72 720 Td ({safe_text}) Tj ET".encode("latin-1", errors="replace")
+    stream = f"BT /F1 12 Tf 72 720 Td ({safe_text}) Tj ET".encode(
+        "latin-1", errors="replace"
+    )
     objects = [
         b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
         b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
         b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>\nendobj\n",
         b"4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n",
-        b"5 0 obj\n<< /Length %d >>\nstream\n%s\nendstream\nendobj\n" % (len(stream), stream),
+        b"5 0 obj\n<< /Length %d >>\nstream\n%s\nendstream\nendobj\n"
+        % (len(stream), stream),
     ]
 
     pdf = bytearray(b"%PDF-1.4\n")
@@ -68,7 +71,9 @@ Built UI systems, internal tools, and AI-assisted workflows.
     }
     store.save(profile)
 
-    tailor = ResumeTailor(profile_store=store, output_dir=tmp_path / "output", use_bro=False)
+    tailor = ResumeTailor(
+        profile_store=store, output_dir=tmp_path / "output", use_bro=False
+    )
     result = tailor.generate_from_text(
         """
 Senior Frontend Engineer
@@ -102,7 +107,9 @@ Requirements
     assert manifest["company"] == "Acme AI"
 
 
-def test_tailor_selects_facilities_resume_for_field_service_role(tmp_path: Path, monkeypatch):
+def test_tailor_selects_facilities_resume_for_field_service_role(
+    tmp_path: Path, monkeypatch
+):
     resume_sources = tmp_path / "resume_sources"
     resume_sources.mkdir()
     facilities_resume = resume_sources / "field_service_v1.md"
@@ -133,7 +140,12 @@ Solutions Engineer who built React dashboards and Python automation for software
     store.save(profile)
 
     lanes = {"facilities": "field_service_v1", "default": "software_v1"}
-    tailor = ResumeTailor(profile_store=store, output_dir=tmp_path / "output", use_bro=False, resume_lanes=lanes)
+    tailor = ResumeTailor(
+        profile_store=store,
+        output_dir=tmp_path / "output",
+        use_bro=False,
+        resume_lanes=lanes,
+    )
     result = tailor.generate_from_text(
         """
 Field Service Technician II
@@ -185,7 +197,12 @@ Designed human-in-the-loop workflows for ATS sourcing and application review.
     store.save(profile)
 
     lanes = {"facilities": "field_service_v1", "default": "software_v1"}
-    tailor = ResumeTailor(profile_store=store, output_dir=tmp_path / "output", use_bro=False, resume_lanes=lanes)
+    tailor = ResumeTailor(
+        profile_store=store,
+        output_dir=tmp_path / "output",
+        use_bro=False,
+        resume_lanes=lanes,
+    )
     result = tailor.generate_from_text(
         """
 Solutions Engineer
@@ -230,7 +247,9 @@ def test_tailor_falls_back_without_resume_file(tmp_path: Path):
     profile.resume_path = str(tmp_path / "missing.pdf")
     store.save(profile)
 
-    tailor = ResumeTailor(profile_store=store, output_dir=tmp_path / "output", use_bro=False)
+    tailor = ResumeTailor(
+        profile_store=store, output_dir=tmp_path / "output", use_bro=False
+    )
     result = tailor.generate_from_text(
         "Frontend Engineer\nExample Co\nRequirements\n- React\n- Remote",
         title="Frontend Engineer",
@@ -252,4 +271,6 @@ def test_module_contains_no_author_identity():
     """
     source = Path(resume_tailor_module.__file__).read_text()
     for fragment in ("garo", "vartabed"):
-        assert fragment not in source.lower(), f"author literal {fragment!r} still in module"
+        assert fragment not in source.lower(), (
+            f"author literal {fragment!r} still in module"
+        )

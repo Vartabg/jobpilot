@@ -28,11 +28,14 @@ def test_company_from_url_empty_when_no_companies_segment() -> None:
 
 def test_location_hint_picks_parenthetical_market() -> None:
     assert _location_hint("Founding AI Engineer (India)", "", "https://x/y") == "India"
-    assert _location_hint(
-        "Frontend Engineer – Remote (UK)",
-        "whatever",
-        "https://himalayas.app/companies/bjak/jobs/frontend-engineer-remote-uk",
-    ) == "UK"
+    assert (
+        _location_hint(
+            "Frontend Engineer – Remote (UK)",
+            "whatever",
+            "https://himalayas.app/companies/bjak/jobs/frontend-engineer-remote-uk",
+        )
+        == "UK"
+    )
 
 
 def test_rescore_backfills_placeholder_company_from_url() -> None:

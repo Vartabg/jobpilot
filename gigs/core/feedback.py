@@ -16,7 +16,6 @@ import json
 import re
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
 
 from jobpilot.gigs.core import pipeline
 from jobpilot.gigs.core.io_lock import atomic_write_text, file_lock
@@ -33,16 +32,18 @@ _PASS_CODE_RE = re.compile(
     re.IGNORECASE,
 )
 
-KNOWN_REASONS = frozenset({
-    "wrong-stack",
-    "low-pay",
-    "wrong-role",
-    "spam",
-    "location",
-    "contract-only",
-    "duplicate",
-    "other",
-})
+KNOWN_REASONS = frozenset(
+    {
+        "wrong-stack",
+        "low-pay",
+        "wrong-role",
+        "spam",
+        "location",
+        "contract-only",
+        "duplicate",
+        "other",
+    }
+)
 
 
 @dataclass(frozen=True)

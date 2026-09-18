@@ -20,7 +20,9 @@ def client(request, monkeypatch, tmp_path):
     monkeypatch.setattr(gigs_server.swipe, "session_meta", lambda: {"test": True})
     monkeypatch.setattr(gigs_server.swipe, "build_queue", lambda **kwargs: [])
     with TestClient(request.param.app, base_url="https://testserver") as result:
-        result.protected_path = "/api/profile" if request.param is server else "/api/meta"
+        result.protected_path = (
+            "/api/profile" if request.param is server else "/api/meta"
+        )
         yield result
 
 
@@ -54,8 +56,18 @@ def test_session_api_requires_custom_header(client):
 
 
 def test_explicit_token_authentication_and_invalid_tokens(client):
-    assert client.get(client.protected_path, headers={"X-JobPilot-Token": TEST_TOKEN}).status_code == 200
-    assert client.get(client.protected_path, headers={"X-JobPilot-Token": "wrong"}).status_code == 401
+    assert (
+        client.get(
+            client.protected_path, headers={"X-JobPilot-Token": TEST_TOKEN}
+        ).status_code
+        == 200
+    )
+    assert (
+        client.get(
+            client.protected_path, headers={"X-JobPilot-Token": "wrong"}
+        ).status_code
+        == 401
+    )
     assert client.get("/", params={"token": "wrong"}).status_code == 401
 
 
@@ -77,7 +89,9 @@ def test_dashboard_fill_button_works_after_sign_in(monkeypatch, tmp_path):
         assert "Install the Fill Button" in install.text
 
 
-def test_queue_corruption_returns_actionable_error_on_every_request(monkeypatch, tmp_path):
+def test_queue_corruption_returns_actionable_error_on_every_request(
+    monkeypatch, tmp_path
+):
     from jobpilot.core import queue_builder
 
     monkeypatch.setattr(config, "SERVER_AUTH_TOKEN", TEST_TOKEN)

@@ -13,7 +13,6 @@ from jobpilot.core.job_scorer import JobScorer
 from jobpilot.core.policy_config import Policy, load_policy, policy_from_dict
 from jobpilot.core.profile_store import UserProfile
 
-
 # ── policy loading ────────────────────────────────────────────────
 
 
@@ -47,10 +46,14 @@ def test_load_policy_invalid_json_falls_back_to_defaults(tmp_path: Path):
 def test_load_policy_deep_merges_partial_file(tmp_path: Path):
     """A partial policy file only overrides what it specifies."""
     partial = tmp_path / "policy.json"
-    partial.write_text(json.dumps({
-        "scoring": {"refused_companies": {"evilcorp": "reasons"}},
-        "queue": {"location_gate": {"enabled": True, "country_terms": ["us"]}},
-    }))
+    partial.write_text(
+        json.dumps(
+            {
+                "scoring": {"refused_companies": {"evilcorp": "reasons"}},
+                "queue": {"location_gate": {"enabled": True, "country_terms": ["us"]}},
+            }
+        )
+    )
     policy = load_policy(partial)
     assert policy.scoring.refused_companies == {"evilcorp": "reasons"}
     # untouched sections keep their defaults
@@ -63,23 +66,25 @@ def test_load_policy_deep_merges_partial_file(tmp_path: Path):
 
 
 def test_transport_and_evidence_policy_load():
-    policy = policy_from_dict({
-        "application_evidence": {
-            "employment_dir": "/tmp/Employment",
-            "gmail_cache_path": "data/gmail_applications.json",
-            "gmail_cache_max_age_hours": 24,
-            "fail_closed": True,
-        },
-        "queue": {
-            "title_allow_keywords": ["solutions engineer"],
-            "transport_gate": {
-                "enabled": True,
-                "mode": "transit",
-                "mobile_title_keywords": ["field service"],
-                "fixed_site_title_keywords": ["data center"],
+    policy = policy_from_dict(
+        {
+            "application_evidence": {
+                "employment_dir": "/tmp/Employment",
+                "gmail_cache_path": "data/gmail_applications.json",
+                "gmail_cache_max_age_hours": 24,
+                "fail_closed": True,
             },
-        },
-    })
+            "queue": {
+                "title_allow_keywords": ["solutions engineer"],
+                "transport_gate": {
+                    "enabled": True,
+                    "mode": "transit",
+                    "mobile_title_keywords": ["field service"],
+                    "fixed_site_title_keywords": ["data center"],
+                },
+            },
+        }
+    )
 
     assert policy.application_evidence.employment_dir == "/tmp/Employment"
     assert policy.application_evidence.fail_closed
@@ -93,17 +98,19 @@ def test_refused_lists_accept_list_or_dict_and_ignore_doc_keys():
     as_list = policy_from_dict({"scoring": {"refused_companies": ["EvilCorp "]}})
     assert as_list.scoring.refused_companies == {"evilcorp": ""}
 
-    as_dict = policy_from_dict({
-        "scoring": {
-            "refused_companies": {
-                "_doc": "this is documentation, not a company",
-                "EvilCorp": "their whole deal",
+    as_dict = policy_from_dict(
+        {
+            "scoring": {
+                "refused_companies": {
+                    "_doc": "this is documentation, not a company",
+                    "EvilCorp": "their whole deal",
+                },
             },
-        },
-        "queue": {
-            "moat_company_tags": {"_doc": "ignored", "Acme": "HealthCare_Ops"},
-        },
-    })
+            "queue": {
+                "moat_company_tags": {"_doc": "ignored", "Acme": "HealthCare_Ops"},
+            },
+        }
+    )
     assert as_dict.scoring.refused_companies == {"evilcorp": "their whole deal"}
     assert as_dict.queue.moat_company_tags == {"acme": "healthcare_ops"}
 
@@ -127,41 +134,63 @@ def _scorer(policy: Policy) -> JobScorer:
         requires_sponsorship=False,
         custom_answers={"skills": "Python TypeScript React Postgres"},
     )
-    return JobScorer(profile_store=DummyProfileStore(profile), use_bro=False, policy=policy)
+    return JobScorer(
+        profile_store=DummyProfileStore(profile), use_bro=False, policy=policy
+    )
 
 
 JD_TEXT = "Forward Deployed Engineer — Python, TypeScript, distributed systems. Remote."
 
 
 def test_scorer_refuses_configured_company():
-    policy = policy_from_dict({
-        "scoring": {"refused_companies": {"evilcorp": "their whole deal"}},
-    })
-    result = _scorer(policy).score_text(JD_TEXT, title="Forward Deployed Engineer", company="EvilCorp")
+    policy = policy_from_dict(
+        {
+            "scoring": {"refused_companies": {"evilcorp": "their whole deal"}},
+        }
+    )
+    result = _scorer(policy).score_text(
+        JD_TEXT, title="Forward Deployed Engineer", company="EvilCorp"
+    )
     assert result.score == 0, "refused companies must score 0 regardless of fit"
     assert "REFUSED" in result.recommendation
-    assert any("evilcorp" in risk.lower() and "their whole deal" in risk.lower() for risk in result.risks)
+    assert any(
+        "evilcorp" in risk.lower() and "their whole deal" in risk.lower()
+        for risk in result.risks
+    )
 
 
 def test_scorer_refuses_configured_title_keyword():
-    policy = policy_from_dict({
-        "scoring": {"refused_title_keywords": ["night shift"]},
-    })
-    result = _scorer(policy).score_text(JD_TEXT, title="Engineer, Night Shift", company="Acme")
+    policy = policy_from_dict(
+        {
+            "scoring": {"refused_title_keywords": ["night shift"]},
+        }
+    )
+    result = _scorer(policy).score_text(
+        JD_TEXT, title="Engineer, Night Shift", company="Acme"
+    )
     assert result.score == 0
     assert "REFUSED" in result.recommendation
     assert any("night shift" in risk.lower() for risk in result.risks)
 
 
 def test_scorer_deprioritizes_configured_company():
-    policy = policy_from_dict({
-        "scoring": {"deprioritized_companies": {"slowcorp": "zero prior conversion"}},
-    })
-    result = _scorer(policy).score_text(JD_TEXT, title="Forward Deployed Engineer", company="SlowCorp")
+    policy = policy_from_dict(
+        {
+            "scoring": {
+                "deprioritized_companies": {"slowcorp": "zero prior conversion"}
+            },
+        }
+    )
+    result = _scorer(policy).score_text(
+        JD_TEXT, title="Forward Deployed Engineer", company="SlowCorp"
+    )
     assert result.components.get("Alignment") == -25
     assert 0 < result.score < 100
     assert "deprioritized" in result.recommendation.lower()
-    assert any("slowcorp" in risk.lower() and "conversion" in risk.lower() for risk in result.risks)
+    assert any(
+        "slowcorp" in risk.lower() and "conversion" in risk.lower()
+        for risk in result.risks
+    )
 
 
 def test_scorer_default_policy_refuses_nothing():

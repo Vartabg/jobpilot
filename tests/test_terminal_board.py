@@ -1,9 +1,6 @@
 """Tests for the Rich terminal board."""
 
-import json
-from pathlib import Path
-
-from jobpilot.core.queue_builder import QueueJob, save_queue
+from jobpilot.core.queue_builder import QueueJob
 from jobpilot.ui.terminal_board import BoardFilters, build_board_renderable, filter_jobs
 from jobpilot.ui.view_helpers import score_bar
 
@@ -18,15 +15,27 @@ def test_score_bar_colors_by_threshold():
 def test_filter_jobs_austin_and_fresh():
     jobs = [
         QueueJob(
-            id="a1", company="Osano", title="Senior AI Engineer",
-            url="https://example.com/1", location="Austin, TX",
-            portal="greenhouse", track="tech", fit_score=51, keywords=["ai"],
+            id="a1",
+            company="Osano",
+            title="Senior AI Engineer",
+            url="https://example.com/1",
+            location="Austin, TX",
+            portal="greenhouse",
+            track="tech",
+            fit_score=51,
+            keywords=["ai"],
             status="queued",
         ),
         QueueJob(
-            id="b2", company="Starbridge", title="FDE",
-            url="https://example.com/2", location="New York City",
-            portal="ashby", track="both", fit_score=90, keywords=["fde"],
+            id="b2",
+            company="Starbridge",
+            title="FDE",
+            url="https://example.com/2",
+            location="New York City",
+            portal="ashby",
+            track="both",
+            fit_score=90,
+            keywords=["fde"],
             status="applied",
         ),
     ]
@@ -51,9 +60,16 @@ def test_build_board_renderable_with_mocks(monkeypatch):
         status="queued",
         psyche_score=7,
     )
-    profile = SimpleNamespace(first_name="Alex", last_name="Sample", city="Rivertown", state="OH")
+    profile = SimpleNamespace(
+        first_name="Alex", last_name="Sample", city="Rivertown", state="OH"
+    )
     tracker = SimpleNamespace(
-        get_stats=lambda: {"total": 1, "submitted": 0, "interview": 0, "in_progress": 0},
+        get_stats=lambda: {
+            "total": 1,
+            "submitted": 0,
+            "interview": 0,
+            "in_progress": 0,
+        },
         get_recent=lambda limit: [],
         close=lambda: None,
     )
@@ -61,9 +77,15 @@ def test_build_board_renderable_with_mocks(monkeypatch):
 
     monkeypatch.setattr("jobpilot.ui.terminal_board.load_queue", lambda: [job])
     monkeypatch.setattr("jobpilot.ui.terminal_board.get_profile_store", lambda: store)
-    monkeypatch.setattr("jobpilot.ui.terminal_board.get_application_tracker", lambda: tracker)
-    monkeypatch.setattr("jobpilot.ui.terminal_board._check_dashboard", lambda _port: False)
-    monkeypatch.setattr("jobpilot.ui.terminal_board._check_chrome", lambda _port=9222: False)
+    monkeypatch.setattr(
+        "jobpilot.ui.terminal_board.get_application_tracker", lambda: tracker
+    )
+    monkeypatch.setattr(
+        "jobpilot.ui.terminal_board._check_dashboard", lambda _port: False
+    )
+    monkeypatch.setattr(
+        "jobpilot.ui.terminal_board._check_chrome", lambda _port=9222: False
+    )
 
     from rich.console import Console
 

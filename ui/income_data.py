@@ -2,17 +2,16 @@
 
 from __future__ import annotations
 
-import re
-from dataclasses import dataclass
 from collections.abc import Callable
-from typing import Any, Optional
+from dataclasses import dataclass
+from typing import Any
 
 from jobpilot.core.queue_builder import QueueJob, load_queue
 from jobpilot.core.work_style import is_contract_friendly, is_schedule_rigid
 from jobpilot.gigs.core.collect import collect_all
 from jobpilot.gigs.core.dedupe import dedupe_cross_source
 from jobpilot.gigs.core.models import Gig
-from jobpilot.gigs.core.scorer import apply_friction, filter_and_rank
+from jobpilot.gigs.core.scorer import filter_and_rank
 from jobpilot.gigs.core.store import filter_new
 from jobpilot.ui.view_helpers import is_senior_title
 
@@ -39,9 +38,9 @@ def gig_pay_label(gig: Gig) -> str:
     if gig.pay_hourly_est:
         return f"${gig.pay_hourly_est:.0f}/hr"
     if gig.salary_max and gig.salary_min:
-        return f"${gig.salary_min/1000:.0f}-${gig.salary_max/1000:.0f}K"
+        return f"${gig.salary_min / 1000:.0f}-${gig.salary_max / 1000:.0f}K"
     if gig.salary_max:
-        return f"≤${gig.salary_max/1000:.0f}K"
+        return f"≤${gig.salary_max / 1000:.0f}K"
     return "?"
 
 
@@ -75,12 +74,18 @@ def short_url(url: str, max_len: int = 42) -> str:
 def load_gigs(
     opts: IncomeViewOptions,
     *,
-    on_progress: Optional[Callable[[str], None]] = None,
+    on_progress: Callable[[str], None] | None = None,
 ) -> tuple[list[Gig], dict[str, Any]]:
     gigs, results = collect_all(on_progress=on_progress)
-    meta: dict[str, Any] = {"sources": [], "collected": len(gigs), "fresh_only": opts.gigs_fresh_only}
+    meta: dict[str, Any] = {
+        "sources": [],
+        "collected": len(gigs),
+        "fresh_only": opts.gigs_fresh_only,
+    }
     for r in results:
-        meta["sources"].append({"name": r.name, "ok": r.ok, "fetched": r.fetched, "error": r.error})
+        meta["sources"].append(
+            {"name": r.name, "ok": r.ok, "fetched": r.fetched, "error": r.error}
+        )
 
     if opts.gigs_fresh_only:
         new_ids = set(filter_new([g.id for g in gigs]))
@@ -105,7 +110,8 @@ def load_jobs(opts: IncomeViewOptions) -> list[QueueJob]:
         jobs = [j for j in jobs if not is_senior_title(j.title)]
     if opts.austin:
         jobs = [
-            j for j in jobs
+            j
+            for j in jobs
             if "austin" in (j.location or "").lower()
             or "remote" in (j.location or "").lower()
             or (j.location or "").lower() in {"", "not specified", "united states"}
@@ -117,6 +123,7 @@ def load_jobs(opts: IncomeViewOptions) -> list[QueueJob]:
 def load_pipeline_rows(opts: IncomeViewOptions) -> list[Any]:
     try:
         from jobpilot.gigs.core import pipeline
+
         rows = pipeline.parse()
     except Exception:
         return []

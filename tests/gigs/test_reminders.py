@@ -1,5 +1,6 @@
 """Reminders integration tests — verifies date math and string escaping
 without actually invoking osascript (which would create real reminders)."""
+
 from __future__ import annotations
 
 import subprocess
@@ -38,7 +39,7 @@ def test_next_friday_from_tuesday() -> None:
 
 
 def test_applescript_string_escaping_handles_quotes_and_backslashes() -> None:
-    assert _applescript_str('Acme "AI" Co\\') == r'Acme \"AI\" Co\\'
+    assert _applescript_str('Acme "AI" Co\\') == r"Acme \"AI\" Co\\"
 
 
 def test_format_for_applescript_is_locale_safe_numeric() -> None:
@@ -62,7 +63,10 @@ def test_create_reminder_skips_when_osascript_missing() -> None:
 def test_create_reminder_returns_false_on_subprocess_error() -> None:
     err = subprocess.CalledProcessError(1, ["osascript"], stderr="boom")
     with (
-        patch("jobpilot.gigs.core.reminders.shutil.which", return_value="/usr/bin/osascript"),
+        patch(
+            "jobpilot.gigs.core.reminders.shutil.which",
+            return_value="/usr/bin/osascript",
+        ),
         patch("jobpilot.gigs.core.reminders.subprocess.run", side_effect=err) as run,
     ):
         result = create_reminder_for_gig(_gig())
@@ -72,7 +76,10 @@ def test_create_reminder_returns_false_on_subprocess_error() -> None:
 
 def test_create_reminder_invokes_osascript_with_expected_payload() -> None:
     with (
-        patch("jobpilot.gigs.core.reminders.shutil.which", return_value="/usr/bin/osascript"),
+        patch(
+            "jobpilot.gigs.core.reminders.shutil.which",
+            return_value="/usr/bin/osascript",
+        ),
         patch("jobpilot.gigs.core.reminders.subprocess.run") as run,
     ):
         result = create_reminder_for_gig(_gig())

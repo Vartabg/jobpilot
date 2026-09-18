@@ -6,16 +6,16 @@ to produce CSV exports and Rich terminal reports.
 """
 
 import csv
-import io
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional
+
 from rich.console import Console
-from rich.table import Table
 from rich.panel import Panel
+from rich.table import Table
+
 from jobpilot.core.application_tracker import get_application_tracker
-from jobpilot.learning.action_recorder import get_action_recorder
 from jobpilot.core.logger import get_logger
+from jobpilot.learning.action_recorder import get_action_recorder
 
 log = get_logger(__name__)
 console = Console()
@@ -23,7 +23,7 @@ console = Console()
 DATA_DIR = Path(__file__).parent.parent / "data" / "reports"
 
 
-def export_csv(days: int = 30, output_path: Optional[Path] = None) -> Path:
+def export_csv(days: int = 30, output_path: Path | None = None) -> Path:
     """Export application history to CSV.
 
     Returns the path to the written CSV file.
@@ -50,19 +50,27 @@ def export_csv(days: int = 30, output_path: Optional[Path] = None) -> Path:
 
     with open(output_path, "w", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow([
-            "Job Title", "Company", "URL", "Status",
-            "Applied At", "Step Reached",
-        ])
+        writer.writerow(
+            [
+                "Job Title",
+                "Company",
+                "URL",
+                "Status",
+                "Applied At",
+                "Step Reached",
+            ]
+        )
         for app in filtered:
-            writer.writerow([
-                app.job_title,
-                app.company,
-                app.job_url,
-                app.status,
-                app.applied_at,
-                getattr(app, "step_reached", ""),
-            ])
+            writer.writerow(
+                [
+                    app.job_title,
+                    app.company,
+                    app.job_url,
+                    app.status,
+                    app.applied_at,
+                    getattr(app, "step_reached", ""),
+                ]
+            )
 
     log.info(f"Exported {len(filtered)} applications to {output_path}")
     return output_path
@@ -79,10 +87,12 @@ def daily_digest(days: int = 7):
     rec_stats = recorder.get_stats()
 
     # --- Header ---
-    console.print(Panel.fit(
-        f"[bold cyan]📊 JobPilot Report[/bold cyan]  ·  Last {days} days",
-        border_style="cyan",
-    ))
+    console.print(
+        Panel.fit(
+            f"[bold cyan]📊 JobPilot Report[/bold cyan]  ·  Last {days} days",
+            border_style="cyan",
+        )
+    )
 
     # --- Summary Stats ---
     summary = Table(title="Summary", show_header=False, padding=(0, 2))

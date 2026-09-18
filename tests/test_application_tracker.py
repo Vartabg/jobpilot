@@ -2,8 +2,10 @@
 Tests for ApplicationTracker — SQLite-backed job application deduplication and tracking.
 """
 
-import pytest
 from pathlib import Path
+
+import pytest
+
 from jobpilot.core.application_tracker import ApplicationTracker
 
 
@@ -13,7 +15,6 @@ def tracker(tmp_path: Path) -> ApplicationTracker:
 
 
 class TestMarkAndQuery:
-
     def test_mark_started(self, tracker: ApplicationTracker):
         tracker.mark_started("https://linkedin.com/jobs/view/123", "SWE", "Acme")
         assert tracker.has_applied("https://linkedin.com/jobs/view/123") is True
@@ -42,7 +43,9 @@ class TestMarkAndQuery:
         tracker.mark_started("https://linkedin.com/jobs/view/5", "New Title", "New Co")
         assert tracker.get_status("https://linkedin.com/jobs/view/5") == "started"
 
-    def test_log_application_without_url_uses_synthetic_url(self, tracker: ApplicationTracker):
+    def test_log_application_without_url_uses_synthetic_url(
+        self, tracker: ApplicationTracker
+    ):
         app = tracker.log_application(
             company="Titan AI",
             title="Forward Deployed Engineer",
@@ -54,7 +57,9 @@ class TestMarkAndQuery:
         assert tracker.has_applied(app.job_url) is True
         assert tracker.company_status("Titan AI") == "applied"
 
-    def test_log_application_idempotent_by_company_title(self, tracker: ApplicationTracker):
+    def test_log_application_idempotent_by_company_title(
+        self, tracker: ApplicationTracker
+    ):
         tracker.log_application(
             company="Titan AI",
             title="Forward Deployed Engineer",
@@ -71,7 +76,9 @@ class TestMarkAndQuery:
         assert recent[0].status == "interview"
         assert tracker.company_status("Titan AI") == "interview"
 
-    def test_log_application_without_url_preserves_existing_real_url(self, tracker: ApplicationTracker):
+    def test_log_application_without_url_preserves_existing_real_url(
+        self, tracker: ApplicationTracker
+    ):
         tracker.log_application(
             company="Titan AI",
             title="Forward Deployed Engineer",
@@ -85,7 +92,9 @@ class TestMarkAndQuery:
         )
 
         assert app.job_url == "https://jobs.ashbyhq.com/titan-ai/123"
-        assert tracker.get_status("https://jobs.ashbyhq.com/titan-ai/123") == "interview"
+        assert (
+            tracker.get_status("https://jobs.ashbyhq.com/titan-ai/123") == "interview"
+        )
 
     def test_log_application_rejects_unknown_status(self, tracker: ApplicationTracker):
         with pytest.raises(ValueError):
@@ -126,16 +135,22 @@ class TestMarkAndQuery:
 
         assert tracker.get_status("https://jobs.example.com/9") == "rejected"
         # The synthetic-URL row was not the one updated.
-        synthetic = [a for a in tracker.get_recent(limit=10) if a.job_url.startswith("manual://")]
+        synthetic = [
+            a for a in tracker.get_recent(limit=10) if a.job_url.startswith("manual://")
+        ]
         assert len(synthetic) == 1
         assert synthetic[0].status == "applied"
 
-    def test_log_application_company_title_match_uses_most_recent(self, tracker: ApplicationTracker):
+    def test_log_application_company_title_match_uses_most_recent(
+        self, tracker: ApplicationTracker
+    ):
         """With multiple company+title rows, the most recently updated one is updated."""
         tracker.mark_started("https://jobs.example.com/old", "Engineer", "Acme")
         tracker.mark_started("https://jobs.example.com/new", "Engineer", "Acme")
 
-        app = tracker.log_application(company="Acme", title="Engineer", status="applied")
+        app = tracker.log_application(
+            company="Acme", title="Engineer", status="applied"
+        )
 
         assert app.job_url == "https://jobs.example.com/new"
         assert tracker.get_status("https://jobs.example.com/new") == "applied"
@@ -143,7 +158,6 @@ class TestMarkAndQuery:
 
 
 class TestRecent:
-
     def test_get_recent(self, tracker: ApplicationTracker):
         tracker.mark_started("https://job/1", "Job A", "Co A")
         tracker.mark_started("https://job/2", "Job B", "Co B")
@@ -158,7 +172,6 @@ class TestRecent:
 
 
 class TestStats:
-
     def test_empty_stats(self, tracker: ApplicationTracker):
         stats = tracker.get_stats()
         assert stats["total"] == 0
@@ -194,7 +207,6 @@ class TestStats:
 
 
 class TestLifecycle:
-
     def test_close_and_reopen(self, tmp_path: Path):
         t1 = ApplicationTracker(data_dir=tmp_path)
         t1.mark_started("https://job/x", "Test")

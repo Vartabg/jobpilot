@@ -8,8 +8,8 @@ on-demand model: "give me the jobs", swipe through, apply with one tap.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime
-from typing import Callable, Optional
 from urllib.parse import quote
 
 from jobpilot.gigs.core import pipeline, preferences
@@ -31,8 +31,11 @@ from jobpilot.gigs.core.store import filter_new, mark_seen, unmark_seen
 
 
 def build_queue(
-    *, limit: int | None = None, min_score: int | None = None, fresh_only: bool = False,
-    on_progress: Optional[Callable[[str], None]] = None,
+    *,
+    limit: int | None = None,
+    min_score: int | None = None,
+    fresh_only: bool = False,
+    on_progress: Callable[[str], None] | None = None,
 ) -> list[Gig]:
     """Ranked roles to swipe — same search gate as `gigs now` (prefs.search),
     minus anything already DECIDED in the pipeline.
@@ -54,6 +57,7 @@ def build_queue(
     # reappear forever in Get jobs (status "new" is not "decided").
     try:
         from jobpilot.gigs.core import pipeline as _pipe
+
         hyg = _pipe.archive_stale_new()
         if on_progress and hyg.get("archived"):
             on_progress(
@@ -71,8 +75,11 @@ def build_queue(
     decided = {r.gig_id for r in pipeline.parse() if r.gig_id and r.status != "new"}
     gigs = [g for g in gigs if g.id not in decided]
     ranked = filter_and_rank(
-        gigs, min_score=min_score, top_n=limit,
-        contract_first=contract_first, drop_rigid_schedule=drop_rigid,
+        gigs,
+        min_score=min_score,
+        top_n=limit,
+        contract_first=contract_first,
+        drop_rigid_schedule=drop_rigid,
     )
     # Resolve WWR listings to a real apply target (mailto/ATS/careers) so the
     # Apply tap doesn't dead-end on the paywalled aggregator page. Network
@@ -93,7 +100,7 @@ def _apply_target(gig: Gig) -> tuple[str, bool]:
         subj, body = email_subject(gig), email_body(gig)
         if contains_placeholder(subj) or contains_placeholder(body):
             return gig.url, False
-        addr = base[len("mailto:"):].split("?", 1)[0]
+        addr = base[len("mailto:") :].split("?", 1)[0]
         return f"mailto:{addr}?subject={quote(subj)}&body={quote(body)}", True
     return base, False
 
@@ -182,17 +189,19 @@ def _upsert_row(gig: Gig, status: str, note: str = ""):
                 r.notes = f"{r.notes} {note}".strip() if r.notes else note
             break
     else:
-        rows.append(Row(
-            status=status,
-            score=gig.fit_score,
-            company=gig.company or gig.source,
-            role=(gig.title or "").split("|")[0].strip()[:80],
-            pay=pipeline._fmt_pay_for_pipeline(gig),
-            apply=gig.apply_url or gig.url,
-            last_touched=today,
-            notes=note,
-            gig_id=gig.id,
-        ))
+        rows.append(
+            Row(
+                status=status,
+                score=gig.fit_score,
+                company=gig.company or gig.source,
+                role=(gig.title or "").split("|")[0].strip()[:80],
+                pay=pipeline._fmt_pay_for_pipeline(gig),
+                apply=gig.apply_url or gig.url,
+                last_touched=today,
+                notes=note,
+                gig_id=gig.id,
+            )
+        )
     return pipeline.write(rows, authoritative_status={gig.id: status})
 
 

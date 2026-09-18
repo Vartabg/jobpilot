@@ -5,7 +5,6 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 from urllib.parse import urlparse, urlunparse
 
 from jobpilot.core import llm_client
@@ -20,8 +19,12 @@ from jobpilot.learning.learning_db import LearningDB
 # Gmail-backfill path and `jobpilot log` for tracking external/manual flows.
 # All are accepted by the doctor so backfilled rows don't trip warnings.
 _VALID_APPLICATION_STATUSES = {
-    "started", "submitted", "abandoned",
-    "applied", "rejected", "interview",
+    "started",
+    "submitted",
+    "abandoned",
+    "applied",
+    "rejected",
+    "interview",
     "skipped",  # user-dismissed queue items via dashboard/bookmarklet
 }
 
@@ -46,7 +49,7 @@ class DoctorReport:
         }
 
 
-def run_doctor(data_dir: Optional[Path] = None, *, check_bro: bool = True) -> DoctorReport:
+def run_doctor(data_dir: Path | None = None, *, check_bro: bool = True) -> DoctorReport:
     """Run integrity checks over JobPilot's local data directory."""
     root = data_dir or DATA_DIR
     root.mkdir(parents=True, exist_ok=True)
@@ -157,7 +160,9 @@ def _check_applications(
                 )
 
             url_rows = conn.execute("SELECT job_url FROM applications").fetchall()
-            duplicates = _find_duplicate_normalized_urls([str(row[0]) for row in url_rows if row[0]])
+            duplicates = _find_duplicate_normalized_urls(
+                [str(row[0]) for row in url_rows if row[0]]
+            )
             if duplicates:
                 warnings.append(
                     f"Duplicate normalized job URLs detected: {len(duplicates)}"
@@ -194,9 +199,7 @@ def _check_learning(
             if isinstance(rate_value, (int, float)) and rate_value < 0.6:
                 low_templates.append(item)
         if low_templates:
-            warnings.append(
-                f"{len(low_templates)} low-approval templates need review."
-            )
+            warnings.append(f"{len(low_templates)} low-approval templates need review.")
     finally:
         db.close()
 

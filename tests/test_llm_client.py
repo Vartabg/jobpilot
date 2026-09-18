@@ -34,6 +34,7 @@ def _gemini_text_payload(text: str) -> dict:
 # Provider selection order
 # ---------------------------------------------------------------------------
 
+
 class TestProviderSelection:
     @patch("jobpilot.core.llm_client.is_bro_running", return_value=True)
     def test_bro_wins_when_reachable(self, _mock_bro, monkeypatch):
@@ -61,14 +62,20 @@ class TestProviderSelection:
 # Bro path
 # ---------------------------------------------------------------------------
 
+
 class TestCompleteViaBro:
     @patch("jobpilot.core.llm_client.chat_or_raise", return_value="Three bullets.")
     @patch("jobpilot.core.llm_client.is_bro_running", return_value=True)
     def test_returns_bro_reply(self, _mock_bro, mock_chat):
-        assert llm_client.complete("prompt", context="ctx", smart=True) == "Three bullets."
+        assert (
+            llm_client.complete("prompt", context="ctx", smart=True) == "Three bullets."
+        )
         mock_chat.assert_called_once_with("prompt", context="ctx", force_smart=True)
 
-    @patch("jobpilot.core.llm_client.chat_or_raise", side_effect=BroUnavailable("Bro is busy."))
+    @patch(
+        "jobpilot.core.llm_client.chat_or_raise",
+        side_effect=BroUnavailable("Bro is busy."),
+    )
     @patch("jobpilot.core.llm_client.is_bro_running", return_value=True)
     def test_bro_failure_raises_typed_error(self, _mock_bro, _mock_chat):
         with pytest.raises(llm_client.LLMUnavailable):
@@ -85,6 +92,7 @@ class TestCompleteViaBro:
 # Gemini path
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def gemini_env(monkeypatch):
     """Force the Gemini provider: Bro down, key set."""
@@ -96,7 +104,9 @@ def gemini_env(monkeypatch):
 class TestCompleteViaGemini:
     @patch("jobpilot.core.llm_client.requests.post")
     def test_happy_path_parses_text(self, mock_post, gemini_env):
-        mock_post.return_value = _gemini_response(200, _gemini_text_payload("Tailored summary."))
+        mock_post.return_value = _gemini_response(
+            200, _gemini_text_payload("Tailored summary.")
+        )
 
         assert llm_client.complete("prompt") == "Tailored summary."
 
@@ -178,6 +188,7 @@ class TestCompleteViaGemini:
 # ---------------------------------------------------------------------------
 # No backend
 # ---------------------------------------------------------------------------
+
 
 class TestNoBackend:
     @patch("jobpilot.core.llm_client.is_bro_running", return_value=False)

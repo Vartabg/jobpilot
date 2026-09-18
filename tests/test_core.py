@@ -3,13 +3,12 @@ Tests for question_matcher.py — fuzzy matching, normalization, and template ma
 """
 
 import json
-import tempfile
 from pathlib import Path
 
 import pytest
+
 from jobpilot.core.question_matcher import (
     QuestionMatcher,
-    MatchResult,
 )
 from jobpilot.learning.learning_db import LearningDB, _reset_learning_db
 
@@ -173,24 +172,32 @@ def recorder(tmp_path: Path):
 class TestRecording:
     def test_record_field_approved(self, recorder: ActionRecorder, tmp_path: Path):
         recorder.record_field_approved("Email", "email", "test@example.com", 0.95)
-        
+
         stats = recorder.get_stats()
         assert stats["fields_approved"] == 1
 
-    def test_record_application_lifecycle(self, recorder: ActionRecorder, tmp_path: Path):
-        recorder.record_application_started("https://linkedin.com/job/1", "Senior Engineer", "LinkedIn")
+    def test_record_application_lifecycle(
+        self, recorder: ActionRecorder, tmp_path: Path
+    ):
+        recorder.record_application_started(
+            "https://linkedin.com/job/1", "Senior Engineer", "LinkedIn"
+        )
         recorder.record_field_approved("Name", "name", "Test", 0.9)
         recorder.record_application_submitted()
-        
+
         stats = recorder.get_stats()
         assert stats["total_applications"] == 1
         assert stats["submitted"] == 1
         assert stats["fields_approved"] == 1
 
-    def test_record_application_abandoned(self, recorder: ActionRecorder, tmp_path: Path):
-        recorder.record_application_started("https://linkedin.com/job/2", "Manager", "LinkedIn")
+    def test_record_application_abandoned(
+        self, recorder: ActionRecorder, tmp_path: Path
+    ):
+        recorder.record_application_started(
+            "https://linkedin.com/job/2", "Manager", "LinkedIn"
+        )
         recorder.record_application_abandoned(step_number=2)
-        
+
         stats = recorder.get_stats()
         assert stats["abandoned"] == 1
 
@@ -206,7 +213,7 @@ class TestStats:
         recorder.record_application_submitted()
         recorder.record_application_started("url2", "Job 2")
         recorder.record_application_abandoned(step_number=1)
-        
+
         stats = recorder.get_stats()
         assert stats["total_applications"] == 2
         assert stats["submitted"] == 1
@@ -217,7 +224,7 @@ class TestStats:
 # LinkedIn Parser Tests
 # ===================================================================
 
-from jobpilot.core.linkedin_parser import LinkedInParser, FieldType, SemanticType
+from jobpilot.core.linkedin_parser import FieldType, LinkedInParser, SemanticType
 
 
 class TestSemanticTypeInference:
@@ -228,16 +235,20 @@ class TestSemanticTypeInference:
         # Parser needs a page, but _infer_semantic_type doesn't use it
         class FakePage:
             pass
+
         return LinkedInParser(FakePage())
 
-    @pytest.mark.parametrize("label,expected", [
-        ("First name", SemanticType.FIRST_NAME),
-        ("Last name", SemanticType.LAST_NAME),
-        ("Email address", SemanticType.EMAIL),
-        ("Phone number", SemanticType.PHONE),
-        ("City", SemanticType.CITY),
-        ("LinkedIn Profile URL", SemanticType.LINKEDIN_URL),
-    ])
+    @pytest.mark.parametrize(
+        "label,expected",
+        [
+            ("First name", SemanticType.FIRST_NAME),
+            ("Last name", SemanticType.LAST_NAME),
+            ("Email address", SemanticType.EMAIL),
+            ("Phone number", SemanticType.PHONE),
+            ("City", SemanticType.CITY),
+            ("LinkedIn Profile URL", SemanticType.LINKEDIN_URL),
+        ],
+    )
     def test_common_field_labels(self, parser, label, expected):
         semantic_type, confidence = parser._infer_semantic_type(
             label, "", FieldType.TEXT
