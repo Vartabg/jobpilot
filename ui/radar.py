@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-from typing import Optional
 
 from rich import box
 from rich.columns import Columns
@@ -13,7 +12,12 @@ from rich.table import Table
 
 from jobpilot.gigs.core.models import Gig
 from jobpilot.gigs.core.scorer import apply_friction
-from jobpilot.ui.income_data import IncomeViewOptions, gig_pay_label, load_gigs, load_jobs
+from jobpilot.ui.income_data import (
+    IncomeViewOptions,
+    gig_pay_label,
+    load_gigs,
+    load_jobs,
+)
 from jobpilot.ui.view_helpers import materials_ready, score_bar
 
 # Backward-compatible alias — radar now shares IncomeViewOptions with HUD.
@@ -43,7 +47,9 @@ def _gigs_table(gigs: list[Gig]) -> Table:
 
 
 def _jobs_table(jobs) -> Table:
-    table = Table(title="Jobs lane backup (queued ATS)", box=box.SIMPLE_HEAVY, expand=True)
+    table = Table(
+        title="Jobs lane backup (queued ATS)", box=box.SIMPLE_HEAVY, expand=True
+    )
     table.add_column("#", width=3, justify="right", style="dim")
     table.add_column("Fit", width=14)
     table.add_column("Company", max_width=14)
@@ -71,9 +77,16 @@ def _income_velocity_panel() -> Panel:
 
         rows = pipeline.parse()
     except Exception:
-        return Panel("[dim]Pipeline not initialized — run `jobpilot gigs digest`[/dim]", title="Income velocity")
+        return Panel(
+            "[dim]Pipeline not initialized — run `jobpilot gigs digest`[/dim]",
+            title="Income velocity",
+        )
 
-    active = [r for r in rows if r.status in {"saved", "drafted", "sent", "replied", "interview"}]
+    active = [
+        r
+        for r in rows
+        if r.status in {"saved", "drafted", "sent", "replied", "interview"}
+    ]
     sent = sum(1 for r in rows if r.status in {"sent", "replied", "interview"})
     drafted = sum(1 for r in rows if r.status == "drafted")
     potential_hr = 0.0
@@ -83,7 +96,11 @@ def _income_velocity_panel() -> Panel:
             m = re.search(r"\$?(\d+)", pay)
             if m:
                 potential_hr = max(potential_hr, float(m.group(1)))
-    est_week = f"~${potential_hr * 20:,.0f}/wk potential" if potential_hr >= 30 else "pay bands unclear on active rows"
+    est_week = (
+        f"~${potential_hr * 20:,.0f}/wk potential"
+        if potential_hr >= 30
+        else "pay bands unclear on active rows"
+    )
     return Panel(
         f"[bold]{len(active)}[/] active pipeline rows  "
         f"[cyan]{drafted}[/] drafted  [green]{sent}[/] sent  "
@@ -106,7 +123,7 @@ def _mode_caption(opts: IncomeViewOptions) -> str:
     return " · ".join(bits) or "default"
 
 
-def build_radar_renderable(opts: Optional[IncomeViewOptions] = None) -> RenderableType:
+def build_radar_renderable(opts: IncomeViewOptions | None = None) -> RenderableType:
     opts = opts or IncomeViewOptions(gigs_limit=8, jobs_limit=8)
     gigs, _meta = load_gigs(opts)
     jobs = load_jobs(opts)
@@ -127,45 +144,56 @@ def build_radar_renderable(opts: Optional[IncomeViewOptions] = None) -> Renderab
     if gigs:
         parts.append(_gigs_table(gigs))
         top = gigs[0]
-        parts.append(Panel(
-            f"[bold]{top.company}[/bold] — {top.title}\n"
-            f"{score_bar(top.fit_score)}  {gig_pay_label(top)}  friction {apply_friction(top)}\n"
-            f"[dim]{top.apply_url or top.url}[/dim]\n"
-            f"[dim]Next:[/dim] `jobpilot gigs digest` to push · mark [cyan]s[/cyan] in pipeline on phone",
-            title="Top contract lead",
-            border_style="green",
-        ))
+        parts.append(
+            Panel(
+                f"[bold]{top.company}[/bold] — {top.title}\n"
+                f"{score_bar(top.fit_score)}  {gig_pay_label(top)}  friction {apply_friction(top)}\n"
+                f"[dim]{top.apply_url or top.url}[/dim]\n"
+                f"[dim]Next:[/dim] `jobpilot gigs digest` to push · mark [cyan]s[/cyan] in pipeline on phone",
+                title="Top contract lead",
+                border_style="green",
+            )
+        )
     else:
-        parts.append(Panel(
-            "[yellow]No contract gigs matched.[/yellow] Try `--min-gig-score 35` or `--no-contract-first`.",
-            title="Contract lane",
-        ))
+        parts.append(
+            Panel(
+                "[yellow]No contract gigs matched.[/yellow] Try `--min-gig-score 35` or `--no-contract-first`.",
+                title="Contract lane",
+            )
+        )
 
     if jobs:
         parts.append(_jobs_table(jobs))
     else:
-        parts.append(Panel(
-            "[dim]No queued backup jobs for this filter.[/dim]",
-            title="Jobs lane",
-        ))
+        parts.append(
+            Panel(
+                "[dim]No queued backup jobs for this filter.[/dim]",
+                title="Jobs lane",
+            )
+        )
 
-    parts.append(Panel(
-        "[dim]Commands:[/dim] "
-        "[cyan]jobpilot hud --watch[/cyan] · "
-        "[cyan]jobpilot radar --watch[/cyan] · "
-        "[cyan]jobpilot gigs digest --contract-first[/cyan] · "
-        "[cyan]jobpilot board --austin[/cyan]",
-        border_style="dim",
-    ))
+    parts.append(
+        Panel(
+            "[dim]Commands:[/dim] "
+            "[cyan]jobpilot hud --watch[/cyan] · "
+            "[cyan]jobpilot radar --watch[/cyan] · "
+            "[cyan]jobpilot gigs digest --contract-first[/cyan] · "
+            "[cyan]jobpilot board --austin[/cyan]",
+            border_style="dim",
+        )
+    )
     return Group(*parts)
 
 
-def render_radar(console: Console, *, opts: Optional[IncomeViewOptions] = None) -> None:
+def render_radar(console: Console, *, opts: IncomeViewOptions | None = None) -> None:
     console.print(build_radar_renderable(opts=opts))
 
 
-def watch_radar(console: Console, *, opts: Optional[IncomeViewOptions] = None, interval: float = 30.0) -> None:
+def watch_radar(
+    console: Console, *, opts: IncomeViewOptions | None = None, interval: float = 30.0
+) -> None:
     import time
+
     from rich.live import Live
 
     with Live(console=console, refresh_per_second=2, screen=True) as live:

@@ -8,23 +8,24 @@ and MockChat captures outbound messages.
 
 from __future__ import annotations
 
-import asyncio
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from jobpilot.core.cdp_bridge import PageInfo
-from jobpilot.core.events import EventBus, FIELD_FILLED, APPLICATION_STARTED, APPLICATION_SUBMITTED, APPLICATION_ABANDONED, INFO, WARNING
-from jobpilot.core.engine import ApplicationEngine
-from jobpilot.core.linkedin_parser import FieldType, SemanticType
 from jobpilot.core.autonomy import AutonomyConfig, AutonomyMode
-
-from tests.mock_browser import MockBrowser, MockOverlay, MockChat, MockElement
-
+from jobpilot.core.cdp_bridge import PageInfo
+from jobpilot.core.engine import ApplicationEngine
+from jobpilot.core.events import (
+    INFO,
+    EventBus,
+)
+from jobpilot.core.linkedin_parser import FieldType, SemanticType
+from tests.mock_browser import MockBrowser, MockChat, MockElement, MockOverlay
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 class FakeField:
     """Minimal field stand-in with an element and metadata."""
@@ -81,9 +82,12 @@ def _make_engine(
 
     profile_store = MagicMock()
     profile_store.load.return_value = MagicMock(
-        first_name="Alex", last_name="Test",
-        email="alex@test.com", phone="555-0100",
-        current_title="Engineer", resume_path=None,
+        first_name="Alex",
+        last_name="Test",
+        email="alex@test.com",
+        phone="555-0100",
+        current_title="Engineer",
+        resume_path=None,
         cover_letter_path=None,
     )
     profile_store.get_field_value.side_effect = lambda k: {
@@ -95,35 +99,49 @@ def _make_engine(
 
     question_matcher = MagicMock()
     question_matcher.match.return_value = MagicMock(answer=None, confidence=0)
-    question_matcher.match_with_context.return_value = MagicMock(answer=None, confidence=0)
+    question_matcher.match_with_context.return_value = MagicMock(
+        answer=None, confidence=0
+    )
 
     action_recorder = MagicMock()
     app_tracker = MagicMock()
     app_tracker.get_status.return_value = None
     app_tracker.get_stats.return_value = {
-        "submitted": 0, "abandoned": 0, "in_progress": 0, "total": 0,
+        "submitted": 0,
+        "abandoned": 0,
+        "in_progress": 0,
+        "total": 0,
     }
     app_tracker.get_recent.return_value = []
 
     config = AutonomyConfig()
     config.mode = autonomy_mode
 
-    return ApplicationEngine(
-        bridge=browser,
-        events=events,
-        overlay=overlay,
-        chat_overlay=chat,
-        profile_store=profile_store,
-        question_matcher=question_matcher,
-        action_recorder=action_recorder,
-        app_tracker=app_tracker,
-        autonomy_config=config,
-    ), events, browser, overlay, chat, action_recorder, app_tracker
+    return (
+        ApplicationEngine(
+            bridge=browser,
+            events=events,
+            overlay=overlay,
+            chat_overlay=chat,
+            profile_store=profile_store,
+            question_matcher=question_matcher,
+            action_recorder=action_recorder,
+            app_tracker=app_tracker,
+            autonomy_config=config,
+        ),
+        events,
+        browser,
+        overlay,
+        chat,
+        action_recorder,
+        app_tracker,
+    )
 
 
 # ---------------------------------------------------------------------------
 # Tests: Engine startup (no watch)
 # ---------------------------------------------------------------------------
+
 
 class TestEngineStartup:
     """Engine.run(watch=False) goes through startup then exits."""
@@ -134,7 +152,10 @@ class TestEngineStartup:
         received = []
         events.on(INFO, lambda **kw: received.append(kw.get("message", "")))
 
-        with patch("jobpilot.core.engine.get_health", return_value={"status": "ok", "whisper": "ready"}):
+        with patch(
+            "jobpilot.core.engine.get_health",
+            return_value={"status": "ok", "whisper": "ready"},
+        ):
             await engine.run(watch=False)
 
         assert any("LinkedIn" in msg for msg in received)
@@ -145,17 +166,24 @@ class TestEngineStartup:
         received = []
         events.on(INFO, lambda **kw: received.append(kw.get("message", "")))
 
-        with patch("jobpilot.core.engine.get_health", return_value={"status": "ok", "whisper": "ready"}):
+        with patch(
+            "jobpilot.core.engine.get_health",
+            return_value={"status": "ok", "whisper": "ready"},
+        ):
             await engine.run(watch=False)
 
         assert any("Bro: ✓" in msg for msg in received)
 
     @pytest.mark.asyncio
     async def test_startup_non_linkedin_page(self):
-        browser = MockBrowser(page_info=PageInfo(
-            url="https://google.com", title="Google",
-            is_linkedin=False, is_job_application=False,
-        ))
+        browser = MockBrowser(
+            page_info=PageInfo(
+                url="https://google.com",
+                title="Google",
+                is_linkedin=False,
+                is_job_application=False,
+            )
+        )
         engine, events, *_ = _make_engine(browser=browser)
         received = []
         events.on(INFO, lambda **kw: received.append(kw.get("message", "")))
@@ -169,6 +197,7 @@ class TestEngineStartup:
 # ---------------------------------------------------------------------------
 # Tests: Field filling
 # ---------------------------------------------------------------------------
+
 
 class TestFieldFilling:
     """Engine correctly fills various field types."""
@@ -219,6 +248,7 @@ class TestFieldFilling:
 # Tests: Chat dispatch
 # ---------------------------------------------------------------------------
 
+
 class TestChatDispatch:
     """Chat commands processed correctly by the engine."""
 
@@ -233,7 +263,10 @@ class TestChatDispatch:
     async def test_stats(self):
         engine, _, _, _, chat, _, tracker = _make_engine()
         tracker.get_stats.return_value = {
-            "submitted": 5, "abandoned": 2, "in_progress": 1, "total": 8,
+            "submitted": 5,
+            "abandoned": 2,
+            "in_progress": 1,
+            "total": 8,
         }
         page_info = PageInfo("https://linkedin.com", "Job", True, True)
         await engine.handle_chat("stats", page_info, None, None)
@@ -271,7 +304,9 @@ class TestChatDispatch:
     async def test_freeform_message_calls_llm_backend(self):
         engine, _, _, _, chat, *_ = _make_engine()
         page_info = PageInfo("https://linkedin.com", "Job", True, True)
-        with patch("jobpilot.core.engine.llm_client.complete", return_value="I can help!"):
+        with patch(
+            "jobpilot.core.engine.llm_client.complete", return_value="I can help!"
+        ):
             await engine.handle_chat("What is Python?", page_info, None, None)
         assert any("I can help" in m for m in chat.sent_messages)
 
@@ -280,14 +315,16 @@ class TestChatDispatch:
 # Tests: Voice dispatch
 # ---------------------------------------------------------------------------
 
-class TestVoiceDispatch:
 
+class TestVoiceDispatch:
     @pytest.mark.asyncio
     async def test_skip_command(self):
         engine, _, _, _, chat, recorder, _ = _make_engine()
-        app_page = FakeAppPage(fields=[
-            FakeField("Name", SemanticType.FIRST_NAME),
-        ])
+        app_page = FakeAppPage(
+            fields=[
+                FakeField("Name", SemanticType.FIRST_NAME),
+            ]
+        )
         await engine.handle_voice({"command": "skip", "args": {}}, app_page)
         assert any("skip" in m.lower() for m in chat.sent_messages)
         recorder.record_field_skipped.assert_called_once()
@@ -310,11 +347,13 @@ class TestVoiceDispatch:
 # Tests: Protocol compliance
 # ---------------------------------------------------------------------------
 
+
 class TestProtocolCompliance:
     """Verify MockBrowser satisfies BrowserInterface."""
 
     def test_mock_browser_is_browser_interface(self):
         from jobpilot.core.browser_interface import BrowserInterface
+
         browser = MockBrowser()
         assert isinstance(browser, BrowserInterface)
 
@@ -323,17 +362,20 @@ class TestProtocolCompliance:
 # Tests: Page sequence (multi-step lifecycle)
 # ---------------------------------------------------------------------------
 
+
 class TestPageSequence:
     """Engine reacts correctly to page transitions."""
 
     @pytest.mark.asyncio
     async def test_page_sequence_navigation(self):
         """MockBrowser returns different pages in sequence."""
-        browser = MockBrowser(page_sequence=[
-            PageInfo("https://linkedin.com/jobs/view/1", "Job 1", True, True, 1),
-            PageInfo("https://linkedin.com/jobs/view/1", "Job 1", True, True, 2),
-            PageInfo("https://linkedin.com/feed", "Feed", True, False),
-        ])
+        browser = MockBrowser(
+            page_sequence=[
+                PageInfo("https://linkedin.com/jobs/view/1", "Job 1", True, True, 1),
+                PageInfo("https://linkedin.com/jobs/view/1", "Job 1", True, True, 2),
+                PageInfo("https://linkedin.com/feed", "Feed", True, False),
+            ]
+        )
         info1 = await browser.get_page_info()
         assert info1.application_step == 1
         info2 = await browser.get_page_info()

@@ -5,27 +5,39 @@ from jobpilot.gigs.core.models import Gig
 
 
 def _gig(**kw):
-    base = dict(id="hn-1", source="hn", title="Role", company="Co",
-               description="", url="https://example-post.test/1")
+    base = dict(
+        id="hn-1",
+        source="hn",
+        title="Role",
+        company="Co",
+        description="",
+        url="https://example-post.test/1",
+    )
     base.update(kw)
     return Gig(**base)
 
 
 # --- offer/role matching ---------------------------------------------------
 
+
 def test_backend_3d_mention_does_not_get_threejs_offer():
-    g = _gig(title="Founding Engineer",
-             description="geologic modelling; building 3D geological models; python backend, agent, claude")
+    g = _gig(
+        title="Founding Engineer",
+        description="geologic modelling; building 3D geological models; python backend, agent, claude",
+    )
     assert proposals.pick_offer(g) != "Interactive 3D performance rescue"
 
 
 def test_real_frontend_3d_still_gets_threejs_offer():
-    g = _gig(title="Frontend Engineer",
-             description="interactive configurator with three.js / react-three-fiber and webgl perf work")
+    g = _gig(
+        title="Frontend Engineer",
+        description="interactive configurator with three.js / react-three-fiber and webgl perf work",
+    )
     assert proposals.pick_offer(g) == "Interactive 3D performance rescue"
 
 
 # --- placeholder guard -----------------------------------------------------
+
 
 def test_contains_placeholder_detects_leaks():
     assert proposals.contains_placeholder("see https://your-portfolio.example.com/work")
@@ -34,6 +46,7 @@ def test_contains_placeholder_detects_leaks():
 
 
 # --- links fall through to the resolved portfolio --------------------------
+
 
 def test_links_fall_through_to_portfolio_when_placeholder():
     prefs = {
@@ -49,8 +62,10 @@ def test_links_fall_through_to_portfolio_when_placeholder():
 def test_explicit_links_are_kept():
     prefs = {
         "identity": {"portfolio": "https://www.atxbro.com/"},
-        "links": {"work_page": "https://www.atxbro.com/work",
-                  "service_page": "https://www.atxbro.com/services"},
+        "links": {
+            "work_page": "https://www.atxbro.com/work",
+            "service_page": "https://www.atxbro.com/services",
+        },
     }
     out = preferences.links(prefs)
     assert out["work_page"] == "https://www.atxbro.com/work"
@@ -69,8 +84,11 @@ def test_resume_for_empty_when_unset():
 
 def test_apply_friction_marks_aggregators():
     from jobpilot.gigs.core import scorer
+
     assert scorer.apply_friction(_gig(apply_url="https://himalayas.app/jobs/1")) == 6
-    assert scorer.apply_friction(_gig(apply_url="https://remoteok.com/remote-jobs/1")) == 5
+    assert (
+        scorer.apply_friction(_gig(apply_url="https://remoteok.com/remote-jobs/1")) == 5
+    )
     assert scorer.apply_friction(_gig(apply_url="mailto:x@y.com")) == 1
 
 

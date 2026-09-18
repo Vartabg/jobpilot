@@ -7,7 +7,6 @@ import time
 import urllib.request
 from datetime import date, datetime
 from pathlib import Path
-from typing import Optional
 
 from rich import box
 from rich.console import Console
@@ -15,8 +14,12 @@ from rich.live import Live
 from rich.panel import Panel
 
 from jobpilot.core.config import DATA_DIR, DEFAULT_SERVE_PORT
-
-from jobpilot.ui.income_data import IncomeViewOptions, load_gigs, load_jobs, load_pipeline_rows
+from jobpilot.ui.income_data import (
+    IncomeViewOptions,
+    load_gigs,
+    load_jobs,
+    load_pipeline_rows,
+)
 from jobpilot.ui.view_helpers import check_chrome, check_dashboard, materials_ready
 
 OUTREACH_DIR = DATA_DIR / "outreach" / "ready-to-send"
@@ -33,16 +36,23 @@ def _austin_countdown() -> str:
         return "Austin today"
     return f"Austin +{-days}d"
 
+
 _LOG_RULES: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"Uvicorn running", re.I), "Dashboard is online"),
     (re.compile(r"Application startup complete", re.I), "Dashboard finished starting"),
     (re.compile(r"GET /api/queue", re.I), "Job list was viewed"),
     (re.compile(r"POST /api/queue/refresh", re.I), "Refreshing job listings…"),
-    (re.compile(r"POST /api/job/[^/]+/mark-applied", re.I), "You marked an application as submitted"),
+    (
+        re.compile(r"POST /api/job/[^/]+/mark-applied", re.I),
+        "You marked an application as submitted",
+    ),
     (re.compile(r"POST /api/job/[^/]+/opened", re.I), "You opened a job posting"),
     (re.compile(r"POST /api/job/[^/]+/skip", re.I), "You skipped a job"),
     (re.compile(r"POST /api/applications/log", re.I), "Application activity logged"),
-    (re.compile(r"ERROR|Traceback|Exception", re.I), "Something needs attention — check the dashboard"),
+    (
+        re.compile(r"ERROR|Traceback|Exception", re.I),
+        "Something needs attention — check the dashboard",
+    ),
     (re.compile(r"Shutting down", re.I), "Dashboard stopped"),
     (re.compile(r"Started server process", re.I), "Dashboard process started"),
 ]
@@ -76,7 +86,7 @@ def _outreach_packages() -> list[tuple[str, str]]:
     return rows
 
 
-def _top_gig_name() -> Optional[str]:
+def _top_gig_name() -> str | None:
     gigs, _ = load_gigs(IncomeViewOptions(gigs_fresh_only=True))
     if not gigs:
         return None
@@ -84,7 +94,7 @@ def _top_gig_name() -> Optional[str]:
     return f"{g.company} — {g.title}"
 
 
-def _top_job_with_materials() -> Optional[str]:
+def _top_job_with_materials() -> str | None:
     jobs = load_jobs(IncomeViewOptions())
     for j in jobs:
         if materials_ready(j.company):
@@ -97,7 +107,9 @@ def _top_job_with_materials() -> Optional[str]:
 
 def _serve_url(port: int = DEFAULT_SERVE_PORT) -> str:
     try:
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/profile", timeout=1.5) as resp:
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/api/profile", timeout=1.5
+        ) as resp:
             if resp.status == 200:
                 return f"http://127.0.0.1:{port}/"
     except Exception:
@@ -117,7 +129,9 @@ def build_status_panel(port: int = DEFAULT_SERVE_PORT) -> Panel:
     if dash_ok and chrome_ok:
         lines.append("[bold green]All set — JobPilot is ready[/bold green]")
     elif dash_ok:
-        lines.append("[bold yellow]Dashboard is up — browser helper still starting[/bold yellow]")
+        lines.append(
+            "[bold yellow]Dashboard is up — browser helper still starting[/bold yellow]"
+        )
     else:
         lines.append("[bold red]Starting up — give it a few seconds[/bold red]")
 
@@ -135,22 +149,34 @@ def build_status_panel(port: int = DEFAULT_SERVE_PORT) -> Panel:
     lines.append("")
     lines.append("[bold]Your search right now[/bold]")
     fresh = gigs_meta.get("fresh_count", gigs_meta.get("shown", len(gigs)))
-    lines.append(f"  • [cyan]{len(gigs)}[/cyan] contract gigs to review ({fresh} new today)")
+    lines.append(
+        f"  • [cyan]{len(gigs)}[/cyan] contract gigs to review ({fresh} new today)"
+    )
     ready_jobs = sum(1 for j in jobs if materials_ready(j.company))
     lines.append(
         f"  • [cyan]{len(jobs)}[/cyan] Austin / remote jobs queued"
-        + (f" ([green]{ready_jobs}[/green] with application kit ready)" if ready_jobs else "")
+        + (
+            f" ([green]{ready_jobs}[/green] with application kit ready)"
+            if ready_jobs
+            else ""
+        )
     )
     if pipeline:
-        lines.append(f"  • [cyan]{len(pipeline)}[/cyan] active applications in your pipeline")
+        lines.append(
+            f"  • [cyan]{len(pipeline)}[/cyan] active applications in your pipeline"
+        )
     if outreach:
-        lines.append(f"  • [cyan]{len(outreach)}[/cyan] outreach packages ready to send")
+        lines.append(
+            f"  • [cyan]{len(outreach)}[/cyan] outreach packages ready to send"
+        )
 
     lines.append("")
     lines.append("[bold]Suggested next step[/bold]")
     if outreach:
         _, name = outreach[0]
-        lines.append(f"  → Send outreach: [green]{name}[/green]  [dim](type jps 01)[/dim]")
+        lines.append(
+            f"  → Send outreach: [green]{name}[/green]  [dim](type jps 01)[/dim]"
+        )
     elif ready_jobs:
         top = _top_job_with_materials()
         if top:
@@ -173,7 +199,7 @@ def build_status_panel(port: int = DEFAULT_SERVE_PORT) -> Panel:
     )
 
 
-def _translate_log_line(line: str) -> Optional[str]:
+def _translate_log_line(line: str) -> str | None:
     raw = line.strip()
     if not raw:
         return None
@@ -185,7 +211,9 @@ def _translate_log_line(line: str) -> Optional[str]:
     return None
 
 
-def _read_activity_messages(log_path: Path = SERVE_LOG, *, limit: int = 12) -> list[str]:
+def _read_activity_messages(
+    log_path: Path = SERVE_LOG, *, limit: int = 12
+) -> list[str]:
     if not log_path.is_file():
         return ["[dim]Waiting for activity…[/dim]"]
     try:
@@ -226,7 +254,9 @@ def build_activity_panel() -> Panel:
     )
 
 
-def watch_status_board(console: Console, *, interval: float = 30.0, port: int = DEFAULT_SERVE_PORT) -> None:
+def watch_status_board(
+    console: Console, *, interval: float = 30.0, port: int = DEFAULT_SERVE_PORT
+) -> None:
     with Live(console=console, refresh_per_second=2, screen=True) as live:
         while True:
             live.update(build_status_panel(port=port))

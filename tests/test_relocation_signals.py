@@ -35,4 +35,6 @@ def test_offer_elsewhere_in_sentence_with_need_still_counts() -> None:
 
 def test_empty_and_plain_text() -> None:
     assert detect_relocation_offer("") is None
-    assert detect_relocation_offer("Remote-first team, async culture, great pay.") is None
+    assert (
+        detect_relocation_offer("Remote-first team, async culture, great pay.") is None
+    )

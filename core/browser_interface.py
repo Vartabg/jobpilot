@@ -11,7 +11,7 @@ Uses ``typing.Protocol`` so CDPBridge satisfies the protocol implicitly
 
 from __future__ import annotations
 
-from typing import Any, Optional, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from jobpilot.core.cdp_bridge import PageInfo
 

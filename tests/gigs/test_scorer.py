@@ -2,7 +2,6 @@ from jobpilot.gigs.core.models import Gig
 from jobpilot.gigs.core.scorer import filter_and_rank, score_gig
 from jobpilot.gigs.core.scoring_rules import TITLE_NEGATIVE_CAP
 
-
 # ----- core invariants ---------------------------------------------------
 
 
@@ -332,7 +331,9 @@ def test_overlapping_title_patterns_score_only_the_longest() -> None:
 
     scored = score_gig(gig)
 
-    eng_reasons = [r for r in scored.fit_reasons if r.startswith("+") and " title:" in r]
+    eng_reasons = [
+        r for r in scored.fit_reasons if r.startswith("+") and " title:" in r
+    ]
     assert eng_reasons == ["+30 title:ai automation engineer"]
 
 

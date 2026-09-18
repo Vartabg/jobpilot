@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import NamedTuple
@@ -93,13 +93,26 @@ _LEGACY_ID_RE = re.compile(r"^([a-z0-9]+)-(\d{15,})$")
 
 # Statuses that mean "already decided about this gig — do not re-surface"
 EXCLUDED_STATUSES = {
-    "saved", "drafted", "sent", "replied", "interview", "hired",
-    "passed", "archived",
+    "saved",
+    "drafted",
+    "sent",
+    "replied",
+    "interview",
+    "hired",
+    "passed",
+    "archived",
 }
 
 HEADER = (
-    "Status", "Score", "Company — Role", "Pay", "Apply",
-    "Saved", "Last touched", "Next action", "Notes",
+    "Status",
+    "Score",
+    "Company — Role",
+    "Pay",
+    "Apply",
+    "Saved",
+    "Last touched",
+    "Next action",
+    "Notes",
 )
 
 
@@ -181,7 +194,10 @@ def parse_last_touched(value: str, today: datetime | None = None) -> datetime | 
 
 
 def followups_due(
-    rows: list[Row], *, days: int = 3, today: datetime | None = None,
+    rows: list[Row],
+    *,
+    days: int = 3,
+    today: datetime | None = None,
 ) -> list[Row]:
     """Rows that were 'sent' but not yet replied and have gone quiet for
     `days`+ — most cold-outreach replies come from the 2nd–4th touch, so a
@@ -202,9 +218,9 @@ def followups_due(
 
 def _fmt_pay_for_pipeline(g: Gig) -> str:
     if g.salary_max and g.salary_min:
-        return f"${g.salary_min/1000:.0f}-${g.salary_max/1000:.0f}K"
+        return f"${g.salary_min / 1000:.0f}-${g.salary_max / 1000:.0f}K"
     if g.salary_max:
-        return f"up to ${g.salary_max/1000:.0f}K"
+        return f"up to ${g.salary_max / 1000:.0f}K"
     if g.pay_hourly_est:
         return f"${g.pay_hourly_est:.0f}/hr"
     return ""
@@ -316,15 +332,17 @@ def merge_new_gigs(existing: list[Row], ranked: list[Gig]) -> list[Row]:
     for g in ranked:
         if g.id in existing_ids or gig_keys(g) & existing_keys:
             continue
-        out.append(Row(
-            status="new",
-            score=g.fit_score,
-            company=g.company or g.source,
-            role=(g.title or "").split("|")[0].strip()[:80],
-            pay=_fmt_pay_for_pipeline(g),
-            apply=g.apply_url or g.url,
-            gig_id=g.id,
-        ))
+        out.append(
+            Row(
+                status="new",
+                score=g.fit_score,
+                company=g.company or g.source,
+                role=(g.title or "").split("|")[0].strip()[:80],
+                pay=_fmt_pay_for_pipeline(g),
+                apply=g.apply_url or g.url,
+                gig_id=g.id,
+            )
+        )
         existing_ids.add(g.id)
         existing_keys |= gig_keys(g)
     return out
@@ -348,9 +366,16 @@ def _gig_from_row(row: Row) -> Gig:
 # Source names that leak into the Company column when a scraper left
 # company empty (merge does `g.company or g.source`). On rescore we
 # replace these placeholders with a recovered employer name when we can.
-_SOURCE_COMPANY_PLACEHOLDERS = frozenset({
-    "himalayas", "hn", "hackernews", "remoteok", "wwr", "weworkremotely",
-})
+_SOURCE_COMPANY_PLACEHOLDERS = frozenset(
+    {
+        "himalayas",
+        "hn",
+        "hackernews",
+        "remoteok",
+        "wwr",
+        "weworkremotely",
+    }
+)
 
 
 def _recover_company(row: Row, gig: Gig) -> str:
@@ -439,10 +464,15 @@ def _collapse_keep_rank(row: Row) -> tuple:
     the modern row is the newer sighting); score breaks the final tie."""
     has_user_data = row.status != "new" or bool(row.notes)
     touched = sum(
-        1 for v in (
-            row.status != "new", row.notes, row.next_action,
-            row.saved, row.last_touched,
-        ) if v
+        1
+        for v in (
+            row.status != "new",
+            row.notes,
+            row.next_action,
+            row.saved,
+            row.last_touched,
+        )
+        if v
     )
     when = (
         parse_last_touched(row.last_touched)
@@ -512,7 +542,8 @@ def migrate_pipeline_hygiene(
         store.mark_archived(sorted(r.gig_id for r in removed if r.gig_id))
     if removed or remapped:
         write(
-            kept, path,
+            kept,
+            path,
             removed_ids={r.gig_id for r in removed if r.gig_id} | set(remapped),
         )
     marker_path.write_text(
@@ -530,6 +561,7 @@ def archive_after_days() -> int:
     """Days a `new` row may sit untriaged before auto-archive."""
     try:
         from jobpilot.gigs.core import preferences
+
         raw = preferences.search_config().get("archive_new_after_days")
         if raw is not None:
             return max(1, int(raw))
@@ -542,6 +574,7 @@ def max_live_new() -> int:
     """Cap on concurrent `new` rows in pipeline.md (mobile backlog guard)."""
     try:
         from jobpilot.gigs.core import preferences
+
         raw = preferences.search_config().get("max_live_new")
         if raw is not None:
             return max(5, int(raw))
@@ -723,7 +756,9 @@ def append_to_archive(rows: list[Row], path: Path = ARCHIVE_PATH) -> Path:
 
 
 def stamp_status_changes(
-    before: list[Row], after: list[Row], today: str | None = None,
+    before: list[Row],
+    after: list[Row],
+    today: str | None = None,
 ) -> list[Row]:
     """When the user edits a status, stamp Last touched + Saved as needed.
     Pass `before` (the previous run's status snapshot, see
@@ -810,20 +845,23 @@ def _preserve_user_edits(
         if disk is None:
             out.append(row)
             continue
-        out.append(Row(
-            status=authoritative_status.get(row.gig_id, disk.status),
-            score=row.score,
-            company=row.company or disk.company,
-            role=row.role or disk.role,
-            pay=row.pay or disk.pay,
-            apply=disk.apply or row.apply,
-            saved=disk.saved or row.saved,
-            last_touched=disk.last_touched or row.last_touched,
-            next_action=disk.next_action,
-            notes=_merge_notes(row.notes, disk.notes),
-            gig_id=row.gig_id,
-            legacy_reminder_flag=row.legacy_reminder_flag or disk.legacy_reminder_flag,
-        ))
+        out.append(
+            Row(
+                status=authoritative_status.get(row.gig_id, disk.status),
+                score=row.score,
+                company=row.company or disk.company,
+                role=row.role or disk.role,
+                pay=row.pay or disk.pay,
+                apply=disk.apply or row.apply,
+                saved=disk.saved or row.saved,
+                last_touched=disk.last_touched or row.last_touched,
+                next_action=disk.next_action,
+                notes=_merge_notes(row.notes, disk.notes),
+                gig_id=row.gig_id,
+                legacy_reminder_flag=row.legacy_reminder_flag
+                or disk.legacy_reminder_flag,
+            )
+        )
     merged_ids = {r.gig_id for r in merged if r.gig_id}
     merged_keys = {(r.company, r.role) for r in merged}
     for disk in on_disk:
@@ -860,6 +898,7 @@ def render(rows: list[Row]) -> str:
         if r.excluded_from_future:
             return 3
         return 4
+
     rows = sorted(rows, key=lambda r: (_bucket(r), -r.score))
 
     out = [
@@ -892,8 +931,11 @@ def _row_line(row: Row) -> str:
     cells = [
         row.status,
         str(row.score) if row.score else "",
-        (f"{row.company} — {row.role}" if row.company and row.role
-            else (row.company or row.role)),
+        (
+            f"{row.company} — {row.role}"
+            if row.company and row.role
+            else (row.company or row.role)
+        ),
         row.pay,
         row.apply,
         row.saved,
@@ -902,12 +944,17 @@ def _row_line(row: Row) -> str:
         row.notes,
     ]
     cells = [c.replace("|", "/") for c in cells]
-    marker = f"{GIG_ID_MARKER_PREFIX}{row.gig_id}{GIG_ID_MARKER_SUFFIX}" if row.gig_id else ""
+    marker = (
+        f"{GIG_ID_MARKER_PREFIX}{row.gig_id}{GIG_ID_MARKER_SUFFIX}"
+        if row.gig_id
+        else ""
+    )
     return f"| {' | '.join(cells)} | {marker}"
 
 
 _REFRESHED_LINE_RE = re.compile(
-    r"^# GigPilot Pipeline — refreshed .*$", flags=re.MULTILINE,
+    r"^# GigPilot Pipeline — refreshed .*$",
+    flags=re.MULTILINE,
 )
 
 
@@ -946,7 +993,9 @@ def write(
     with file_lock(path):
         on_disk = parse(path) if path.exists() else []
         rows = _preserve_user_edits(
-            rows, on_disk, removed_ids=removed_ids,
+            rows,
+            on_disk,
+            removed_ids=removed_ids,
             authoritative_status=authoritative_status,
         )
         removed_on_disk = sum(
@@ -957,11 +1006,17 @@ def write(
                 "REFUSING to write %s: %d rows on disk but only %d to write "
                 "(tolerance %d + %d deliberately archived). "
                 "Keeping the on-disk file untouched.",
-                path, len(on_disk), len(rows), SHRINK_TOLERANCE, removed_on_disk,
+                path,
+                len(on_disk),
+                len(rows),
+                SHRINK_TOLERANCE,
+                removed_on_disk,
             )
             return WriteResult(path, refused=True)
         rendered = render(rows)
         if path.exists() and _content_equal(path.read_text(), rendered):
-            return WriteResult(path)  # no changes — skip the write, spare an iCloud sync
+            return WriteResult(
+                path
+            )  # no changes — skip the write, spare an iCloud sync
         atomic_write_text(path, rendered)
     return WriteResult(path)

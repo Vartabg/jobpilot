@@ -3,9 +3,9 @@
 from pathlib import Path
 
 from jobpilot.core.application_tracker import ApplicationTracker
+from jobpilot.core.doctor import run_doctor
 from jobpilot.core.profile_store import ProfileStore
 from jobpilot.learning.learning_db import LearningDB
-from jobpilot.core.doctor import run_doctor
 
 
 def test_doctor_reports_ok_for_healthy_setup(tmp_path: Path):
@@ -24,7 +24,9 @@ def test_doctor_reports_ok_for_healthy_setup(tmp_path: Path):
     tracker.close()
 
     db = LearningDB(db_path=tmp_path / "learning.db")
-    db.upsert_template("Why do you want this role?", "Because it matches my background.")
+    db.upsert_template(
+        "Why do you want this role?", "Because it matches my background."
+    )
     db.record_action(
         action_type="field_approved",
         field_label="Why do you want this role?",
@@ -52,7 +54,14 @@ def test_doctor_flags_missing_resume_and_bad_status(tmp_path: Path):
     conn = tracker._get_conn()
     conn.execute(
         "INSERT INTO applications (job_url, job_title, company, applied_at, status, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-        ("https://linkedin.com/jobs/view/2", "Weird Role", "Odd Co", "2026-04-07T00:00:00", "mystery", "2026-04-07T00:00:00"),
+        (
+            "https://linkedin.com/jobs/view/2",
+            "Weird Role",
+            "Odd Co",
+            "2026-04-07T00:00:00",
+            "mystery",
+            "2026-04-07T00:00:00",
+        ),
     )
     conn.commit()
     tracker.close()
@@ -72,4 +81,6 @@ def test_doctor_warns_about_shadow_application_database(tmp_path: Path):
     report = run_doctor(data_dir=data_dir, check_bro=False)
 
     assert report.status == "warn"
-    assert any("shadow application database" in item.lower() for item in report.warnings)
+    assert any(
+        "shadow application database" in item.lower() for item in report.warnings
+    )

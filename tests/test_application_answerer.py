@@ -157,7 +157,9 @@ def test_background_answer_prefers_stored_background_summary(tmp_path):
     accounts_path = _write_accounts(
         tmp_path,
         {
-            "narrative": {"background_summary": "I am a synthetic test person who fixes things."},
+            "narrative": {
+                "background_summary": "I am a synthetic test person who fixes things."
+            },
             "accounts": [{"id": "first-job", "title": "Something I did once"}],
         },
     )
@@ -226,4 +228,6 @@ def test_module_contains_no_author_identity():
         "columbia",
         "field engineering",
     ):
-        assert fragment.lower() not in source.lower(), f"author literal {fragment!r} still in module"
+        assert fragment.lower() not in source.lower(), (
+            f"author literal {fragment!r} still in module"
+        )

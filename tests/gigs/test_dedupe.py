@@ -9,8 +9,16 @@ from jobpilot.gigs.core.models import Gig
 
 
 def test_cross_source_key_matches_same_role_different_ids() -> None:
-    a = Gig(id="rok-1", source="remoteok", title="AI Engineer", company="Acme", url="https://a")
-    b = Gig(id="wwr-2", source="wwr", title="AI Engineer", company="Acme", url="https://b")
+    a = Gig(
+        id="rok-1",
+        source="remoteok",
+        title="AI Engineer",
+        company="Acme",
+        url="https://a",
+    )
+    b = Gig(
+        id="wwr-2", source="wwr", title="AI Engineer", company="Acme", url="https://b"
+    )
     assert cross_source_key(a) == cross_source_key(b)
 
 
@@ -40,9 +48,19 @@ def test_dedupe_keeps_higher_fit_variant() -> None:
 
 
 def test_dedupe_with_groups_lists_every_collapsed_member() -> None:
-    a = Gig(id="rok-1", source="remoteok", title="AI Engineer", company="Acme", url="https://a")
-    b = Gig(id="wwr-2", source="wwr", title="AI Engineer", company="Acme", url="https://b")
-    c = Gig(id="hn-3", source="hn", title="Data Engineer", company="Beta", url="https://c")
+    a = Gig(
+        id="rok-1",
+        source="remoteok",
+        title="AI Engineer",
+        company="Acme",
+        url="https://a",
+    )
+    b = Gig(
+        id="wwr-2", source="wwr", title="AI Engineer", company="Acme", url="https://b"
+    )
+    c = Gig(
+        id="hn-3", source="hn", title="Data Engineer", company="Beta", url="https://c"
+    )
     unique, removed, groups = dedupe_cross_source_with_groups([a, b, c])
     assert removed == 1
     rep = next(g for g in unique if g.id != "hn-3")
@@ -56,8 +74,11 @@ def test_gig_keys_match_listing_keys_built_from_a_pipeline_row() -> None:
     # A repost's keys must intersect the keys of the pipeline row that was
     # minted from the original sighting (title truncated, pipes stripped).
     gig = Gig(
-        id="wwr-9", source="wwr", title="Senior AI Engineer | Remote | $150K",
-        company="Acme", url="https://example.com/x",
+        id="wwr-9",
+        source="wwr",
+        title="Senior AI Engineer | Remote | $150K",
+        company="Acme",
+        url="https://example.com/x",
     )
     row_side = listing_keys(title="Senior AI Engineer", company="Acme")
     assert gig_keys(gig) & row_side

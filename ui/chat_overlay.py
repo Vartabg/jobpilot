@@ -5,10 +5,11 @@ Injects a floating chat interface into the browser for bidirectional
 communication between the user and the JobPilot agent.
 """
 
-from dataclasses import dataclass
 import json
-from rich.console import Console
+from dataclasses import dataclass
+
 from playwright.async_api import Page
+from rich.console import Console
 
 console = Console()
 
@@ -64,7 +65,10 @@ def build_chat_welcome_message() -> str:
 
 
 _QUICK_ACTIONS_JSON = json.dumps(
-    [{"command": action.command, "label": action.label} for action in build_chat_quick_actions()]
+    [
+        {"command": action.command, "label": action.label}
+        for action in build_chat_quick_actions()
+    ]
 )
 
 # The overlay HTML/CSS/JS that gets injected into the page
@@ -380,7 +384,10 @@ CHAT_OVERLAY_TEMPLATE = """
     
     console.log('✓ JobPilot Chat injected');
 })();
-""".replace("__WELCOME_MESSAGE__", json.dumps(build_chat_welcome_message())).replace("__QUICK_ACTIONS_JSON__", _QUICK_ACTIONS_JSON)
+""".replace("__WELCOME_MESSAGE__", json.dumps(build_chat_welcome_message())).replace(
+    "__QUICK_ACTIONS_JSON__", _QUICK_ACTIONS_JSON
+)
+
 
 class ChatOverlay:
     """
@@ -394,7 +401,9 @@ class ChatOverlay:
     async def inject(self) -> bool:
         """Inject the fallback chat overlay, or reuse the unified surface if it already exists."""
         try:
-            has_unified = await self.page.evaluate("typeof window.jobpilotChat !== 'undefined'")
+            has_unified = await self.page.evaluate(
+                "typeof window.jobpilotChat !== 'undefined'"
+            )
             if has_unified:
                 await self.page.evaluate(
                     "window.jobpilotChat.restoreFromSession && window.jobpilotChat.restoreFromSession()"
@@ -413,7 +422,9 @@ class ChatOverlay:
     async def ensure_injected(self) -> bool:
         """Ensure the chat control surface exists, injecting it when needed."""
         try:
-            has_chat_api = await self.page.evaluate("typeof window.jobpilotChat !== 'undefined'")
+            has_chat_api = await self.page.evaluate(
+                "typeof window.jobpilotChat !== 'undefined'"
+            )
         except Exception:
             has_chat_api = False
 
@@ -422,7 +433,7 @@ class ChatOverlay:
             return True
 
         return await self.inject()
-            
+
     async def get_messages(self) -> list[str]:
         """Poll for new messages from the user."""
         if not await self.ensure_injected():

@@ -18,20 +18,28 @@ class TestSalaryHeuristic:
         assert JobScorer._extract_salary("Just a $5 application fee.") == ""
 
     def test_extracts_real_comp(self):
-        assert JobScorer._extract_salary("Comp: $120,000 - $150,000 per year").startswith("$120,000")
+        assert JobScorer._extract_salary(
+            "Comp: $120,000 - $150,000 per year"
+        ).startswith("$120,000")
         assert JobScorer._extract_salary("Pay is $50/hr").startswith("$50")
         assert JobScorer._extract_salary("Base $120k-$160k").startswith("$120k")
 
 
 class TestExperienceHeuristic:
     def test_ignores_non_requirement_years(self):
-        _, risk = JobScorer._score_experience(3, "The company was founded 20 years ago.")
+        _, risk = JobScorer._score_experience(
+            3, "The company was founded 20 years ago."
+        )
         assert risk == ""
-        _, risk = JobScorer._score_experience(3, "Unlimited PTO after 5 years of tenure.")
+        _, risk = JobScorer._score_experience(
+            3, "Unlimited PTO after 5 years of tenure."
+        )
         assert risk == ""
 
     def test_reads_real_requirement(self):
-        _, risk = JobScorer._score_experience(2, "We require 7+ years of experience in Python.")
+        _, risk = JobScorer._score_experience(
+            2, "We require 7+ years of experience in Python."
+        )
         assert "7" in risk
 
 
@@ -64,11 +72,16 @@ class TestQueueCompanyDedup:
 
     def test_rejected_company_marks_dead_ground(self):
         tracker = _FakeTracker(company_statuses={"Acme": "rejected"})
-        assert tracker_status_for_job(tracker, "https://acme/new-role", "Acme") == "rejected"
+        assert (
+            tracker_status_for_job(tracker, "https://acme/new-role", "Acme")
+            == "rejected"
+        )
 
     def test_directly_applied_url_still_flagged(self):
         tracker = _FakeTracker(applied={"https://acme/role-a"})
-        assert tracker_status_for_job(tracker, "https://acme/role-a", "Acme") == "applied"
+        assert (
+            tracker_status_for_job(tracker, "https://acme/role-a", "Acme") == "applied"
+        )
 
 
 class TestQueueSchemaDrift:
@@ -76,10 +89,17 @@ class TestQueueSchemaDrift:
         # A queue.json written by a newer version with an extra field must not
         # crash the load (which would wipe applied/skipped history).
         row = {
-            "id": "abc123", "company": "Acme", "title": "Engineer",
-            "url": "https://acme/role", "location": "Remote", "portal": "greenhouse",
-            "track": "tech", "fit_score": 80, "keywords": ["python"],
-            "status": "applied", "future_field_from_a_newer_version": "boom",
+            "id": "abc123",
+            "company": "Acme",
+            "title": "Engineer",
+            "url": "https://acme/role",
+            "location": "Remote",
+            "portal": "greenhouse",
+            "track": "tech",
+            "fit_score": 80,
+            "keywords": ["python"],
+            "status": "applied",
+            "future_field_from_a_newer_version": "boom",
         }
         qpath = tmp_path / "queue.json"
         qpath.write_text(json.dumps([row]))

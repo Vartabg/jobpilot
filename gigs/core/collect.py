@@ -18,7 +18,12 @@ log = get_logger(__name__)
 
 
 def include_upwork_exports() -> bool:
-    return os.getenv("GIGPILOT_INCLUDE_UPWORK", "").lower() in {"1", "true", "yes", "on"}
+    return os.getenv("GIGPILOT_INCLUDE_UPWORK", "").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
 
 def scraper_registry() -> list[tuple[str, Callable[[], list[Gig]]]]:

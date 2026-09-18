@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Optional
 
 from rich.text import Text
 
@@ -38,7 +37,7 @@ def company_slug(company: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", (company or "").strip().lower()).strip("-")
 
 
-def materials_ready(company: str) -> Optional[Path]:
+def materials_ready(company: str) -> Path | None:
     slug = company_slug(company)
     if not slug:
         return None
@@ -68,7 +67,9 @@ def check_dashboard(port: int = DEFAULT_SERVE_PORT) -> bool:
     try:
         import urllib.request
 
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/queue", timeout=1.5) as resp:
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/api/queue", timeout=1.5
+        ) as resp:
             return resp.status == 200
     except Exception:
         return False
@@ -78,7 +79,9 @@ def check_chrome(port: int = 9222) -> bool:
     try:
         import urllib.request
 
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}/json/version", timeout=1.5):
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/json/version", timeout=1.5
+        ):
             return True
     except Exception:
         return False

@@ -18,7 +18,7 @@ log = get_logger(__name__)
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) "
-                  "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
     "Accept": "application/rss+xml, application/xml, text/xml",
 }
 
@@ -31,6 +31,7 @@ WWR_CATEGORIES = {
     "customer-support": "https://weworkremotely.com/categories/remote-customer-support-jobs.rss",
     "management": "https://weworkremotely.com/categories/remote-management-and-finance-jobs.rss",
 }
+
 
 def _strip_html(s: str) -> str:
     return unescape(re.sub(r"<[^>]+>", " ", s or "")).strip()
@@ -46,16 +47,40 @@ _EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 _DESC_URL_RE = re.compile(r"URL:\s*(https?://[^\s<>\"')]+)", re.IGNORECASE)
 _PLAIN_URL_RE = re.compile(r"https?://[^\s<>\"')]+", re.IGNORECASE)
 _APPLY_HOST_HINTS = (
-    "boards.greenhouse.io", "jobs.lever.co", "jobs.ashbyhq.com", "ashbyhq.com",
-    "apply.workable.com", "myworkdayjobs.com", "wellfound.com",
-    "smartrecruiters.com", "bamboohr.com", "rippling.com", "join.com",
+    "boards.greenhouse.io",
+    "jobs.lever.co",
+    "jobs.ashbyhq.com",
+    "ashbyhq.com",
+    "apply.workable.com",
+    "myworkdayjobs.com",
+    "wellfound.com",
+    "smartrecruiters.com",
+    "bamboohr.com",
+    "rippling.com",
+    "join.com",
     "personio.com",
 )
 _APPLY_PATH_HINTS = (
-    "/careers", "/career", "/jobs", "/job/", "/apply",
-    "/hiring", "/work-with-us", "/openings", "/positions",
+    "/careers",
+    "/career",
+    "/jobs",
+    "/job/",
+    "/apply",
+    "/hiring",
+    "/work-with-us",
+    "/openings",
+    "/positions",
 )
-_APPLY_INBOX_HINTS = ("jobs@", "hiring@", "careers@", "apply@", "hr@", "recruiting@", "recruit@", "talent@")
+_APPLY_INBOX_HINTS = (
+    "jobs@",
+    "hiring@",
+    "careers@",
+    "apply@",
+    "hr@",
+    "recruiting@",
+    "recruit@",
+    "talent@",
+)
 
 
 def _score_apply_target(href: str, label: str) -> int:
@@ -71,7 +96,9 @@ def _score_apply_target(href: str, label: str) -> int:
         return 70
     if any(p in href_l for p in _APPLY_PATH_HINTS):
         return 60
-    if any(t in label_l for t in ("apply", "careers", "open positions", "we're hiring")):
+    if any(
+        t in label_l for t in ("apply", "careers", "open positions", "we're hiring")
+    ):
         return 40
     return 0
 
@@ -116,7 +143,9 @@ def extract_apply_url_from_listing(html: str) -> str:
     # Fallback: any plaintext jobs@ inbox in the page body
     for email in _EMAIL_RE.findall(html):
         local = email.split("@", 1)[0].lower() + "@"
-        if any(local == hint or local.startswith(hint[:-1]) for hint in _APPLY_INBOX_HINTS):
+        if any(
+            local == hint or local.startswith(hint[:-1]) for hint in _APPLY_INBOX_HINTS
+        ):
             return f"mailto:{email}"
 
     if best_score > 0:
@@ -142,7 +171,9 @@ def _extract_from_description(desc: str) -> str:
     # Plaintext jobs@ inbox (rare but high-signal)
     for email in _EMAIL_RE.findall(desc):
         local = email.split("@", 1)[0].lower() + "@"
-        if any(local == hint or local.startswith(hint[:-1]) for hint in _APPLY_INBOX_HINTS):
+        if any(
+            local == hint or local.startswith(hint[:-1]) for hint in _APPLY_INBOX_HINTS
+        ):
             return f"mailto:{email}"
 
     # Find the structured `URL:` line first
@@ -174,6 +205,7 @@ def _google_careers_search(company: str) -> str:
     vs. a direct apply URL, but still better than the WWR aggregator.
     """
     from urllib.parse import quote
+
     return f"https://www.google.com/search?q={quote(company + ' careers OR jobs OR apply')}"
 
 
@@ -263,21 +295,23 @@ def scrape_weworkremotely() -> list[Gig]:
             if ": " in title:
                 company, pos_title = title.split(": ", 1)
 
-            gigs.append(Gig(
-                id=gid,
-                source="wwr",
-                title=pos_title.strip(),
-                company=company.strip(),
-                url=link,
-                description=desc[:800],
-                location="Remote",
-                posted_at=entry.get("published", ""),
-                salary_min=sal_min,
-                salary_max=sal_max,
-                pay_hourly_est=hourly,
-                currency=currency,
-                tags=[cat],
-            ))
+            gigs.append(
+                Gig(
+                    id=gid,
+                    source="wwr",
+                    title=pos_title.strip(),
+                    company=company.strip(),
+                    url=link,
+                    description=desc[:800],
+                    location="Remote",
+                    posted_at=entry.get("published", ""),
+                    salary_min=sal_min,
+                    salary_max=sal_max,
+                    pay_hourly_est=hourly,
+                    currency=currency,
+                    tags=[cat],
+                )
+            )
 
     if not ok_categories:
         raise RuntimeError(

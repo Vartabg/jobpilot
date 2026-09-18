@@ -1,7 +1,7 @@
 """Tests for core/job_scorer.py — pre-apply fit scoring."""
 
-from jobpilot.core.profile_store import UserProfile
 from jobpilot.core.job_scorer import JobScorer
+from jobpilot.core.profile_store import UserProfile
 
 
 class DummyProfileStore:
@@ -40,7 +40,10 @@ def test_score_text_returns_high_score_for_good_match():
     assert result.score >= 70
     assert "React" in result.matched_skills
     assert "TypeScript" in result.matched_skills
-    assert result.recommendation in {"Strong fit — prioritize", "Good fit — worth a closer look"}
+    assert result.recommendation in {
+        "Strong fit — prioritize",
+        "Good fit — worth a closer look",
+    }
 
 
 def test_score_text_penalizes_clear_gaps():
@@ -68,7 +71,9 @@ def test_score_text_penalizes_clear_gaps():
 
     assert result.score < 50
     assert result.missing_skills
-    assert any("spons" in risk.lower() or "authoriz" in risk.lower() for risk in result.risks)
+    assert any(
+        "spons" in risk.lower() or "authoriz" in risk.lower() for risk in result.risks
+    )
 
 
 # ── Policy alignment tests ────────────────────────────────────────
@@ -90,7 +95,9 @@ def _aligned_profile() -> UserProfile:
 
 def test_aligned_commercial_company_no_alignment_penalty():
     """Commercial company outside refused/deprioritized lists scores normally."""
-    scorer = JobScorer(profile_store=DummyProfileStore(_aligned_profile()), use_bro=False)
+    scorer = JobScorer(
+        profile_store=DummyProfileStore(_aligned_profile()), use_bro=False
+    )
     result = scorer.score_text(
         "Software Engineer, Forward Deployed Agent Builder — Python, agents, real-time systems.",
         title="Software Engineer, Forward Deployed Agent Builder",
@@ -105,7 +112,9 @@ def test_aligned_commercial_company_no_alignment_penalty():
 
 def test_labeled_jd_parses_role_and_company_correctly():
     """JD files that lead with `Company:` / `Role:` labels must not swap fields."""
-    scorer = JobScorer(profile_store=DummyProfileStore(_aligned_profile()), use_bro=False)
+    scorer = JobScorer(
+        profile_store=DummyProfileStore(_aligned_profile()), use_bro=False
+    )
     jd = (
         "Company: Entech Sales & Service LLC\n"
         "Role: Service Technician - Security / Access Control Systems\n"
@@ -114,7 +123,10 @@ def test_labeled_jd_parses_role_and_company_correctly():
         "Install, troubleshoot, and service access control systems at commercial sites."
     )
     result = scorer.score_text(jd)
-    assert result.parsed_jd.title == "Service Technician - Security / Access Control Systems"
+    assert (
+        result.parsed_jd.title
+        == "Service Technician - Security / Access Control Systems"
+    )
     assert result.parsed_jd.company == "Entech Sales & Service LLC"
 
 
@@ -129,7 +141,9 @@ def test_relocation_offer_boosts_score_with_strength():
     scorer = JobScorer(profile_store=DummyProfileStore(profile), use_bro=False)
     base_text = "AI Engineer\nAcme\nBuild agent tooling with Python and LLMs.\n"
     plain = scorer.score_text(base_text)
-    offered = scorer.score_text(base_text + "We offer a relocation package for new hires.\n")
+    offered = scorer.score_text(
+        base_text + "We offer a relocation package for new hires.\n"
+    )
 
     assert offered.components["Relocation"] == 8
     assert plain.components["Relocation"] == 0
@@ -145,7 +159,9 @@ def test_relocation_question_is_not_an_offer():
         requires_sponsorship=False,
     )
     scorer = JobScorer(profile_store=DummyProfileStore(profile), use_bro=False)
-    result = scorer.score_text("AI Engineer\nAcme\nDo you require relocation assistance?\n")
+    result = scorer.score_text(
+        "AI Engineer\nAcme\nDo you require relocation assistance?\n"
+    )
 
     assert result.components["Relocation"] == 0
     assert not any("Relocation on the table" in s for s in result.strengths)

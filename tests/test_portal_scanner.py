@@ -62,7 +62,9 @@ class TestPortalScanner:
         assert jobs[0].location == "Remote US"
 
     @patch("jobpilot.core.portal_scanner.requests.get")
-    def test_scans_ashby_uses_location_and_secondary_locations(self, mock_get: MagicMock):
+    def test_scans_ashby_uses_location_and_secondary_locations(
+        self, mock_get: MagicMock
+    ):
         payload = {
             "jobs": [
                 {
@@ -92,16 +94,22 @@ class TestPortalScanner:
         jobs = scanner.scan_ashby_board("acme")
 
         assert len(jobs) == 2
-        assert jobs[0].location == "New York City; Remote (United States); Remote (Canada)"
+        assert (
+            jobs[0].location == "New York City; Remote (United States); Remote (Canada)"
+        )
         assert jobs[1].location == "London"
 
     @patch("jobpilot.core.portal_scanner.ADZUNA_APP_ID", "test_app_id")
     @patch("jobpilot.core.portal_scanner.ADZUNA_API_KEY", "secret_api_key")
     @patch("jobpilot.core.portal_scanner.requests.get")
-    def test_adzuna_http_error_logs_without_credentials(self, mock_get: MagicMock, caplog):
+    def test_adzuna_http_error_logs_without_credentials(
+        self, mock_get: MagicMock, caplog
+    ):
         response = requests.Response()
         response.status_code = 429
-        response.url = "https://api.adzuna.com/jobs?app_id=test_app_id&app_key=secret_api_key"
+        response.url = (
+            "https://api.adzuna.com/jobs?app_id=test_app_id&app_key=secret_api_key"
+        )
         error = requests.HTTPError(
             "429 Client Error: Too Many Requests for url: "
             "https://api.adzuna.com/jobs?app_id=test_app_id&app_key=secret_api_key",
@@ -110,7 +118,9 @@ class TestPortalScanner:
         mock_get.return_value = MagicMock(raise_for_status=MagicMock(side_effect=error))
 
         scanner = PortalScanner()
-        with caplog.at_level(logging.WARNING, logger="jobpilot.jobpilot.core.portal_scanner"):
+        with caplog.at_level(
+            logging.WARNING, logger="jobpilot.jobpilot.core.portal_scanner"
+        ):
             jobs = scanner.scan_adzuna("field service technician")
 
         assert jobs == []
@@ -120,9 +130,9 @@ class TestPortalScanner:
 
     def test_save_report_writes_json(self, tmp_path: Path):
         scanner = PortalScanner(keywords=["python"])
-        jobs = scanner.scan_targets([
-            ScanTarget(portal="manual", value="https://example.com", label="Example")
-        ])
+        jobs = scanner.scan_targets(
+            [ScanTarget(portal="manual", value="https://example.com", label="Example")]
+        )
         assert jobs == []
 
         sample_jobs: list[PortalJob] = []

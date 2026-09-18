@@ -10,7 +10,9 @@ from jobpilot.core.work_style import (
 
 
 def test_contract_friendly_detects_hourly():
-    assert is_contract_friendly("Freelance Python contractor, hourly rate", title="Integration consultant")
+    assert is_contract_friendly(
+        "Freelance Python contractor, hourly rate", title="Integration consultant"
+    )
 
 
 def test_w2_only_detects_full_time_employee():

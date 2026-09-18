@@ -7,16 +7,14 @@ can be exercised end-to-end without launching Chrome.
 
 from __future__ import annotations
 
-import asyncio
-from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 from jobpilot.core.cdp_bridge import PageInfo
-
 
 # ---------------------------------------------------------------------------
 # Mock Element — mimics Playwright ElementHandle
 # ---------------------------------------------------------------------------
+
 
 class MockElement:
     """Lightweight stand-in for a Playwright ``ElementHandle``."""
@@ -45,7 +43,9 @@ class MockElement:
         self._value = value
 
     async def type(self, text: str, delay: int = 0) -> None:
-        del delay  # delay is part of the Playwright API; the mock doesn't simulate timing.
+        del (
+            delay
+        )  # delay is part of the Playwright API; the mock doesn't simulate timing.
         self._value += text
 
     async def press(self, key: str) -> None:
@@ -76,7 +76,7 @@ class MockElement:
     async def set_input_files(self, path: str) -> None:
         self._value = path
 
-    async def get_attribute(self, name: str) -> Optional[str]:
+    async def get_attribute(self, name: str) -> str | None:
         attrs = {
             "type": self.input_type,
             "id": f"mock-{id(self)}",
@@ -92,10 +92,10 @@ class MockElement:
         if state == "enabled" and not self._enabled:
             raise RuntimeError("Element not enabled")
 
-    async def query_selector(self, selector: str) -> Optional["MockElement"]:
+    async def query_selector(self, selector: str) -> MockElement | None:
         return None
 
-    async def evaluate_handle(self, expression: str) -> "MockElement":
+    async def evaluate_handle(self, expression: str) -> MockElement:
         return self
 
     async def evaluate(self, expression: str) -> Any:
@@ -106,6 +106,7 @@ class MockElement:
 # Mock Overlay / Chat — minimal stubs
 # ---------------------------------------------------------------------------
 
+
 class MockOverlay:
     """Stub for GhostOverlay."""
 
@@ -113,7 +114,7 @@ class MockOverlay:
         self.status: str = ""
         self.suggestions: list = []
         self.review_decision: str = "submit"
-        self._pending_action: Optional[dict] = None
+        self._pending_action: dict | None = None
 
     async def inject(self) -> None:
         pass
@@ -130,7 +131,7 @@ class MockOverlay:
     async def show_review(self, fields: list) -> str:
         return self.review_decision
 
-    async def get_pending_action(self) -> Optional[dict]:
+    async def get_pending_action(self) -> dict | None:
         action = self._pending_action
         self._pending_action = None
         return action
@@ -170,6 +171,7 @@ class MockChat:
 # Mock Browser — satisfies BrowserInterface protocol
 # ---------------------------------------------------------------------------
 
+
 class MockBrowser:
     """In-memory browser backend for testing.
 
@@ -178,8 +180,8 @@ class MockBrowser:
 
     def __init__(
         self,
-        page_info: Optional[PageInfo] = None,
-        page_sequence: Optional[list[PageInfo]] = None,
+        page_info: PageInfo | None = None,
+        page_sequence: list[PageInfo] | None = None,
     ) -> None:
         self._page_info = page_info or PageInfo(
             url="https://www.linkedin.com/jobs/view/123",

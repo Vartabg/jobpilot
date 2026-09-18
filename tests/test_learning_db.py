@@ -6,15 +6,16 @@ All tests use a temporary database via tmp_path so nothing persists.
 
 from __future__ import annotations
 
-import pytest
 from pathlib import Path
 
-from jobpilot.learning.learning_db import LearningDB
+import pytest
 
+from jobpilot.learning.learning_db import LearningDB
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture()
 def db(tmp_path: Path) -> LearningDB:
@@ -26,8 +27,8 @@ def db(tmp_path: Path) -> LearningDB:
 # Templates
 # ---------------------------------------------------------------------------
 
-class TestTemplates:
 
+class TestTemplates:
     def test_upsert_and_get(self, db: LearningDB):
         db.upsert_template("Why interested?", "I love this role")
         assert db.get_template("Why interested?") == "I love this role"
@@ -72,8 +73,8 @@ class TestTemplates:
 # Actions
 # ---------------------------------------------------------------------------
 
-class TestActions:
 
+class TestActions:
     def test_record_and_get_stats(self, db: LearningDB):
         db.record_action(action_type="app_started", job_url="https://job/1")
         db.record_action(action_type="field_approved", field_label="Name")
@@ -132,8 +133,8 @@ class TestActions:
 # Advanced queries
 # ---------------------------------------------------------------------------
 
-class TestAdvancedQueries:
 
+class TestAdvancedQueries:
     def test_approval_rate_by_field(self, db: LearningDB):
         # Name: 2 approved, 1 edited => 66%
         db.record_action(action_type="field_approved", field_label="Name")
@@ -143,7 +144,7 @@ class TestAdvancedQueries:
         db.record_action(action_type="field_approved", field_label="Email")
 
         rates = db.approval_rate_by_field()
-        assert abs(rates["Name"] - 2/3) < 0.01
+        assert abs(rates["Name"] - 2 / 3) < 0.01
         assert rates["Email"] == 1.0
 
     def test_low_confidence_templates(self, db: LearningDB):
@@ -171,8 +172,8 @@ class TestAdvancedQueries:
 # Lifecycle
 # ---------------------------------------------------------------------------
 
-class TestLifecycle:
 
+class TestLifecycle:
     def test_close_and_reopen(self, tmp_path: Path):
         db1 = LearningDB(tmp_path / "test.db")
         db1.upsert_template("Q", "A")

@@ -9,6 +9,7 @@ import time
 from pathlib import Path
 
 import requests
+
 from jobpilot.core.config import (
     CHROME_EXECUTABLE,
     SYSTEM_CHROME,

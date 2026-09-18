@@ -10,7 +10,6 @@ Injects a Shadow DOM overlay into LinkedIn pages that shows:
 
 import json
 from dataclasses import dataclass
-from typing import Optional
 
 from playwright.async_api import Page
 from rich.console import Console
@@ -23,7 +22,10 @@ from jobpilot.ui.chat_overlay import (
 console = Console()
 
 _CHAT_QUICK_ACTIONS_JSON = json.dumps(
-    [{"command": action.command, "label": action.label} for action in build_chat_quick_actions()]
+    [
+        {"command": action.command, "label": action.label}
+        for action in build_chat_quick_actions()
+    ]
 )
 _CHAT_WELCOME_MESSAGE_JSON = json.dumps(build_chat_welcome_message())
 
@@ -125,8 +127,10 @@ def build_status_presentation(status: str) -> StatusPresentation:
         guidance="Use Enter to approve, E to edit, or Esc to skip.",
     )
 
+
 # The overlay HTML/CSS/JS that gets injected into the page
-OVERLAY_TEMPLATE = """
+OVERLAY_TEMPLATE = (
+    """
 (function() {
     // Prevent double-injection
     if (window.__jobpilot_overlay) return;
@@ -1327,24 +1331,28 @@ OVERLAY_TEMPLATE = """
     window.__jobpilot_overlay = true;
     console.log('✓ JobPilot overlay injected (v2 — MutationObserver + Progress + Highlights)');
 })();
-""".replace("__JP_CHAT_ACTIONS__", _CHAT_QUICK_ACTIONS_JSON).replace("__JP_CHAT_WELCOME__", _CHAT_WELCOME_MESSAGE_JSON).replace("__JP_SURFACE_SECTIONS__", _CONTROL_SURFACE_SECTIONS_JSON).replace("__JP_DENSITY_LABELS__", _DENSITY_LABELS_JSON)
+""".replace("__JP_CHAT_ACTIONS__", _CHAT_QUICK_ACTIONS_JSON)
+    .replace("__JP_CHAT_WELCOME__", _CHAT_WELCOME_MESSAGE_JSON)
+    .replace("__JP_SURFACE_SECTIONS__", _CONTROL_SURFACE_SECTIONS_JSON)
+    .replace("__JP_DENSITY_LABELS__", _DENSITY_LABELS_JSON)
+)
 
 
 class GhostOverlay:
     """
     Manages the overlay UI injected into LinkedIn pages.
-    
+
     The overlay:
     - Shows suggested values with confidence levels
     - Provides Approve/Edit/Skip buttons per field
     - Gives visual feedback before any action
     - Doesn't interfere with LinkedIn's UI
     """
-    
+
     def __init__(self, page: Page):
         self.page = page
         self._injected = False
-    
+
     async def inject(self) -> bool:
         """Inject the overlay into the page"""
         try:
@@ -1355,18 +1363,18 @@ class GhostOverlay:
         except Exception as e:
             console.print(f"[red]✗ Failed to inject overlay: {e}[/red]")
             return False
-    
+
     async def is_injected(self) -> bool:
         """Check if overlay is already injected"""
         result = await self.page.evaluate("window.__jobpilot_overlay === true")
         return bool(result)
-    
+
     async def ensure_injected(self) -> bool:
         """Inject overlay if not already present"""
         if not await self.is_injected():
             return await self.inject()
         return True
-    
+
     async def update_status(self, status: str):
         """Update the operator-facing status in the overlay."""
         if not await self.ensure_injected():
@@ -1374,17 +1382,21 @@ class GhostOverlay:
         import json
 
         presentation = build_status_presentation(status)
-        payload = json.dumps({
-            "label": presentation.label,
-            "tone": presentation.tone,
-            "guidance": presentation.guidance,
-        })
+        payload = json.dumps(
+            {
+                "label": presentation.label,
+                "tone": presentation.tone,
+                "guidance": presentation.guidance,
+            }
+        )
         await self.page.evaluate(f"window.__jobpilot.updateStatus({payload})")
-    
-    async def show_suggestions(self, suggestions: list[dict], fit_score: Optional[int] = None):
+
+    async def show_suggestions(
+        self, suggestions: list[dict], fit_score: int | None = None
+    ):
         """
         Show field suggestions in the overlay.
-        
+
         Each suggestion should have:
         - label: Field label/name
         - suggestion: Suggested value
@@ -1395,11 +1407,14 @@ class GhostOverlay:
             return
         # Convert to JSON-safe format
         import json
+
         suggestions_json = json.dumps(suggestions)
         fit_json = json.dumps(fit_score)
-        await self.page.evaluate(f"window.__jobpilot.showSuggestions({suggestions_json}, {fit_json})")
-    
-    async def get_pending_action(self) -> Optional[dict]:
+        await self.page.evaluate(
+            f"window.__jobpilot.showSuggestions({suggestions_json}, {fit_json})"
+        )
+
+    async def get_pending_action(self) -> dict | None:
         """Check if user clicked any action button"""
         result = await self.page.evaluate("""
             (() => {
@@ -1409,32 +1424,38 @@ class GhostOverlay:
             })()
         """)
         return result
-    
+
     async def flash_field(self, field_id: int):
         """Flash a field to show it's being acted on"""
         await self.page.evaluate(f"window.__jobpilot.flashField({field_id})")
-    
+
     async def hide(self):
         """Hide the overlay"""
         if await self.is_injected():
             await self.page.evaluate("window.__jobpilot.hide()")
-    
+
     async def show(self):
         """Show the overlay"""
         if await self.is_injected():
             await self.page.evaluate("window.__jobpilot.show()")
 
-    async def update_progress(self, filled: int, total: int, step: int,
-                               total_steps: int, apps_today: int = 0):
+    async def update_progress(
+        self, filled: int, total: int, step: int, total_steps: int, apps_today: int = 0
+    ):
         """Update the progress dashboard in the overlay footer."""
         if not await self.ensure_injected():
             return
         import json
-        data = json.dumps({
-            "filled": filled, "total": total,
-            "step": step, "totalSteps": total_steps,
-            "appsToday": apps_today,
-        })
+
+        data = json.dumps(
+            {
+                "filled": filled,
+                "total": total,
+                "step": step,
+                "totalSteps": total_steps,
+                "appsToday": apps_today,
+            }
+        )
         await self.page.evaluate(f"window.__jobpilot.updateProgress({data})")
 
     async def show_review(self, fields: list[dict]) -> str:
@@ -1443,9 +1464,10 @@ class GhostOverlay:
         Returns 'submit' or 'cancel'.
         """
         if not await self.ensure_injected():
-            return 'cancel'
-        import json
+            return "cancel"
         import asyncio
+        import json
+
         fields_json = json.dumps(fields)
         await self.page.evaluate(f"window.__jobpilot.showReview({fields_json})")
 
@@ -1461,7 +1483,7 @@ class GhostOverlay:
             if decision:
                 return decision
             await asyncio.sleep(0.5)
-        return 'cancel'  # timeout = cancel
+        return "cancel"  # timeout = cancel
 
     async def show_success(self):
         """Show success animation in the overlay."""
@@ -1473,7 +1495,7 @@ class GhostOverlay:
         """Show a 'Learned!' toast in the overlay."""
         if not await self.ensure_injected():
             return
-        await self.page.evaluate(f"window.__jobpilot.showLearningToast({repr(label)})")
+        await self.page.evaluate(f"window.__jobpilot.showLearningToast({label!r})")
 
     async def get_mutations(self) -> list:
         """Drain the MutationObserver event queue."""

@@ -82,13 +82,21 @@ class PortalScanner:
             try:
                 portal = target.portal.lower().strip()
                 if portal == "greenhouse":
-                    results.extend(self.scan_greenhouse_board(target.value, label=target.label))
+                    results.extend(
+                        self.scan_greenhouse_board(target.value, label=target.label)
+                    )
                 elif portal == "lever":
-                    results.extend(self.scan_lever_board(target.value, label=target.label))
+                    results.extend(
+                        self.scan_lever_board(target.value, label=target.label)
+                    )
                 elif portal == "ashby":
-                    results.extend(self.scan_ashby_board(target.value, label=target.label))
+                    results.extend(
+                        self.scan_ashby_board(target.value, label=target.label)
+                    )
                 elif portal == "google_jobs":
-                    results.extend(self.scan_google_jobs(target.value, label=target.label))
+                    results.extend(
+                        self.scan_google_jobs(target.value, label=target.label)
+                    )
                 elif portal == "indeed":
                     results.extend(self.scan_indeed(target.value, label=target.label))
                 elif portal == "adzuna":
@@ -96,7 +104,12 @@ class PortalScanner:
                 else:
                     log.info("Skipping unsupported portal target: %s", target.portal)
             except Exception as exc:
-                log.warning("Portal scan failed for %s:%s — %s", target.portal, target.value, exc)
+                log.warning(
+                    "Portal scan failed for %s:%s — %s",
+                    target.portal,
+                    target.value,
+                    exc,
+                )
 
         deduped: dict[str, PortalJob] = {}
         for job in results:
@@ -104,7 +117,9 @@ class PortalScanner:
 
         return list(deduped.values())
 
-    def scan_greenhouse_board(self, board_token: str, *, label: str = "") -> list[PortalJob]:
+    def scan_greenhouse_board(
+        self, board_token: str, *, label: str = ""
+    ) -> list[PortalJob]:
         """Read jobs from the public Greenhouse board API."""
         url = f"https://boards-api.greenhouse.io/v1/boards/{board_token}/jobs"
         response = requests.get(url, timeout=self.timeout)
@@ -154,7 +169,11 @@ class PortalScanner:
         for item in payload:
             title = item.get("text", "").strip()
             categories_raw: object = item.get("categories") or {}
-            categories = cast(dict[str, Any], categories_raw) if isinstance(categories_raw, dict) else {}
+            categories = (
+                cast(dict[str, Any], categories_raw)
+                if isinstance(categories_raw, dict)
+                else {}
+            )
             location = str(categories.get("location", "")).strip()
             matched = self._matched_keywords(title, company_name, location)
             if self.keywords and not matched:
@@ -252,10 +271,16 @@ class PortalScanner:
             log.warning("Adzuna request failed for %r: HTTP %s", query, status)
             return []
         except requests.RequestException as exc:
-            log.warning("Adzuna request failed for %r: %s", query, exc.__class__.__name__)
+            log.warning(
+                "Adzuna request failed for %r: %s", query, exc.__class__.__name__
+            )
             return []
         except Exception as exc:
-            log.warning("Adzuna request failed for %r: unexpected %s", query, exc.__class__.__name__)
+            log.warning(
+                "Adzuna request failed for %r: unexpected %s",
+                query,
+                exc.__class__.__name__,
+            )
             return []
 
         payload: dict[str, Any] = response.json()
@@ -263,23 +288,29 @@ class PortalScanner:
 
         for item in payload.get("results", []):
             title = str(item.get("title", "")).strip()
-            company = str((item.get("company") or {}).get("display_name", label or query)).strip()
+            company = str(
+                (item.get("company") or {}).get("display_name", label or query)
+            ).strip()
             loc_raw = item.get("location") or {}
-            loc_parts: list[str] = loc_raw.get("area", []) if isinstance(loc_raw, dict) else []
+            loc_parts: list[str] = (
+                loc_raw.get("area", []) if isinstance(loc_raw, dict) else []
+            )
             loc = ", ".join(loc_parts) if loc_parts else location
             job_url = str(item.get("redirect_url", "")).strip()
             matched = self._matched_keywords(title, company, loc)
             if self.keywords and not matched:
                 continue
-            jobs.append(PortalJob(
-                company=company,
-                title=title,
-                url=job_url,
-                location=loc,
-                portal="adzuna",
-                matched_keywords=matched,
-                description=_extract_snippet(str(item.get("description", ""))),
-            ))
+            jobs.append(
+                PortalJob(
+                    company=company,
+                    title=title,
+                    url=job_url,
+                    location=loc,
+                    portal="adzuna",
+                    matched_keywords=matched,
+                    description=_extract_snippet(str(item.get("description", ""))),
+                )
+            )
 
         log.info("Adzuna scan for %r in %r: %d matches", query, where, len(jobs))
         return jobs
@@ -333,7 +364,9 @@ class PortalScanner:
                     items = [data]
                 elif data.get("@type") == "ItemList":
                     for entry in data.get("itemListElement") or []:
-                        if isinstance(entry, dict) and isinstance(entry.get("item"), dict):
+                        if isinstance(entry, dict) and isinstance(
+                            entry.get("item"), dict
+                        ):
                             items.append(entry["item"])
 
             for item in items:
@@ -341,7 +374,11 @@ class PortalScanner:
                     continue
                 title = str(item.get("title", "")).strip()
                 org = item.get("hiringOrganization") or {}
-                company = str(org.get("name", label or query)).strip() if isinstance(org, dict) else (label or query)
+                company = (
+                    str(org.get("name", label or query)).strip()
+                    if isinstance(org, dict)
+                    else (label or query)
+                )
                 loc_raw = item.get("jobLocation") or {}
                 addr = loc_raw.get("address") or {} if isinstance(loc_raw, dict) else {}
                 if isinstance(addr, dict):
@@ -354,19 +391,23 @@ class PortalScanner:
                 matched = self._matched_keywords(title, company, location)
                 if self.keywords and not matched:
                     continue
-                jobs.append(PortalJob(
-                    company=company,
-                    title=title,
-                    url=job_url,
-                    location=location,
-                    portal="google_jobs",
-                    matched_keywords=matched,
-                ))
+                jobs.append(
+                    PortalJob(
+                        company=company,
+                        title=title,
+                        url=job_url,
+                        location=location,
+                        portal="google_jobs",
+                        matched_keywords=matched,
+                    )
+                )
 
         log.info("Google Jobs scan for %r: %d matches", query, len(jobs))
         return jobs
 
-    def scan_indeed(self, query: str, *, label: str = "", location: str = "Austin, TX") -> list[PortalJob]:
+    def scan_indeed(
+        self, query: str, *, label: str = "", location: str = "Austin, TX"
+    ) -> list[PortalJob]:
         """Search Indeed job listings by keyword query.
 
         Indeed renders job cards server-side and embeds structured data in the
@@ -393,7 +434,11 @@ class PortalScanner:
             return []
 
         # Indeed embeds job data in a window._initialData JSON blob.
-        match = re.search(r'window\._initialData\s*=\s*(\{.*?\});\s*</script>', response.text, re.DOTALL)
+        match = re.search(
+            r"window\._initialData\s*=\s*(\{.*?\});\s*</script>",
+            response.text,
+            re.DOTALL,
+        )
         jobs: list[PortalJob] = []
 
         if match:
@@ -401,31 +446,43 @@ class PortalScanner:
                 initial = json.loads(match.group(1))
                 # Flatten whatever structure Indeed uses to get title+company+url.
                 results_raw = (
-                    initial.get("jobKeysWithTitles")
-                    or initial.get("results")
-                    or []
+                    initial.get("jobKeysWithTitles") or initial.get("results") or []
                 )
                 for item in results_raw if isinstance(results_raw, list) else []:
                     if not isinstance(item, dict):
                         continue
                     title = str(item.get("title") or item.get("jobTitle") or "").strip()
-                    company = str(item.get("company") or item.get("companyName") or label or query).strip()
-                    loc = str(item.get("formattedLocation") or item.get("location") or location).strip()
-                    job_key = str(item.get("jobkey") or item.get("jobKey") or "").strip()
-                    job_url = f"https://www.indeed.com/viewjob?jk={job_key}" if job_key else ""
+                    company = str(
+                        item.get("company") or item.get("companyName") or label or query
+                    ).strip()
+                    loc = str(
+                        item.get("formattedLocation")
+                        or item.get("location")
+                        or location
+                    ).strip()
+                    job_key = str(
+                        item.get("jobkey") or item.get("jobKey") or ""
+                    ).strip()
+                    job_url = (
+                        f"https://www.indeed.com/viewjob?jk={job_key}"
+                        if job_key
+                        else ""
+                    )
                     if not title:
                         continue
                     matched = self._matched_keywords(title, company, loc)
                     if self.keywords and not matched:
                         continue
-                    jobs.append(PortalJob(
-                        company=company,
-                        title=title,
-                        url=job_url,
-                        location=loc,
-                        portal="indeed",
-                        matched_keywords=matched,
-                    ))
+                    jobs.append(
+                        PortalJob(
+                            company=company,
+                            title=title,
+                            url=job_url,
+                            location=loc,
+                            portal="indeed",
+                            matched_keywords=matched,
+                        )
+                    )
             except (json.JSONDecodeError, AttributeError, TypeError) as exc:
                 log.warning("Indeed JSON parse failed: %s", exc)
 
@@ -440,14 +497,16 @@ class PortalScanner:
                 matched = self._matched_keywords(title, label or query, location)
                 if self.keywords and not matched:
                     continue
-                jobs.append(PortalJob(
-                    company=label or query,
-                    title=title,
-                    url=f"https://www.indeed.com/viewjob?jk={jk}",
-                    location=location,
-                    portal="indeed",
-                    matched_keywords=matched,
-                ))
+                jobs.append(
+                    PortalJob(
+                        company=label or query,
+                        title=title,
+                        url=f"https://www.indeed.com/viewjob?jk={jk}",
+                        location=location,
+                        portal="indeed",
+                        matched_keywords=matched,
+                    )
+                )
 
         log.info("Indeed scan for %r in %r: %d matches", query, location, len(jobs))
         return jobs
@@ -468,7 +527,9 @@ class PortalScanner:
             locations.append(primary)
         for secondary in item.get("secondaryLocations") or []:
             if isinstance(secondary, dict):
-                value = str(secondary.get("location") or secondary.get("locationName") or "").strip()
+                value = str(
+                    secondary.get("location") or secondary.get("locationName") or ""
+                ).strip()
                 if value:
                     locations.append(value)
         return "; ".join(dict.fromkeys(locations))

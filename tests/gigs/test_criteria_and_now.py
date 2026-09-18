@@ -60,12 +60,18 @@ def test_dispatch_skips_ntfy_when_push_false(monkeypatch, tmp_path) -> None:
 
     monkeypatch.setattr("jobpilot.gigs.core.dispatcher.write_markdown", _fake_write)
     monkeypatch.setattr("jobpilot.gigs.core.dispatcher.write_crib_sheet", _fake_crib)
-    monkeypatch.setattr("jobpilot.gigs.core.dispatcher.save_latest_leads", lambda g: None)
+    monkeypatch.setattr(
+        "jobpilot.gigs.core.dispatcher.save_latest_leads", lambda g: None
+    )
     monkeypatch.setattr("jobpilot.gigs.core.dispatcher.push_ntfy", _fake_push)
 
     g = Gig(
-        id="hn-1", source="hn", title="AI Engineer", company="Acme",
-        url="https://example.com", description="claude mcp agent",
+        id="hn-1",
+        source="hn",
+        title="AI Engineer",
+        company="Acme",
+        url="https://example.com",
+        description="claude mcp agent",
         fit_score=80,
     )
     result = dispatch([g], push=False)

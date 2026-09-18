@@ -135,7 +135,7 @@ TITLE_SENIORITY_DRAG = {
     "staff": -18,
     "principal": -16,
     "senior": -12,
-    "sr ": -12,   # "Sr AI", "Sr. " normalized via scorer word check
+    "sr ": -12,  # "Sr AI", "Sr. " normalized via scorer word check
     "sr.": -12,
     "lead": -10,
 }
@@ -314,10 +314,19 @@ JOB_BOARD_SOURCES = {"remoteok", "wwr", "himalayas", "hn"}
 # importing the module never touches the filesystem and tests see pure defaults.
 
 _OVERRIDABLE = (
-    "TITLE_ENGINEERING_PATTERNS", "TITLE_TECH_BONUS", "TITLE_NEGATIVES",
-    "TITLE_NEGATIVE_CAP", "TITLE_SENIORITY_DRAG", "SKILL_WEIGHTS",
-    "SKILL_WEIGHTS_CAP", "SCAM_SIGNALS", "NEGATIVE_TERMS", "STRONG_FIT_TERMS",
-    "DOMAIN_BONUS", "REVENUE_TERMS", "JOB_BOARD_SOURCES",
+    "TITLE_ENGINEERING_PATTERNS",
+    "TITLE_TECH_BONUS",
+    "TITLE_NEGATIVES",
+    "TITLE_NEGATIVE_CAP",
+    "TITLE_SENIORITY_DRAG",
+    "SKILL_WEIGHTS",
+    "SKILL_WEIGHTS_CAP",
+    "SCAM_SIGNALS",
+    "NEGATIVE_TERMS",
+    "STRONG_FIT_TERMS",
+    "DOMAIN_BONUS",
+    "REVENUE_TERMS",
+    "JOB_BOARD_SOURCES",
 )
 
 
@@ -338,6 +347,7 @@ def apply_overrides(path=None) -> bool:
     repeatedly; only the named _OVERRIDABLE tables can be tuned.
     """
     import json
+
     from jobpilot.gigs.core.paths import data_dir
 
     cfg = path or (data_dir() / "scoring.json")

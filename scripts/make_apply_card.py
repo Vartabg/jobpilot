@@ -13,6 +13,7 @@ works even from a ``file://`` page.
 Usage:
     make_apply_card.py <answers.md> [-o OUTPUT.html] [--open]
 """
+
 from __future__ import annotations
 
 import argparse
@@ -22,7 +23,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from make_paste_sheet import parse_answers  # noqa: E402
+from make_paste_sheet import parse_answers
 
 CSS = """
 :root{--bg:#0f1115;--card:#1a1e26;--ink:#e8eaed;--mut:#9aa3b2;--ok:#2ea043;--accent:#3b82f6}
@@ -97,16 +98,30 @@ def build_html(parsed: dict) -> str:
         f"<h1>{title}</h1>"
         '<p class="hint">Open the form, then click <b>Copy</b> on each field and paste it into the '
         "matching question. Dropdowns: just select the shown value.</p>"
-        f'{open_btn}{"".join(cards)}'
+        f"{open_btn}{''.join(cards)}"
         f"<script>{JS}</script></body></html>"
     )
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Generate a one-click apply card (HTML) from an answers file.")
-    parser.add_argument("answers", type=Path, help="Path to data/answers/<company>/<role>.md")
-    parser.add_argument("-o", "--output", type=Path, default=None, help="Output path (default: apply_card.html beside answers)")
-    parser.add_argument("--open", action="store_true", help="Open the card in the default browser after writing")
+    parser = argparse.ArgumentParser(
+        description="Generate a one-click apply card (HTML) from an answers file."
+    )
+    parser.add_argument(
+        "answers", type=Path, help="Path to data/answers/<company>/<role>.md"
+    )
+    parser.add_argument(
+        "-o",
+        "--output",
+        type=Path,
+        default=None,
+        help="Output path (default: apply_card.html beside answers)",
+    )
+    parser.add_argument(
+        "--open",
+        action="store_true",
+        help="Open the card in the default browser after writing",
+    )
     args = parser.parse_args(argv)
 
     if not args.answers.exists():

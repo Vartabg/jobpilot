@@ -5,7 +5,6 @@ from __future__ import annotations
 import subprocess
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 from jobpilot.core.queue_builder import QueueJob, update_job_status
 from jobpilot.gigs.core.models import Gig
@@ -48,19 +47,21 @@ def set_gig_pipeline_status(gig: Gig, status: str, *, note: str = "") -> str:
             notes = row.notes or ""
             if note:
                 notes = f"{notes} {note}".strip()
-            updated.append(pipeline.Row(
-                status=status,
-                score=gig.fit_score,
-                company=row.company or gig.company,
-                role=row.role or gig.title,
-                pay=row.pay,
-                apply=row.apply or selected_gig_url(gig),
-                saved=now if status == "saved" else row.saved,
-                last_touched=now,
-                next_action=row.next_action,
-                notes=notes,
-                gig_id=gig.id,
-            ))
+            updated.append(
+                pipeline.Row(
+                    status=status,
+                    score=gig.fit_score,
+                    company=row.company or gig.company,
+                    role=row.role or gig.title,
+                    pay=row.pay,
+                    apply=row.apply or selected_gig_url(gig),
+                    saved=now if status == "saved" else row.saved,
+                    last_touched=now,
+                    next_action=row.next_action,
+                    notes=notes,
+                    gig_id=gig.id,
+                )
+            )
             found = True
         else:
             updated.append(row)
@@ -92,14 +93,18 @@ def draft_gig_proposal(gig: Gig) -> str:
     brief = build_revenue_brief(gig)
     out_dir = Path(__file__).resolve().parent.parent / "data" / "gigs" / "drafts"
     out_dir.mkdir(parents=True, exist_ok=True)
-    slug = "".join(c if c.isalnum() else "-" for c in (gig.company or "gig")).strip("-").lower()[:40]
+    slug = (
+        "".join(c if c.isalnum() else "-" for c in (gig.company or "gig"))
+        .strip("-")
+        .lower()[:40]
+    )
     path = out_dir / f"{slug or 'gig'}_{gig.id[:8]}.txt"
     path.write_text(f"{brief.offer}\n\n---\n\n{brief.action}\n")
     subprocess.run(["open", str(path)], check=False)
     return f"draft → {path.name}"
 
 
-def pick_with_fzf(lines: list[str]) -> Optional[int]:
+def pick_with_fzf(lines: list[str]) -> int | None:
     if not lines:
         return None
     try:

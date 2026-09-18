@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import Any
 
 from jobpilot.gigs.core.io_lock import atomic_write_text, file_lock

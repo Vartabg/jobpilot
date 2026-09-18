@@ -2,17 +2,15 @@
 Tests for autonomy.py — mode switching, thresholds, and configuration.
 """
 
-import pytest
 from jobpilot.core.autonomy import (
-    AutonomyMode,
     AutonomyConfig,
+    AutonomyMode,
     get_autonomy_config,
     set_autonomy_mode,
 )
 
 
 class TestShouldAutoFill:
-
     def test_suggest_mode_never_autofills(self):
         cfg = AutonomyConfig(mode=AutonomyMode.SUGGEST)
         assert cfg.should_auto_fill(0.99) is False
@@ -35,7 +33,6 @@ class TestShouldAutoFill:
 
 
 class TestShouldAutoAdvance:
-
     def test_suggest_never_advances(self):
         cfg = AutonomyConfig(mode=AutonomyMode.SUGGEST)
         assert cfg.should_auto_advance(is_final_step=False) is False
@@ -58,7 +55,6 @@ class TestShouldAutoAdvance:
 
 
 class TestGlobalConfig:
-
     def test_set_and_get_mode(self):
         original = get_autonomy_config()
         original_mode = original.mode
@@ -74,7 +70,6 @@ class TestGlobalConfig:
 
 
 class TestAutonomyModeEnum:
-
     def test_values(self):
         assert AutonomyMode.SUGGEST.value == "suggest"
         assert AutonomyMode.SEMI_AUTO.value == "semi-auto"

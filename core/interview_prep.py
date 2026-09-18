@@ -43,10 +43,22 @@ LATEST_PREP_FILENAME = "latest_prep.json"
 # so the tool never fabricates a candidate's story — it only names the theme
 # and reminds the user to anchor it to a real, specific example.
 STAR_THEMES: tuple[tuple[str, str], ...] = (
-    ("A hard problem you solved", "Pick one real example. Walk the diagnosis step by step; end on the result."),
-    ("A difficult customer or stakeholder", "Show how you communicated honestly under pressure — even with bad news."),
-    ("Working under a deadline", "One time you owned an outcome with little support. End on what you delivered."),
-    ("Learning something new fast", "How you ramp on an unfamiliar system. Keep it to ~30 seconds."),
+    (
+        "A hard problem you solved",
+        "Pick one real example. Walk the diagnosis step by step; end on the result.",
+    ),
+    (
+        "A difficult customer or stakeholder",
+        "Show how you communicated honestly under pressure — even with bad news.",
+    ),
+    (
+        "Working under a deadline",
+        "One time you owned an outcome with little support. End on what you delivered.",
+    ),
+    (
+        "Learning something new fast",
+        "How you ramp on an unfamiliar system. Keep it to ~30 seconds.",
+    ),
 )
 
 
@@ -58,7 +70,9 @@ class InterviewPrepResult:
     fit_result: JobFitResult
     opener: str = ""
     likely_questions: list[str] = field(default_factory=lambda: cast(list[str], []))
-    star_themes: list[tuple[str, str]] = field(default_factory=lambda: cast(list[tuple[str, str]], []))
+    star_themes: list[tuple[str, str]] = field(
+        default_factory=lambda: cast(list[tuple[str, str]], [])
+    )
     gap_notes: list[str] = field(default_factory=lambda: cast(list[str], []))
     questions_to_ask: list[str] = field(default_factory=lambda: cast(list[str], []))
     reminders: list[str] = field(default_factory=lambda: cast(list[str], []))
@@ -92,7 +106,9 @@ class InterviewPrepGenerator:
     ) -> InterviewPrepResult:
         """Generate a brief from raw JD text."""
         fit_result = self.scorer.score_text(raw_text, title=title, company=company)
-        return self._build_brief(fit_result, output_path=output_path, export_pdf=export_pdf)
+        return self._build_brief(
+            fit_result, output_path=output_path, export_pdf=export_pdf
+        )
 
     def generate_from_fit_result(
         self,
@@ -102,7 +118,9 @@ class InterviewPrepGenerator:
         export_pdf: bool = False,
     ) -> InterviewPrepResult:
         """Generate a brief from a precomputed fit score result."""
-        return self._build_brief(fit_result, output_path=output_path, export_pdf=export_pdf)
+        return self._build_brief(
+            fit_result, output_path=output_path, export_pdf=export_pdf
+        )
 
     # -- build -------------------------------------------------------------
 
@@ -205,7 +223,9 @@ class InterviewPrepGenerator:
                 deduped.append(q.strip())
         return deduped[:9]
 
-    def _build_gap_notes(self, profile: UserProfile, fit_result: JobFitResult) -> list[str]:
+    def _build_gap_notes(
+        self, profile: UserProfile, fit_result: JobFitResult
+    ) -> list[str]:
         notes: list[str] = []
 
         location_note = self._location_note(profile, fit_result)
@@ -213,7 +233,9 @@ class InterviewPrepGenerator:
             notes.append(location_note)
 
         for skill in fit_result.missing_skills[:4]:
-            notes.append(f"Be ready to address {skill} — how you'd ramp, or the closest thing you've done.")
+            notes.append(
+                f"Be ready to address {skill} — how you'd ramp, or the closest thing you've done."
+            )
 
         for risk in fit_result.risks[:3]:
             notes.append(risk)
@@ -228,10 +250,14 @@ class InterviewPrepGenerator:
             "How is the team structured, and who would I work with most closely?",
         ]
         if parsed.location_type in {"onsite", "hybrid"}:
-            questions.append("What does the location / on-site expectation actually look like day to day?")
+            questions.append(
+                "What does the location / on-site expectation actually look like day to day?"
+            )
         return questions
 
-    def _build_reminders(self, profile: UserProfile, fit_result: JobFitResult) -> list[str]:
+    def _build_reminders(
+        self, profile: UserProfile, fit_result: JobFitResult
+    ) -> list[str]:
         reminders = [
             "Keep every answer truthful and specific — one real example beats three vague ones.",
             "End behavioral answers on the outcome, not the mechanics.",
@@ -347,7 +373,9 @@ class InterviewPrepGenerator:
         reminders: list[str],
     ) -> str:
         parsed = fit_result.parsed_jd
-        full_name = escape((f"{profile.first_name} {profile.last_name}").strip() or "Candidate")
+        full_name = escape(
+            (f"{profile.first_name} {profile.last_name}").strip() or "Candidate"
+        )
         title = escape(parsed.title or "Target role")
         company = escape(parsed.company or "Target company")
         location = escape(parsed.location_type.title()) if parsed.location_type else ""
@@ -361,7 +389,11 @@ class InterviewPrepGenerator:
         gaps_html = "".join(f"<li>{escape(n)}</li>" for n in gap_notes)
         ask_html = "".join(f"<li>{escape(q)}</li>" for q in questions_to_ask)
         reminders_html = "".join(f"<li>{escape(r)}</li>" for r in reminders)
-        meta_loc = f"<div class='meta-card'><div class='meta-label'>Location</div><div class='meta-value'>{location}</div></div>" if location else ""
+        meta_loc = (
+            f"<div class='meta-card'><div class='meta-label'>Location</div><div class='meta-value'>{location}</div></div>"
+            if location
+            else ""
+        )
 
         return f"""<!doctype html>
 <html lang='en'>
@@ -467,7 +499,9 @@ class InterviewPrepGenerator:
 
     def _default_output_path(self, fit_result: JobFitResult) -> Path:
         parsed = fit_result.parsed_jd
-        stamp = hashlib.sha256((parsed.raw_text or parsed.summary()).encode()).hexdigest()[:8]
+        stamp = hashlib.sha256(
+            (parsed.raw_text or parsed.summary()).encode()
+        ).hexdigest()[:8]
         company = self._slugify(parsed.company or "company")
         title = self._slugify(parsed.title or "role")
         return self.output_dir / f"prep_{company}_{title}_{stamp}.html"

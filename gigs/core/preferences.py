@@ -18,9 +18,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 from jobpilot.gigs.core.paths import data_dir
-from typing import Any
 
 DATA_DIR = data_dir()
 PREFS_PATH = DATA_DIR / "preferences.json"
@@ -75,14 +75,31 @@ DEFAULTS: dict[str, Any] = {
         # Skills the user wants the email opener to call out when a gig
         # description mentions them. Order = priority for which to pick.
         "skill_keywords": [
-            "three.js", "threejs", "react three fiber", "r3f", "webgpu",
-            "rag", "retrieval-augmented", "agentic", "agent",
-            "claude", "anthropic", "mcp", "model context protocol",
-            "playwright", "browser-use", "chrome devtools",
-            "next.js", "nextjs", "fastapi",
-            "python", "typescript",
-            "postgres", "sqlite",
-            "vercel", "tailscale",
+            "three.js",
+            "threejs",
+            "react three fiber",
+            "r3f",
+            "webgpu",
+            "rag",
+            "retrieval-augmented",
+            "agentic",
+            "agent",
+            "claude",
+            "anthropic",
+            "mcp",
+            "model context protocol",
+            "playwright",
+            "browser-use",
+            "chrome devtools",
+            "next.js",
+            "nextjs",
+            "fastapi",
+            "python",
+            "typescript",
+            "postgres",
+            "sqlite",
+            "vercel",
+            "tailscale",
         ],
     },
     # Which tailored resume to attach per offer type. Map offer name -> resume
@@ -102,7 +119,7 @@ DEFAULTS: dict[str, Any] = {
         "push_default": False,  # on-demand: no phone unless --push
         # Backlog hygiene (mobile Get jobs + digest/now)
         "archive_new_after_days": 7,  # untriaged `new` auto-archive age
-        "max_live_new": 30,           # cap concurrent `new` rows in pipeline
+        "max_live_new": 30,  # cap concurrent `new` rows in pipeline
         "target_titles": [
             "Forward Deployed Engineer",
             "Solutions Engineer",

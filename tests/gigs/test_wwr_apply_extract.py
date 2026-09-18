@@ -1,5 +1,6 @@
 """WeWorkRemotely apply-URL extraction — bypasses WWR's gated apply flow
 by pulling the company's real mailto/ATS link from the listing page HTML."""
+
 from __future__ import annotations
 
 from unittest.mock import patch
@@ -10,7 +11,6 @@ from jobpilot.gigs.core.scrapers.weworkremotely import (
     enrich_apply_urls,
     extract_apply_url_from_listing,
 )
-
 
 # ---- description-based extraction (no network) --------------------------
 
@@ -114,8 +114,12 @@ def test_extract_returns_empty_when_no_signal() -> None:
 
 
 def test_enrich_apply_urls_skips_non_wwr() -> None:
-    hn_gig = Gig(id="hn-1", source="hn", title="X", url="https://news.ycombinator.com/item?id=1")
-    wwr_gig = Gig(id="wwr-1", source="wwr", title="Y", url="https://weworkremotely.com/x")
+    hn_gig = Gig(
+        id="hn-1", source="hn", title="X", url="https://news.ycombinator.com/item?id=1"
+    )
+    wwr_gig = Gig(
+        id="wwr-1", source="wwr", title="Y", url="https://weworkremotely.com/x"
+    )
 
     with patch("jobpilot.gigs.core.scrapers.weworkremotely.requests.get") as get:
         get.return_value.text = '<a href="mailto:jobs@acme.io">Apply</a>'
@@ -143,7 +147,12 @@ def test_enrich_apply_urls_respects_existing_apply_url() -> None:
 
 def test_enrich_apply_urls_caps_at_max_fetch() -> None:
     gigs = [
-        Gig(id=f"wwr-{i}", source="wwr", title="X", url=f"https://weworkremotely.com/{i}")
+        Gig(
+            id=f"wwr-{i}",
+            source="wwr",
+            title="X",
+            url=f"https://weworkremotely.com/{i}",
+        )
         for i in range(30)
     ]
     with patch("jobpilot.gigs.core.scrapers.weworkremotely.requests.get") as get:
@@ -155,6 +164,9 @@ def test_enrich_apply_urls_caps_at_max_fetch() -> None:
 
 def test_enrich_apply_urls_silent_on_network_error() -> None:
     g = Gig(id="wwr-1", source="wwr", title="X", url="https://weworkremotely.com/x")
-    with patch("jobpilot.gigs.core.scrapers.weworkremotely.requests.get", side_effect=RuntimeError("boom")):
+    with patch(
+        "jobpilot.gigs.core.scrapers.weworkremotely.requests.get",
+        side_effect=RuntimeError("boom"),
+    ):
         enrich_apply_urls([g])
     assert g.apply_url == ""
