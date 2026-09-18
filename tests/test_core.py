@@ -7,9 +7,12 @@ from pathlib import Path
 
 import pytest
 
+from jobpilot.core.linkedin_parser import FieldType, LinkedInParser, SemanticType
+from jobpilot.core.profile_store import ProfileStore, UserProfile
 from jobpilot.core.question_matcher import (
     QuestionMatcher,
 )
+from jobpilot.learning.action_recorder import ActionRecorder
 from jobpilot.learning.learning_db import LearningDB, _reset_learning_db
 
 
@@ -87,8 +90,6 @@ class TestTemplatePersistence:
 # Profile Store Tests
 # ===================================================================
 
-from jobpilot.core.profile_store import ProfileStore, UserProfile
-
 
 @pytest.fixture
 def profile_dir(tmp_path: Path):
@@ -161,8 +162,6 @@ class TestFieldMapping:
 # Action Recorder Tests
 # ===================================================================
 
-from jobpilot.learning.action_recorder import ActionRecorder
-
 
 @pytest.fixture
 def recorder(tmp_path: Path):
@@ -224,8 +223,6 @@ class TestStats:
 # LinkedIn Parser Tests
 # ===================================================================
 
-from jobpilot.core.linkedin_parser import FieldType, LinkedInParser, SemanticType
-
 
 class TestSemanticTypeInference:
     """Test _infer_semantic_type with known labels."""
@@ -257,7 +254,7 @@ class TestSemanticTypeInference:
         assert confidence > 0.5
 
     def test_unknown_field(self, parser):
-        semantic_type, confidence = parser._infer_semantic_type(
+        semantic_type, _confidence = parser._infer_semantic_type(
             "Random gibberish xyz", "", FieldType.TEXT
         )
         assert semantic_type == SemanticType.UNKNOWN

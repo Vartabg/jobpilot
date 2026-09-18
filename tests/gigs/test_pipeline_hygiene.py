@@ -365,7 +365,7 @@ def test_split_archivable_keeps_rows_it_cannot_date() -> None:
 def test_split_archivable_respects_after_days_override() -> None:
     old = Row(gig_id="a", status="new")
     first_seen = {"a": _iso_days_ago(5)}
-    keep, stale = split_archivable([old], first_seen, after_days=3)
+    _keep, stale = split_archivable([old], first_seen, after_days=3)
     assert stale == [old]
     keep2, stale2 = split_archivable([old], first_seen, after_days=10)
     assert keep2 == [old] and stale2 == []

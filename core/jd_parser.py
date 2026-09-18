@@ -301,12 +301,10 @@ class JDParser:
             # \b after a non-word char (e.g. "C++", "C#") requires a following
             # word char, so it never matches before whitespace/punctuation.
             # Use an explicit lookahead for those skills instead.
-            if re.search(r"\w$", skill):
-                tail = r"\b"
-            else:
-                tail = r"(?=\s|$|[,.;)])"
-            if re.search(rf"\b{re.escape(skill)}{tail}", text, re.IGNORECASE):
+            tail = r"\b" if re.search(r"\w$", skill) else r"(?=\s|$|[,.;)])"
+            if re.search(rf"\b{re.escape(skill)}{tail}", text, re.IGNORECASE) and (
+                skill not in found
+            ):
                 # Use the canonical casing from the list
-                if skill not in found:
-                    found.append(skill)
+                found.append(skill)
         return found

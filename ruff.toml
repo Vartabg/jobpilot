@@ -14,6 +14,16 @@ select = [
 ignore = [
     "E501",   # line too long — handled by formatter
 ]
+# These "confusables" are deliberate: en-dash minus signs appear in real-world
+# salary-range postings the scrapers must parse, and the multiplication sign
+# is display text.
+allowed-confusables = ["–", "−", "×"]
+
+[lint.per-file-ignores]
+# cli.py: sys.path bootstrap must precede package imports (repo-local
+# execution), and typer.Option() in argument defaults is Typer's canonical
+# signature idiom.
+"cli.py" = ["E402", "B008"]
 
 [format]
 quote-style = "double"

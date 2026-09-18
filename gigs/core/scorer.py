@@ -332,11 +332,10 @@ def _geo_eligible(gig: Gig, *, home_tags: list[str], allow_remote: bool) -> bool
         region = m.group(1)
         if _is_home_blob(region, home_tags) or _HOME_OK_RE.search(region):
             # "must live in NYC" is not home-ok for Austin even if "remote" elsewhere
-            if _OTHER_US_METRO_RE.search(region) and not _is_home_blob(
-                region, home_tags
-            ):
-                return False
-            return True
+            return not (
+                _OTHER_US_METRO_RE.search(region)
+                and not _is_home_blob(region, home_tags)
+            )
         return False  # requirement names somewhere else → out of reach
 
     # Fully remote (location field or strong phrasing) — not soft body keywords.
@@ -346,18 +345,16 @@ def _geo_eligible(gig: Gig, *, home_tags: list[str], allow_remote: bool) -> bool
         if _FULLY_REMOTE_RE.search(text) and not _OTHER_US_METRO_RE.search(pin):
             return True
         # Bare location "Remote" with no metro pin
-        if loc in ("remote", "worldwide", "global", "anywhere") or loc.startswith(
-            "remote "
-        ):
-            if not _OTHER_US_METRO_RE.search(pin):
-                return True
+        if (
+            loc in ("remote", "worldwide", "global", "anywhere")
+            or loc.startswith("remote ")
+        ) and not _OTHER_US_METRO_RE.search(pin):
+            return True
 
-    if loc in _UNKNOWN_LOC or any(
-        re.search(rf"\b{re.escape(tok)}\b", loc) for tok in ("united states", "usa")
-    ):
-        return True
     # A specific, non-home, non-remote location → onsite elsewhere.
-    return False
+    return loc in _UNKNOWN_LOC or any(
+        re.search(rf"\b{re.escape(tok)}\b", loc) for tok in ("united states", "usa")
+    )
 
 
 def _seniority_drag(title: str) -> tuple[int, str | None]:
@@ -393,10 +390,9 @@ def _seniority_drag(title: str) -> tuple[int, str | None]:
         ),
     ]
     for label, weight, rx in checks:
-        if rx.search(title):
-            if weight < best_w:
-                best_w = weight
-                best_label = label
+        if rx.search(title) and weight < best_w:
+            best_w = weight
+            best_label = label
     return best_w, best_label
 
 

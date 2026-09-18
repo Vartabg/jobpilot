@@ -84,18 +84,18 @@ CHAT_OVERLAY_TEMPLATE = """
         }
         return;
     }
-    
+
     // === SESSION STORAGE KEYS ===
     const STORAGE_KEY = 'jobpilot_chat_history';
     const COLLAPSED_KEY = 'jobpilot_chat_collapsed';
     const QUICK_ACTIONS = __QUICK_ACTIONS_JSON__;
-    
+
     // Create chat container with Shadow DOM
     const host = document.createElement('div');
     host.id = 'jobpilot-chat-host';
     document.body.appendChild(host);
     const shadow = host.attachShadow({mode: 'open'});
-    
+
     // Styles
     const style = document.createElement('style');
     style.textContent = `
@@ -106,9 +106,9 @@ CHAT_OVERLAY_TEMPLATE = """
             --border: rgba(100, 255, 218, 0.3);
             --text: #e0e0e0;
         }
-        
+
         * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
-        
+
         .chat-container {
             position: fixed;
             bottom: 20px;
@@ -125,11 +125,11 @@ CHAT_OVERLAY_TEMPLATE = """
             transition: height 0.3s ease;
             height: 400px;
         }
-        
+
         .chat-container.collapsed {
             height: 48px;
         }
-        
+
         .chat-header {
             padding: 12px 16px;
             background: var(--primary-dim);
@@ -176,7 +176,7 @@ CHAT_OVERLAY_TEMPLATE = """
         .quick-chip:hover {
             background: rgba(100, 255, 218, 0.18);
         }
-        
+
         .chat-messages {
             flex: 1;
             overflow-y: auto;
@@ -185,7 +185,7 @@ CHAT_OVERLAY_TEMPLATE = """
             flex-direction: column;
             gap: 10px;
         }
-        
+
         .message {
             padding: 8px 12px;
             border-radius: 8px;
@@ -194,26 +194,26 @@ CHAT_OVERLAY_TEMPLATE = """
             max-width: 85%;
             word-wrap: break-word;
         }
-        
+
         .message.user {
             background: rgba(100, 255, 218, 0.2);
             color: #fff;
             align-self: flex-end;
         }
-        
+
         .message.ai {
             background: rgba(255, 255, 255, 0.05);
             color: #ccc;
             align-self: flex-start;
         }
-        
+
         .chat-input-area {
             padding: 10px;
             border-top: 1px solid rgba(255, 255, 255, 0.1);
             display: flex;
             gap: 8px;
         }
-        
+
         input {
             flex: 1;
             background: rgba(0, 0, 0, 0.2);
@@ -224,11 +224,11 @@ CHAT_OVERLAY_TEMPLATE = """
             font-size: 13px;
             outline: none;
         }
-        
+
         input:focus {
             border-color: var(--primary);
         }
-        
+
         button {
             background: var(--primary-dim);
             border: 1px solid var(--border);
@@ -238,17 +238,17 @@ CHAT_OVERLAY_TEMPLATE = """
             cursor: pointer;
             font-weight: bold;
         }
-        
+
         button:hover {
             background: rgba(100, 255, 218, 0.2);
         }
     `;
     shadow.appendChild(style);
-    
+
     // UI Structure
     const container = document.createElement('div');
     container.className = 'chat-container';
-    
+
     const header = document.createElement('div');
     header.className = 'chat-header';
 
@@ -275,10 +275,10 @@ CHAT_OVERLAY_TEMPLATE = """
         btn.textContent = label;
         quickActions.appendChild(btn);
     });
-    
+
     const messages = document.createElement('div');
     messages.className = 'chat-messages';
-    
+
     const inputArea = document.createElement('div');
     inputArea.className = 'chat-input-area';
     const input = document.createElement('input');
@@ -288,10 +288,10 @@ CHAT_OVERLAY_TEMPLATE = """
     sendBtn.type = 'button';
     sendBtn.textContent = '→';
     inputArea.append(input, sendBtn);
-    
+
     container.append(header, quickActions, messages, inputArea);
     shadow.appendChild(container);
-    
+
     // Collapse Toggle
     header.onclick = () => {
         container.classList.toggle('collapsed');
@@ -299,12 +299,12 @@ CHAT_OVERLAY_TEMPLATE = """
         toggleSpan.textContent = isCollapsed ? '+' : '−';
         sessionStorage.setItem(COLLAPSED_KEY, isCollapsed);
     };
-    
+
     if (sessionStorage.getItem(COLLAPSED_KEY) === 'true') {
         container.classList.add('collapsed');
         toggleSpan.textContent = '+';
     }
-    
+
     // Messaging
     function addMessage(text, type, save = true) {
         const msg = document.createElement('div');
@@ -312,13 +312,13 @@ CHAT_OVERLAY_TEMPLATE = """
         msg.textContent = text;
         messages.appendChild(msg);
         messages.scrollTop = messages.scrollHeight;
-        
+
         if (save) {
             saveToSession();
         }
         return msg;
     }
-    
+
     function saveToSession() {
         const history = [];
         messages.querySelectorAll('.message').forEach(el => {
@@ -329,7 +329,7 @@ CHAT_OVERLAY_TEMPLATE = """
         });
         sessionStorage.setItem(STORAGE_KEY, JSON.stringify(history));
     }
-    
+
     function restoreFromSession() {
         try {
             const saved = sessionStorage.getItem(STORAGE_KEY);
@@ -339,7 +339,7 @@ CHAT_OVERLAY_TEMPLATE = """
             }
         } catch(e) {}
     }
-    
+
     // Send Logic
     function queueOutbound(text, echoUser = true) {
         if (!text) return;
@@ -354,7 +354,7 @@ CHAT_OVERLAY_TEMPLATE = """
         queueOutbound(text, true);
         input.value = '';
     }
-    
+
     input.onkeydown = (e) => { if (e.key === 'Enter') sendMessage(); };
     sendBtn.onclick = sendMessage;
     quickActions.querySelectorAll('[data-quick]').forEach((btn) => {
@@ -364,13 +364,13 @@ CHAT_OVERLAY_TEMPLATE = """
             queueOutbound(btn.dataset.quick || '', true);
         });
     });
-    
+
     // Initial Restore
     restoreFromSession();
     if (messages.children.length === 0) {
         addMessage(__WELCOME_MESSAGE__, 'ai');
     }
-    
+
     // Public API
     window.jobpilotChat = {
         addAIMessage: (text) => addMessage(text, 'ai'),
@@ -381,7 +381,7 @@ CHAT_OVERLAY_TEMPLATE = """
             return msgs;
         }
     };
-    
+
     console.log('✓ JobPilot Chat injected');
 })();
 """.replace("__WELCOME_MESSAGE__", json.dumps(build_chat_welcome_message())).replace(

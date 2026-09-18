@@ -190,10 +190,7 @@ def _tailored_hook(gig: Gig) -> str:
     signal = _personalization_signal(gig)
     skills = _matched_personalization_skills(gig)
     if skills:
-        if len(skills) == 1:
-            skill_text = skills[0]
-        else:
-            skill_text = f"{skills[0]} and {skills[1]}"
+        skill_text = skills[0] if len(skills) == 1 else f"{skills[0]} and {skills[1]}"
         return f" The part that fits me is {signal} — I work with {skill_text}."
     return f" The part that fits me is {signal} — that's the kind of work I do."
 

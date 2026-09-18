@@ -88,7 +88,7 @@ def create_reminder_for_gig(gig: Gig, now: datetime | None = None) -> bool:
     )
 
     try:
-        result = subprocess.run(
+        subprocess.run(
             ["osascript", "-e", script],
             check=True,
             timeout=10,

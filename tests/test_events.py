@@ -13,14 +13,20 @@ class TestSubscribe:
 
     def test_on_deduplicates_same_callback(self):
         bus = EventBus()
-        cb = lambda **_: None  # noqa: E731
+
+        def cb(**_) -> None:
+            pass
+
         bus.on("x", cb)
         bus.on("x", cb)
         assert bus.listener_count == 1
 
     def test_off_removes_callback(self):
         bus = EventBus()
-        cb = lambda **_: None  # noqa: E731
+
+        def cb(**_) -> None:
+            pass
+
         bus.on("x", cb)
         bus.off("x", cb)
         assert bus.listener_count == 0

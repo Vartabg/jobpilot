@@ -340,13 +340,16 @@ class LinkedInParser:
             )
 
             # Radio groups are often for yes/no questions
-            if semantic_type == SemanticType.UNKNOWN and len(options) <= 3:
-                if any("yes" in opt.lower() for opt in options):
-                    # Could be work auth or sponsorship
-                    if "author" in label.lower() or "eligible" in label.lower():
-                        semantic_type = SemanticType.WORK_AUTHORIZATION
-                    elif "sponsor" in label.lower():
-                        semantic_type = SemanticType.SPONSORSHIP
+            if (
+                semantic_type == SemanticType.UNKNOWN
+                and len(options) <= 3
+                and any("yes" in opt.lower() for opt in options)
+            ):
+                # Could be work auth or sponsorship
+                if "author" in label.lower() or "eligible" in label.lower():
+                    semantic_type = SemanticType.WORK_AUTHORIZATION
+                elif "sponsor" in label.lower():
+                    semantic_type = SemanticType.SPONSORSHIP
 
             first_radio = await container.query_selector('input[type="radio"]')
             if first_radio:

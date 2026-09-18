@@ -63,8 +63,10 @@ def test_draft_gig_proposal_returns_message(monkeypatch):
         "jobpilot.gigs.core.proposals.build_revenue_brief",
         lambda g: type("B", (), {"offer": "hi", "action": "do"})(),
     )
-    with patch("jobpilot.ui.hud_actions.subprocess.run"):
-        with patch("pathlib.Path.write_text"):
-            with patch("pathlib.Path.mkdir"):
-                msg = hud_actions.draft_gig_proposal(gig)
+    with (
+        patch("jobpilot.ui.hud_actions.subprocess.run"),
+        patch("pathlib.Path.write_text"),
+        patch("pathlib.Path.mkdir"),
+    ):
+        msg = hud_actions.draft_gig_proposal(gig)
     assert "draft" in msg

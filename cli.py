@@ -801,11 +801,11 @@ def start(
     """Connect to Chrome and start assisting with job applications"""
     try:
         set_autonomy_mode(AutonomyMode(mode))
-    except ValueError:
+    except ValueError as exc:
         console.print(
             f"[red]Invalid mode '{mode}'. Use: suggest, semi-auto, full-auto[/red]"
         )
-        raise typer.Exit(1)
+        raise typer.Exit(1) from exc
 
     console.print(
         Panel.fit(
@@ -1798,7 +1798,7 @@ app.add_typer(answer_app, name="answer")
 # Gigs lane (former GigPilot). Not lazy: Typer's add_typer needs the actual
 # Typer instance at registration time, so the sub-app module must be imported
 # here. Its import cost is small (no network; state paths resolve from env).
-from jobpilot.gigs.cli import app as gigs_app  # noqa: E402
+from jobpilot.gigs.cli import app as gigs_app
 
 app.add_typer(
     gigs_app,
@@ -2281,7 +2281,7 @@ def log(
         )
     except ValueError as exc:
         console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from exc
     stats = tracker.get_stats()
     console.print(
         f"[green]✓ Tracked: {app_row.company} — {app_row.job_title or '(role)'} "

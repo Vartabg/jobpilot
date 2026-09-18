@@ -98,7 +98,7 @@ class QuestionMatcher:
             )
 
             if result:
-                matched_normalized, score, idx = result
+                _matched_normalized, score, idx = result
                 confidence = score / 100.0
 
                 if confidence >= threshold:
