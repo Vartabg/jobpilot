@@ -14,6 +14,7 @@ from typing import Optional, Protocol
 from jobpilot.core import llm_client
 from jobpilot.core.bro_client import is_bro_running, query_rag
 from jobpilot.core.jd_parser import _SALARY_PATTERN, JDParser, ParsedJD
+from jobpilot.core.relocation_signals import detect_relocation_offer
 from jobpilot.core.policy_config import Policy, get_policy
 from jobpilot.core.work_style import score_work_style, title_seniority_penalty
 from jobpilot.core.profile_store import ProfileStore, UserProfile, get_profile_store
@@ -124,6 +125,8 @@ class JobScorer:
         auth_points, auth_risk = self._score_work_auth(profile.authorized_to_work, profile.requires_sponsorship, raw_text)
         location_points = self._score_location(parsed_jd.location_type or self._extract_location_type(raw_text))
         work_style_points, work_style_reasons = self._score_work_style(raw_text, parsed_jd.title)
+        relocation_offer = detect_relocation_offer(raw_text)
+        relocation_points = 8 if relocation_offer else 0
 
         components = {
             "Alignment": alignment_points,
@@ -133,6 +136,7 @@ class JobScorer:
             "Work auth": auth_points,
             "Location": location_points,
             "Work style": work_style_points,
+            "Relocation": relocation_points,
         }
 
         total = max(0, min(100, sum(components.values())))
@@ -150,6 +154,8 @@ class JobScorer:
             strengths.append("Experience level looks aligned with the role")
         if parsed_jd.location_type == "remote":
             strengths.append("Remote role — lower friction to pursue")
+        if relocation_offer:
+            strengths.append(f"Relocation on the table ({relocation_offer})")
         if work_style_points >= 12:
             strengths.append("Work style looks autonomous (async/contract/deadline signals)")
         for reason in work_style_reasons:
