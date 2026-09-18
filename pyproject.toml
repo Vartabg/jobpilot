@@ -68,3 +68,10 @@ include = [
     "learning/*.py",
     "scripts/*.sh",
 ]
+
+[tool.pytest.ini_options]
+# Let bare `pytest tests/` (the invocation documented in CONTRIBUTING.md)
+# resolve rootless imports (`product`, `scripts`, `jobpilot`) exactly like
+# `python3 -m pytest tests/` and CI's PYTHONPATH=$(dirname $PWD) in
+# .github/workflows/checks.yml do. pytest >= 7.
+pythonpath = ["."]
