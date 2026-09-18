@@ -32,7 +32,18 @@ from jobpilot.core.question_matcher import get_question_matcher
 from jobpilot.core.application_tracker import get_application_tracker
 from jobpilot.core.autonomy import AutonomyMode, get_autonomy_config, set_autonomy_mode
 from jobpilot.core.logger import get_logger
-from jobpilot.core.events import EventBus, INFO, WARNING, ERROR, FIELD_FILLED, FIELD_SKIPPED, FIELD_EDITED, APPLICATION_STARTED, APPLICATION_SUBMITTED, APPLICATION_ABANDONED
+from jobpilot.core.events import (
+    EventBus,
+    INFO,
+    WARNING,
+    ERROR,
+    FIELD_FILLED,
+    FIELD_SKIPPED,
+    FIELD_EDITED,
+    APPLICATION_STARTED,
+    APPLICATION_SUBMITTED,
+    APPLICATION_ABANDONED,
+)
 from jobpilot.core.engine import ApplicationEngine
 from jobpilot.core import llm_client
 from jobpilot.core.bro_client import get_health
@@ -82,6 +93,7 @@ def _resolve_claim_lock_path() -> Optional[Path]:
 # Event → Rich Console wiring
 # ---------------------------------------------------------------------------
 
+
 def _wire_events(bus: EventBus) -> None:
     """Subscribe console output to engine events."""
 
@@ -107,7 +119,9 @@ def _wire_events(bus: EventBus) -> None:
         console.print(f"\n[bold cyan]📋 Application Started: {title[:60]}[/bold cyan]")
 
     def _on_app_submitted(**_kw):
-        console.print("\n[bold green]🎊 SUCCESS: Application Submitted! 🎉[/bold green]\n")
+        console.print(
+            "\n[bold green]🎊 SUCCESS: Application Submitted! 🎉[/bold green]\n"
+        )
 
     def _on_app_abandoned(step: int = 1, **_kw):
         console.print(f"[dim]⚠  Application abandoned at step {step}[/dim]")
@@ -126,6 +140,7 @@ def _wire_events(bus: EventBus) -> None:
 # ---------------------------------------------------------------------------
 # Resume auto-index helper (unchanged)
 # ---------------------------------------------------------------------------
+
 
 def _check_and_index_resume() -> None:
     """Auto-index resume in RAG if configured and not yet indexed."""
@@ -152,7 +167,9 @@ def _check_and_index_resume() -> None:
 
         rag_dir = os.environ.get("JOBPILOT_RAG_DIR")
         if not rag_dir:
-            console.print("[dim]RAG indexing skipped: set JOBPILOT_RAG_DIR to enable[/dim]")
+            console.print(
+                "[dim]RAG indexing skipped: set JOBPILOT_RAG_DIR to enable[/dim]"
+            )
             return
 
         rag_path = Path(rag_dir)
@@ -162,6 +179,7 @@ def _check_and_index_resume() -> None:
 
         console.print(f"[cyan]Indexing resume: {resume.name}...[/cyan]")
         import subprocess
+
         result = subprocess.run(
             [sys.executable, "main.py", "index", str(resume)],
             cwd=str(rag_path),
@@ -172,7 +190,9 @@ def _check_and_index_resume() -> None:
         if result.returncode == 0:
             console.print("[green]✓ Resume indexed in RAG[/green]")
         else:
-            console.print(f"[yellow]Resume indexing issue: {result.stderr[:100]}[/yellow]")
+            console.print(
+                f"[yellow]Resume indexing issue: {result.stderr[:100]}[/yellow]"
+            )
     except Exception as e:
         console.print(f"[dim]Resume indexing skipped: {e}[/dim]")
 
@@ -264,7 +284,11 @@ def _find_claim_target(job, lock_path: Path) -> Optional[dict]:
         target_title = _norm_claim_text(target.get("title"))
         if target_title and target_title == job_title:
             return target
-    titleless_matches = [target for target in company_matches if not _norm_claim_text(target.get("title"))]
+    titleless_matches = [
+        target
+        for target in company_matches
+        if not _norm_claim_text(target.get("title"))
+    ]
     if len(titleless_matches) == 1:
         return titleless_matches[0]
     return None
@@ -302,7 +326,9 @@ def _job_output_payload(job) -> dict:
 def _enforce_claim_lock(job, *, claim_approved: bool) -> None:
     lock_path = _resolve_claim_lock_path()
     if lock_path is None:
-        console.print("[dim]Claim-lock not configured (no vetted-targets file) — skipping that check.[/dim]")
+        console.print(
+            "[dim]Claim-lock not configured (no vetted-targets file) — skipping that check.[/dim]"
+        )
         return
 
     try:
@@ -316,7 +342,9 @@ def _enforce_claim_lock(job, *, claim_approved: bool) -> None:
             "[red]Claim-lock blocked staging:[/red] "
             f"{job.company} is not present in {lock_path}."
         )
-        console.print("[dim]Claude must vet it and set materials_status to 'ready' before JobPilot fills it.[/dim]")
+        console.print(
+            "[dim]Claude must vet it and set materials_status to 'ready' before JobPilot fills it.[/dim]"
+        )
         raise typer.Exit(1)
 
     decision = _norm_claim_text(target.get("decision"))
@@ -347,17 +375,21 @@ def _render_score_result(result, source_label: str) -> None:
     """Display a job-fit score in the terminal."""
     from rich.table import Table
 
-    border_style = "green" if result.score >= 65 else "yellow" if result.score >= 50 else "red"
+    border_style = (
+        "green" if result.score >= 65 else "yellow" if result.score >= 50 else "red"
+    )
     title = result.parsed_jd.title or "Job Fit Review"
     company = result.parsed_jd.company or "Unknown company"
 
-    console.print(Panel.fit(
-        f"[bold cyan]{title}[/bold cyan]\n"
-        f"[white]{company}[/white]\n"
-        f"[bold]{result.score}/100[/bold] • {result.recommendation}\n"
-        f"[dim]{source_label}[/dim]",
-        border_style=border_style,
-    ))
+    console.print(
+        Panel.fit(
+            f"[bold cyan]{title}[/bold cyan]\n"
+            f"[white]{company}[/white]\n"
+            f"[bold]{result.score}/100[/bold] • {result.recommendation}\n"
+            f"[dim]{source_label}[/dim]",
+            border_style=border_style,
+        )
+    )
 
     table = Table(title="Fit Breakdown")
     table.add_column("Area", style="cyan")
@@ -389,13 +421,15 @@ def _render_resume_result(result, source_label: str) -> None:
     if result.pdf_path:
         saved_paths.append(f"PDF: {result.pdf_path}")
 
-    console.print(Panel.fit(
-        f"[bold cyan]ATS Resume Draft Ready[/bold cyan]\n"
-        f"[white]{parsed.title or 'Target role'} @ {parsed.company or 'Target company'}[/white]\n"
-        f"[bold]{result.fit_result.score}/100[/bold] • {result.fit_result.recommendation}\n"
-        f"[dim]{source_label}\n" + "\n".join(saved_paths) + "[/dim]",
-        border_style="cyan",
-    ))
+    console.print(
+        Panel.fit(
+            f"[bold cyan]ATS Resume Draft Ready[/bold cyan]\n"
+            f"[white]{parsed.title or 'Target role'} @ {parsed.company or 'Target company'}[/white]\n"
+            f"[bold]{result.fit_result.score}/100[/bold] • {result.fit_result.recommendation}\n"
+            f"[dim]{source_label}\n" + "\n".join(saved_paths) + "[/dim]",
+            border_style="cyan",
+        )
+    )
 
     if result.keywords:
         console.print(f"[green]Keywords:[/green] {', '.join(result.keywords[:10])}")
@@ -493,7 +527,11 @@ def _render_scan_results(jobs, *, limit: int = 20, describe: bool = False) -> No
             )
             loc_line = f"[magenta]{job.location}[/magenta]  [dim]via {job.portal}[/dim]"
             blurb = _format_description(job.description) if job.description else ""
-            body = f"{loc_line}\n\n{blurb}" if blurb else f"{loc_line}\n\n[dim italic]No description available.[/dim italic]"
+            body = (
+                f"{loc_line}\n\n{blurb}"
+                if blurb
+                else f"{loc_line}\n\n[dim italic]No description available.[/dim italic]"
+            )
             console.print(Panel(body, title=header, title_align="left", padding=(0, 1)))
         return
 
@@ -522,12 +560,16 @@ def _render_doctor_report(report) -> None:
     """Display the result of a JobPilot health check."""
     from rich.table import Table
 
-    color = {"ok": "green", "warn": "yellow", "error": "red"}.get(report.status, "white")
-    console.print(Panel.fit(
-        f"[bold {color}]🩺 JobPilot Doctor: {report.status.upper()}[/bold {color}]\n"
-        f"[dim]{report.summary.get('data_dir', '')}[/dim]",
-        border_style=color,
-    ))
+    color = {"ok": "green", "warn": "yellow", "error": "red"}.get(
+        report.status, "white"
+    )
+    console.print(
+        Panel.fit(
+            f"[bold {color}]🩺 JobPilot Doctor: {report.status.upper()}[/bold {color}]\n"
+            f"[dim]{report.summary.get('data_dir', '')}[/dim]",
+            border_style=color,
+        )
+    )
 
     table = Table(title="Health Summary")
     table.add_column("Check", style="cyan")
@@ -566,7 +608,9 @@ async def _resume_active_page(
         await bridge.get_active_page()
         page_info = await bridge.get_page_info()
         if not page_info.is_linkedin:
-            console.print("[yellow]Open a LinkedIn job listing first, or pass JD text/file directly.[/yellow]")
+            console.print(
+                "[yellow]Open a LinkedIn job listing first, or pass JD text/file directly.[/yellow]"
+            )
             return False
 
         parsed_jd = await JDParser(bridge.page).parse()
@@ -602,7 +646,9 @@ async def _score_active_page(port: int) -> bool:
         await bridge.get_active_page()
         page_info = await bridge.get_page_info()
         if not page_info.is_linkedin:
-            console.print("[yellow]Open a LinkedIn job listing first, or pass JD text/file directly.[/yellow]")
+            console.print(
+                "[yellow]Open a LinkedIn job listing first, or pass JD text/file directly.[/yellow]"
+            )
             return False
 
         parsed_jd = await JDParser(bridge.page).parse()
@@ -634,7 +680,9 @@ async def _doctor_async(port: int, *, bro: bool = True) -> int:
         whisper_ready = health.get("whisper") == "ready"
         models = [str(model) for model in health.get("ollama_models", [])]
         preferred_fast = str(health.get("fast_model", "") or "").strip()
-        fast_ready = bool(preferred_fast and any(preferred_fast in model for model in models))
+        fast_ready = bool(
+            preferred_fast and any(preferred_fast in model for model in models)
+        )
 
     table = Table(title="JobPilot Doctor")
     table.add_column("Check", style="cyan")
@@ -698,10 +746,18 @@ async def _doctor_async(port: int, *, bro: bool = True) -> int:
     table.add_row(
         "Chrome CDP",
         "OK" if chrome_ok else "FAIL",
-        "Connected to existing Chrome session" if chrome_ok else f"Could not connect on port {port}",
+        "Connected to existing Chrome session"
+        if chrome_ok
+        else f"Could not connect on port {port}",
     )
 
-    linkedin_status = "OK" if chrome_ok and linkedin_detail.startswith("LinkedIn") else "INFO" if chrome_ok else "FAIL"
+    linkedin_status = (
+        "OK"
+        if chrome_ok and linkedin_detail.startswith("LinkedIn")
+        else "INFO"
+        if chrome_ok
+        else "FAIL"
+    )
     if chrome_ok and not linkedin_detail.startswith("LinkedIn"):
         linkedin_detail = f"{linkedin_detail} — open a LinkedIn job tab when you want pre-apply checks"
 
@@ -714,7 +770,9 @@ async def _doctor_async(port: int, *, bro: bool = True) -> int:
     console.print(table)
 
     if not chrome_ok:
-        console.print("\n[yellow]💡 Tip: Run ./scripts/launch_chrome.sh and reopen the target job tab.[/yellow]")
+        console.print(
+            "\n[yellow]💡 Tip: Run ./scripts/launch_chrome.sh and reopen the target job tab.[/yellow]"
+        )
         return 1
 
     if bro and not ai_ok:
@@ -732,25 +790,32 @@ async def _doctor_async(port: int, *, bro: bool = True) -> int:
 # Commands
 # ---------------------------------------------------------------------------
 
+
 @app.command()
 def start(
     port: int = typer.Option(9222, help="Chrome debugging port"),
     watch: bool = typer.Option(True, help="Stay connected and watch for applications"),
-    mode: str = typer.Option("semi-auto", help="Autonomy: suggest, semi-auto, full-auto"),
+    mode: str = typer.Option(
+        "semi-auto", help="Autonomy: suggest, semi-auto, full-auto"
+    ),
 ):
     """Connect to Chrome and start assisting with job applications"""
     try:
         set_autonomy_mode(AutonomyMode(mode))
     except ValueError:
-        console.print(f"[red]Invalid mode '{mode}'. Use: suggest, semi-auto, full-auto[/red]")
+        console.print(
+            f"[red]Invalid mode '{mode}'. Use: suggest, semi-auto, full-auto[/red]"
+        )
         raise typer.Exit(1)
 
-    console.print(Panel.fit(
-        f"[bold cyan]🚀 JobPilot Smart Dashboard[/bold cyan]\n"
-        f"[dim]Mode: {mode} | Strategy: LinkedIn Fast-Track[/dim]\n"
-        f"[dim]Status: [green]Active & Monitoring[/green][/dim]",
-        border_style="cyan",
-    ))
+    console.print(
+        Panel.fit(
+            f"[bold cyan]🚀 JobPilot Smart Dashboard[/bold cyan]\n"
+            f"[dim]Mode: {mode} | Strategy: LinkedIn Fast-Track[/dim]\n"
+            f"[dim]Status: [green]Active & Monitoring[/green][/dim]",
+            border_style="cyan",
+        )
+    )
 
     try:
         asyncio.run(_start_async(port, watch))
@@ -794,14 +859,31 @@ async def _start_async(port: int, watch: bool):
 
 @app.command()
 def scan(
-    greenhouse: Optional[list[str]] = typer.Option(None, "--greenhouse", help="Greenhouse board token; repeat for multiple."),
-    lever: Optional[list[str]] = typer.Option(None, "--lever", help="Lever site token; repeat for multiple."),
-    ashby: Optional[list[str]] = typer.Option(None, "--ashby", help="Ashby org slug; repeat for multiple."),
-    keyword: Optional[list[str]] = typer.Option(None, "--keyword", "-k", help="Keyword filter for titles or locations."),
-    config: Optional[Path] = typer.Option(None, "--config", help="Optional JSON file of scan targets."),
+    greenhouse: Optional[list[str]] = typer.Option(
+        None, "--greenhouse", help="Greenhouse board token; repeat for multiple."
+    ),
+    lever: Optional[list[str]] = typer.Option(
+        None, "--lever", help="Lever site token; repeat for multiple."
+    ),
+    ashby: Optional[list[str]] = typer.Option(
+        None, "--ashby", help="Ashby org slug; repeat for multiple."
+    ),
+    keyword: Optional[list[str]] = typer.Option(
+        None, "--keyword", "-k", help="Keyword filter for titles or locations."
+    ),
+    config: Optional[Path] = typer.Option(
+        None, "--config", help="Optional JSON file of scan targets."
+    ),
     limit: int = typer.Option(20, help="Maximum number of rows to show"),
-    save: bool = typer.Option(True, "--save/--no-save", help="Persist scan results to `data/reports/`"),
-    describe: bool = typer.Option(False, "--describe", "-d", help="Show a plain-English description of what each role involves."),
+    save: bool = typer.Option(
+        True, "--save/--no-save", help="Persist scan results to `data/reports/`"
+    ),
+    describe: bool = typer.Option(
+        False,
+        "--describe",
+        "-d",
+        help="Show a plain-English description of what each role involves.",
+    ),
 ):
     """Scan public ATS boards for roles worth reviewing before you apply."""
     targets: list[ScanTarget] = []
@@ -834,9 +916,15 @@ def scan(
 @app.command()
 def doctor(
     port: int = typer.Option(9222, help="Chrome debugging port"),
-    json_output: bool = typer.Option(False, "--json", help="Output the health report as JSON"),
-    strict: bool = typer.Option(False, "--strict", help="Exit non-zero if warnings are present"),
-    bro: bool = typer.Option(True, "--bro/--no-bro", help="Include the AI backend health check"),
+    json_output: bool = typer.Option(
+        False, "--json", help="Output the health report as JSON"
+    ),
+    strict: bool = typer.Option(
+        False, "--strict", help="Exit non-zero if warnings are present"
+    ),
+    bro: bool = typer.Option(
+        True, "--bro/--no-bro", help="Include the AI backend health check"
+    ),
 ):
     """Check Chrome, the AI backend, and JobPilot's local data health."""
     runtime_exit = asyncio.run(_doctor_async(port, bro=bro))
@@ -858,11 +946,28 @@ def resume(
         help="Job description text or a path to a JD text file. Omit to use the active LinkedIn page.",
     ),
     port: int = typer.Option(9222, help="Chrome debugging port for --active mode"),
-    active: bool = typer.Option(False, "--active", help="Use the active LinkedIn job tab in Chrome"),
-    output: Optional[Path] = typer.Option(None, "--output", "-o", help="Optional markdown output path for the resume draft"),
-    html: bool = typer.Option(True, "--html/--no-html", help="Also write a styled HTML version next to the markdown draft"),
-    pdf: bool = typer.Option(False, "--pdf", help="Also export a PDF version using Playwright/Chromium"),
-    bro: bool = typer.Option(True, "--bro/--no-bro", help="Use the AI backend (local Bro or Gemini) for more personalized tailoring when available"),
+    active: bool = typer.Option(
+        False, "--active", help="Use the active LinkedIn job tab in Chrome"
+    ),
+    output: Optional[Path] = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Optional markdown output path for the resume draft",
+    ),
+    html: bool = typer.Option(
+        True,
+        "--html/--no-html",
+        help="Also write a styled HTML version next to the markdown draft",
+    ),
+    pdf: bool = typer.Option(
+        False, "--pdf", help="Also export a PDF version using Playwright/Chromium"
+    ),
+    bro: bool = typer.Option(
+        True,
+        "--bro/--no-bro",
+        help="Use the AI backend (local Bro or Gemini) for more personalized tailoring when available",
+    ),
 ):
     """Generate an ATS-friendly resume draft tailored to a target role."""
     if active or not source:
@@ -879,7 +984,9 @@ def resume(
         return
 
     if source.startswith(("http://", "https://")):
-        console.print("[yellow]Open the job in Chrome and run `jobpilot resume --active`, or paste the JD text directly.[/yellow]")
+        console.print(
+            "[yellow]Open the job in Chrome and run `jobpilot resume --active`, or paste the JD text directly.[/yellow]"
+        )
         raise typer.Exit(1)
 
     text, label = _load_score_source(source)
@@ -896,13 +1003,15 @@ def resume(
 def _render_prep_result(result, source_label: str) -> None:
     """Display the output of an interview prep brief."""
     parsed = result.fit_result.parsed_jd
-    console.print(Panel.fit(
-        f"[bold cyan]Interview Brief Ready[/bold cyan]\n"
-        f"[white]{parsed.title or 'Target role'} @ {parsed.company or 'Target company'}[/white]\n"
-        f"[bold]{result.fit_result.score}/100[/bold] • {result.fit_result.recommendation}\n"
-        f"[dim]{source_label}\nHTML: {result.output_path}[/dim]",
-        border_style="cyan",
-    ))
+    console.print(
+        Panel.fit(
+            f"[bold cyan]Interview Brief Ready[/bold cyan]\n"
+            f"[white]{parsed.title or 'Target role'} @ {parsed.company or 'Target company'}[/white]\n"
+            f"[bold]{result.fit_result.score}/100[/bold] • {result.fit_result.recommendation}\n"
+            f"[dim]{source_label}\nHTML: {result.output_path}[/dim]",
+            border_style="cyan",
+        )
+    )
     if result.likely_questions:
         console.print("[green]Likely questions:[/green]")
         for q in result.likely_questions[:3]:
@@ -930,7 +1039,9 @@ async def _prep_active_page(
         await bridge.get_active_page()
         page_info = await bridge.get_page_info()
         if not page_info.is_linkedin:
-            console.print("[yellow]Open a LinkedIn job listing first, or pass JD text/file directly.[/yellow]")
+            console.print(
+                "[yellow]Open a LinkedIn job listing first, or pass JD text/file directly.[/yellow]"
+            )
             return False
 
         parsed_jd = await JDParser(bridge.page).parse()
@@ -943,7 +1054,9 @@ async def _prep_active_page(
 
     fit_result = JobScorer(use_bro=use_bro).score_parsed_jd(parsed_jd)
     generator = InterviewPrepGenerator(use_bro=use_bro)
-    result = generator.generate_from_fit_result(fit_result, output_path=output, export_pdf=export_pdf)
+    result = generator.generate_from_fit_result(
+        fit_result, output_path=output, export_pdf=export_pdf
+    )
     _render_prep_result(result, page_info.url)
     return True
 
@@ -955,10 +1068,20 @@ def prep(
         help="Job description text or a path to a JD text file. Omit to use the active LinkedIn page.",
     ),
     port: int = typer.Option(9222, help="Chrome debugging port for --active mode"),
-    active: bool = typer.Option(False, "--active", help="Use the active LinkedIn job tab in Chrome"),
-    output: Optional[Path] = typer.Option(None, "--output", "-o", help="Optional HTML output path for the brief"),
-    pdf: bool = typer.Option(False, "--pdf", help="Also export a PDF version using Playwright/Chromium"),
-    bro: bool = typer.Option(True, "--bro/--no-bro", help="Use the AI backend (local Bro or Gemini) to sharpen the brief when available"),
+    active: bool = typer.Option(
+        False, "--active", help="Use the active LinkedIn job tab in Chrome"
+    ),
+    output: Optional[Path] = typer.Option(
+        None, "--output", "-o", help="Optional HTML output path for the brief"
+    ),
+    pdf: bool = typer.Option(
+        False, "--pdf", help="Also export a PDF version using Playwright/Chromium"
+    ),
+    bro: bool = typer.Option(
+        True,
+        "--bro/--no-bro",
+        help="Use the AI backend (local Bro or Gemini) to sharpen the brief when available",
+    ),
 ):
     """Generate a one-page interview prep brief for a target role."""
     if active or not source:
@@ -969,7 +1092,9 @@ def prep(
         return
 
     if source.startswith(("http://", "https://")):
-        console.print("[yellow]Open the job in Chrome and run `jobpilot prep --active`, or paste the JD text directly.[/yellow]")
+        console.print(
+            "[yellow]Open the job in Chrome and run `jobpilot prep --active`, or paste the JD text directly.[/yellow]"
+        )
         raise typer.Exit(1)
 
     text, label = _load_score_source(source)
@@ -985,7 +1110,9 @@ def score(
         help="Job description text or a path to a JD text file. Omit to score the active LinkedIn page.",
     ),
     port: int = typer.Option(9222, help="Chrome debugging port for --active mode"),
-    active: bool = typer.Option(False, "--active", help="Score the active LinkedIn job tab in Chrome"),
+    active: bool = typer.Option(
+        False, "--active", help="Score the active LinkedIn job tab in Chrome"
+    ),
 ):
     """Score a role before spending time on the application."""
     if active or not source:
@@ -994,7 +1121,9 @@ def score(
         return
 
     if source.startswith(("http://", "https://")):
-        console.print("[yellow]Open the job in Chrome and run `jobpilot score --active`, or paste the JD text directly.[/yellow]")
+        console.print(
+            "[yellow]Open the job in Chrome and run `jobpilot score --active`, or paste the JD text directly.[/yellow]"
+        )
         raise typer.Exit(1)
 
     text, label = _load_score_source(source)
@@ -1018,7 +1147,9 @@ def _edit_profile(store):
     """Interactive profile editing"""
     p = store.load()
 
-    console.print("\n[cyan]Edit your profile[/cyan] (press Enter to keep current value)\n")
+    console.print(
+        "\n[cyan]Edit your profile[/cyan] (press Enter to keep current value)\n"
+    )
 
     p.first_name = typer.prompt("First name", default=p.first_name or "")
     p.last_name = typer.prompt("Last name", default=p.last_name or "")
@@ -1031,12 +1162,16 @@ def _edit_profile(store):
     p.github_url = typer.prompt("GitHub URL", default=p.github_url or "")
     p.resume_path = typer.prompt("Resume file path", default=p.resume_path or "")
     while True:
-        exp = typer.prompt("Years of experience", default=str(p.years_of_experience or 0))
+        exp = typer.prompt(
+            "Years of experience", default=str(p.years_of_experience or 0)
+        )
         parsed_exp = _parse_years_of_experience(exp)
         if parsed_exp is not None:
             p.years_of_experience = parsed_exp
             break
-        console.print("[yellow]Couldn't read a number from that — enter digits, like 5.[/yellow]")
+        console.print(
+            "[yellow]Couldn't read a number from that — enter digits, like 5.[/yellow]"
+        )
     p.current_title = typer.prompt("Current job title", default=p.current_title or "")
 
     store.save(p)
@@ -1045,7 +1180,9 @@ def _edit_profile(store):
 @app.command()
 def templates(
     add: bool = typer.Option(False, "--add", "-a", help="Add a new template"),
-    question: Optional[str] = typer.Option(None, "--question", "-q", help="Question text"),
+    question: Optional[str] = typer.Option(
+        None, "--question", "-q", help="Question text"
+    ),
     answer: Optional[str] = typer.Option(None, "--answer", help="Answer text"),
 ):
     """Manage answer templates for common questions"""
@@ -1089,9 +1226,13 @@ def history(
 
 @app.command()
 def serve(
-    host: str = typer.Option("127.0.0.1", help="Bind address. Use a specific Tailscale IP for phone access."),
+    host: str = typer.Option(
+        "127.0.0.1", help="Bind address. Use a specific Tailscale IP for phone access."
+    ),
     port: Optional[int] = typer.Option(None, help="Port (default: 8767)"),
-    allow_lan: bool = typer.Option(False, "--allow-lan", help="Allow a non-loopback bind address."),
+    allow_lan: bool = typer.Option(
+        False, "--allow-lan", help="Allow a non-loopback bind address."
+    ),
 ):
     """Start the dashboard and print its private sign-in link.
 
@@ -1100,7 +1241,9 @@ def serve(
     from jobpilot.core.server import run_server
 
     if host not in ("127.0.0.1", "localhost", "::1") and not allow_lan:
-        console.print("[red]Remote access needs --allow-lan.[/red] Use --host with your specific Tailscale IP.")
+        console.print(
+            "[red]Remote access needs --allow-lan.[/red] Use --host with your specific Tailscale IP."
+        )
         raise typer.Exit(code=1)
     run_server(host=host, port=port)
 
@@ -1108,19 +1251,33 @@ def serve(
 @app.command()
 def hud(
     watch: bool = typer.Option(False, "--watch", "-w", help="Full-screen live HUD"),
-    interval: float = typer.Option(30.0, "--interval", help="Refresh seconds (--watch)"),
+    interval: float = typer.Option(
+        30.0, "--interval", help="Refresh seconds (--watch)"
+    ),
     gigs: int = typer.Option(30, "--gigs", "-g", help="Max contract gigs to list"),
     jobs: int = typer.Option(20, "--jobs", "-j", help="Max backup ATS jobs to list"),
     pipeline: int = typer.Option(12, "--pipeline", "-p", help="Max pipeline rows"),
-    min_gig_score: int = typer.Option(45, "--min-gig-score", help="Minimum gigs fit score"),
+    min_gig_score: int = typer.Option(
+        45, "--min-gig-score", help="Minimum gigs fit score"
+    ),
     contract_first: bool = typer.Option(True, "--contract-first/--all-gigs-types"),
     anti_schedule: bool = typer.Option(True, "--anti-schedule/--allow-schedule"),
     austin: bool = typer.Option(True, "--austin/--no-austin"),
-    fresh_gigs: bool = typer.Option(True, "--fresh/--all-gigs", help="Only unseen gigs vs entire scan"),
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show numbered URL index for every row"),
-    plain: bool = typer.Option(False, "--plain", help="Plain-language labels (command center / non-dev view)"),
-    export_txt: bool = typer.Option(False, "--export", help="Plain-text dump to stdout (all rows + URLs)"),
-    pick: bool = typer.Option(False, "--pick", help="fzf fuzzy-pick a gig or job and open its URL"),
+    fresh_gigs: bool = typer.Option(
+        True, "--fresh/--all-gigs", help="Only unseen gigs vs entire scan"
+    ),
+    verbose: bool = typer.Option(
+        False, "--verbose", "-v", help="Show numbered URL index for every row"
+    ),
+    plain: bool = typer.Option(
+        False, "--plain", help="Plain-language labels (command center / non-dev view)"
+    ),
+    export_txt: bool = typer.Option(
+        False, "--export", help="Plain-text dump to stdout (all rows + URLs)"
+    ),
+    pick: bool = typer.Option(
+        False, "--pick", help="fzf fuzzy-pick a gig or job and open its URL"
+    ),
 ):
     """Full-screen terminal HUD — gigs, jobs, pipeline, URLs, and next actions."""
     from jobpilot.ui.hud import export_hud_text, pick_hud, render_hud, watch_hud
@@ -1150,9 +1307,15 @@ def hud(
 
 @app.command()
 def dashboard(
-    save: Optional[Path] = typer.Option(None, "--save", help="Write the PNG here (in addition to showing it)"),
-    ascii_only: bool = typer.Option(False, "--ascii", help="Force the plain-text version"),
-    fetch: bool = typer.Option(False, "--fetch", help="Re-scrape sources for fresh data (slower)"),
+    save: Optional[Path] = typer.Option(
+        None, "--save", help="Write the PNG here (in addition to showing it)"
+    ),
+    ascii_only: bool = typer.Option(
+        False, "--ascii", help="Force the plain-text version"
+    ),
+    fetch: bool = typer.Option(
+        False, "--fetch", help="Re-scrape sources for fresh data (slower)"
+    ),
 ):
     """One-glance visual dashboard — renders as a real image inline in iTerm,
     plain text everywhere else."""
@@ -1178,13 +1341,17 @@ def dashboard(
         print_inline_image(png, name="jobpilot-dashboard.png", width="auto")
     elif not save:
         console.print(ascii_dashboard(data))
-        console.print("[dim]Tip: run this in iTerm2 (or pass --save) to see the graphical dashboard.[/dim]")
+        console.print(
+            "[dim]Tip: run this in iTerm2 (or pass --save) to see the graphical dashboard.[/dim]"
+        )
 
 
 @app.command("center-status")
 def center_status(
     watch: bool = typer.Option(False, "--watch", "-w", help="Live status dashboard"),
-    interval: float = typer.Option(30.0, "--interval", help="Refresh seconds (--watch)"),
+    interval: float = typer.Option(
+        30.0, "--interval", help="Refresh seconds (--watch)"
+    ),
 ):
     """Plain-language status board for the iTerm command center left pane."""
     from jobpilot.ui.center_panes import render_status_board, watch_status_board
@@ -1211,8 +1378,14 @@ def center_activity(
 
 @app.command()
 def iterm(
-    install: bool = typer.Option(False, "--install", help="Install iTerm profiles + shell hook (one-time)"),
-    new_window: bool = typer.Option(False, "--new", help="Force a fresh command center (closes old JobPilot windows)"),
+    install: bool = typer.Option(
+        False, "--install", help="Install iTerm profiles + shell hook (one-time)"
+    ),
+    new_window: bool = typer.Option(
+        False,
+        "--new",
+        help="Force a fresh command center (closes old JobPilot windows)",
+    ),
 ):
     """Open or focus the JobPilot iTerm command center (full-screen HUD)."""
     import subprocess
@@ -1233,12 +1406,20 @@ def iterm(
 
 @app.command()
 def radar(
-    austin: bool = typer.Option(True, "--austin/--no-austin", help="Filter jobs to Austin + remote US"),
-    contract_first: bool = typer.Option(True, "--contract-first/--all-gigs", help="Gigs: contract/1099/hourly first"),
-    anti_schedule: bool = typer.Option(True, "--anti-schedule/--allow-schedule", help="Drop 9-5 / core-hours gigs"),
+    austin: bool = typer.Option(
+        True, "--austin/--no-austin", help="Filter jobs to Austin + remote US"
+    ),
+    contract_first: bool = typer.Option(
+        True, "--contract-first/--all-gigs", help="Gigs: contract/1099/hourly first"
+    ),
+    anti_schedule: bool = typer.Option(
+        True, "--anti-schedule/--allow-schedule", help="Drop 9-5 / core-hours gigs"
+    ),
     gigs_top: int = typer.Option(8, "--gigs", help="Max contract gigs to show"),
     jobs_limit: int = typer.Option(8, "--jobs", help="Max backup ATS jobs to show"),
-    min_gig_score: int = typer.Option(45, "--min-gig-score", help="Minimum gigs fit score"),
+    min_gig_score: int = typer.Option(
+        45, "--min-gig-score", help="Minimum gigs fit score"
+    ),
     watch: bool = typer.Option(False, "--watch", "-w", help="Live refresh"),
     interval: float = typer.Option(30.0, "--interval", help="Watch refresh seconds"),
 ):
@@ -1262,14 +1443,31 @@ def radar(
 
 @app.command()
 def board(
-    fresh: bool = typer.Option(True, "--fresh/--all", help="Show only queued roles (default) or full queue"),
-    austin: bool = typer.Option(False, "--austin", "-a", help="Filter to Austin-area roles"),
-    autonomous: bool = typer.Option(False, "--autonomous", help="Hide senior-titled queued roles"),
-    location: str = typer.Option("", "--location", "-l", help="Substring filter on location field"),
-    status: str = typer.Option("queued", "--status", "-s", help="Status filter: queued, applied, rejected, all, …"),
+    fresh: bool = typer.Option(
+        True, "--fresh/--all", help="Show only queued roles (default) or full queue"
+    ),
+    austin: bool = typer.Option(
+        False, "--austin", "-a", help="Filter to Austin-area roles"
+    ),
+    autonomous: bool = typer.Option(
+        False, "--autonomous", help="Hide senior-titled queued roles"
+    ),
+    location: str = typer.Option(
+        "", "--location", "-l", help="Substring filter on location field"
+    ),
+    status: str = typer.Option(
+        "queued",
+        "--status",
+        "-s",
+        help="Status filter: queued, applied, rejected, all, …",
+    ),
     limit: int = typer.Option(20, "--limit", "-n", help="Max rows in the queue table"),
-    watch: bool = typer.Option(False, "--watch", "-w", help="Live-refresh the board every few seconds"),
-    interval: float = typer.Option(5.0, "--interval", help="Refresh interval (seconds) for --watch"),
+    watch: bool = typer.Option(
+        False, "--watch", "-w", help="Live-refresh the board every few seconds"
+    ),
+    interval: float = typer.Option(
+        5.0, "--interval", help="Refresh interval (seconds) for --watch"
+    ),
 ):
     """Visual terminal dashboard — queue, next-up, tracker, and service health."""
     from jobpilot.ui.terminal_board import BoardFilters, render_board, watch_board
@@ -1290,12 +1488,26 @@ def board(
 
 @app.command()
 def queue(
-    refresh: bool = typer.Option(False, "--refresh", "-r", help="Re-scan all portals and rebuild queue"),
+    refresh: bool = typer.Option(
+        False, "--refresh", "-r", help="Re-scan all portals and rebuild queue"
+    ),
     limit: int = typer.Option(50, "--limit", "-n", help="Max jobs to queue"),
-    open_dashboard: bool = typer.Option(True, "--open/--no-open", help="Open dashboard in browser after building"),
-    fresh: bool = typer.Option(False, "--fresh", help="Show only roles you haven't applied to / been rejected from (dedup vs applications.db)"),
-    as_json: bool = typer.Option(False, "--json", help="Emit the queue (filtered) as JSON to stdout. Suppresses dashboard + console table. For piping into other tools/agents."),
-    no_board: bool = typer.Option(False, "--no-board", help="Skip the terminal board after queue build/load"),
+    open_dashboard: bool = typer.Option(
+        True, "--open/--no-open", help="Open dashboard in browser after building"
+    ),
+    fresh: bool = typer.Option(
+        False,
+        "--fresh",
+        help="Show only roles you haven't applied to / been rejected from (dedup vs applications.db)",
+    ),
+    as_json: bool = typer.Option(
+        False,
+        "--json",
+        help="Emit the queue (filtered) as JSON to stdout. Suppresses dashboard + console table. For piping into other tools/agents.",
+    ),
+    no_board: bool = typer.Option(
+        False, "--no-board", help="Skip the terminal board after queue build/load"
+    ),
 ):
     """Scan ATS boards, score jobs, and open the apply dashboard."""
     from jobpilot.core.queue_builder import build_queue, load_queue, save_queue
@@ -1321,17 +1533,23 @@ def queue(
     if not refresh and (Path(__file__).parent / "data" / "queue.json").exists():
         jobs = load_queue()
         queued = [j for j in jobs if j.status == "queued"]
-        console.print(f"[cyan]Loaded existing queue: {len(queued)} jobs ready to apply[/cyan]")
+        console.print(
+            f"[cyan]Loaded existing queue: {len(queued)} jobs ready to apply[/cyan]"
+        )
         if not queued:
             console.print(f"[dim]Run with --refresh to re-scan portals[/dim]")
     else:
         console.print("[cyan]Scanning ATS boards (this takes ~30 seconds)...[/cyan]")
         jobs = build_queue(limit=limit)
         if not jobs:
-            console.print("[yellow]No jobs found. Check data/portals.json and your internet connection.[/yellow]")
+            console.print(
+                "[yellow]No jobs found. Check data/portals.json and your internet connection.[/yellow]"
+            )
             raise typer.Exit(1)
         save_queue(jobs)
-        console.print(f"[green]✓ Built queue: {len(jobs)} jobs across tech + field ops[/green]")
+        console.print(
+            f"[green]✓ Built queue: {len(jobs)} jobs across tech + field ops[/green]"
+        )
 
     if not no_board:
         render_board(
@@ -1344,7 +1562,9 @@ def queue(
 
     if open_dashboard and dashboard_path.exists():
         subprocess.run(["open", str(dashboard_path)], check=False)
-        console.print(f"[green]✓ Web dashboard opened — or run [cyan]jobpilot board --watch[/cyan] in another tab[/green]")
+        console.print(
+            f"[green]✓ Web dashboard opened — or run [cyan]jobpilot board --watch[/cyan] in another tab[/green]"
+        )
     elif not dashboard_path.exists():
         console.print(f"[yellow]Dashboard not found at {dashboard_path}[/yellow]")
 
@@ -1372,10 +1592,18 @@ async def _neutralize_staged_tab(port: int, url: Optional[str]) -> None:
 
 @app.command()
 def apply(
-    job_id: str = typer.Argument(..., help="Job ID from the queue (shown in dashboard or 'jobpilot queue')"),
+    job_id: str = typer.Argument(
+        ..., help="Job ID from the queue (shown in dashboard or 'jobpilot queue')"
+    ),
     port: int = typer.Option(9222, help="Chrome debugging port"),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be filled without filling"),
-    claim_approved: bool = typer.Option(False, "--claim-approved", help="Use only if you've already approved staging this Claude-ready target"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Show what would be filled without filling"
+    ),
+    claim_approved: bool = typer.Option(
+        False,
+        "--claim-approved",
+        help="Use only if you've already approved staging this Claude-ready target",
+    ),
 ):
     """Auto-fill a job application. Stops before submit — you approve."""
     from jobpilot.core.queue_builder import get_job, update_job_status
@@ -1383,25 +1611,33 @@ def apply(
 
     job = get_job(job_id)
     if not job:
-        console.print(f"[red]Job '{job_id}' not found in queue. Run 'jobpilot queue' first.[/red]")
+        console.print(
+            f"[red]Job '{job_id}' not found in queue. Run 'jobpilot queue' first.[/red]"
+        )
         raise typer.Exit(1)
 
     if job.status in {"applied", "submitted"}:
-        console.print(f"[yellow]Already applied to {job.title} @ {job.company}[/yellow]")
+        console.print(
+            f"[yellow]Already applied to {job.title} @ {job.company}[/yellow]"
+        )
         if not typer.confirm("Apply again anyway?"):
             raise typer.Exit(0)
 
-    console.print(Panel.fit(
-        f"[bold cyan]{job.title}[/bold cyan]\n"
-        f"[white]{job.company}[/white]  •  {job.location}\n"
-        f"[dim]{job.url}[/dim]\n"
-        f"[bold]Fit Score: {job.fit_score}/100[/bold]  •  Track: {job.track}",
-        border_style="cyan",
-        title="Applying to",
-    ))
+    console.print(
+        Panel.fit(
+            f"[bold cyan]{job.title}[/bold cyan]\n"
+            f"[white]{job.company}[/white]  •  {job.location}\n"
+            f"[dim]{job.url}[/dim]\n"
+            f"[bold]Fit Score: {job.fit_score}/100[/bold]  •  Track: {job.track}",
+            border_style="cyan",
+            title="Applying to",
+        )
+    )
 
     if dry_run:
-        console.print("[dim]Dry run — no form filling. Pass without --dry-run to apply.[/dim]")
+        console.print(
+            "[dim]Dry run — no form filling. Pass without --dry-run to apply.[/dim]"
+        )
         raise typer.Exit(0)
 
     _enforce_claim_lock(job, claim_approved=claim_approved)
@@ -1409,16 +1645,22 @@ def apply(
     profile = get_profile_store().load()
 
     console.print("[cyan]Starting LLM form filler...[/cyan]")
-    console.print("[dim]Chrome will navigate to the job page. Watch it fill the form.[/dim]")
-    console.print("[yellow]⚠  It will STOP before submitting. You approve in this terminal.[/yellow]\n")
+    console.print(
+        "[dim]Chrome will navigate to the job page. Watch it fill the form.[/dim]"
+    )
+    console.print(
+        "[yellow]⚠  It will STOP before submitting. You approve in this terminal.[/yellow]\n"
+    )
 
-    result = asyncio.run(fill_application(
-        job_url=job.url,
-        job_title=job.title,
-        company=job.company,
-        profile=profile,
-        cdp_port=port,
-    ))
+    result = asyncio.run(
+        fill_application(
+            job_url=job.url,
+            job_title=job.title,
+            company=job.company,
+            profile=profile,
+            cdp_port=port,
+        )
+    )
 
     if not result.success:
         console.print(f"[red]Form filler failed: {result.error}[/red]")
@@ -1431,7 +1673,9 @@ def apply(
     console.print("\n[bold yellow]Review the form in Chrome now.[/bold yellow]")
     console.print("Make any corrections in the browser, then come back here.\n")
 
-    confirmed = typer.confirm("Everything looks good? Submit the application?", default=False)
+    confirmed = typer.confirm(
+        "Everything looks good? Submit the application?", default=False
+    )
 
     if confirmed:
         console.print("[cyan]Go to Chrome and click the Submit button.[/cyan]")
@@ -1461,8 +1705,12 @@ def report(
 
 @app.command()
 def review(
-    threshold: float = typer.Option(0.8, "--threshold", "-t", help="Show templates with approval rate below this"),
-    fix: bool = typer.Option(False, "--fix", "-f", help="Interactive mode: edit or delete each template"),
+    threshold: float = typer.Option(
+        0.8, "--threshold", "-t", help="Show templates with approval rate below this"
+    ),
+    fix: bool = typer.Option(
+        False, "--fix", "-f", help="Interactive mode: edit or delete each template"
+    ),
 ):
     """Review templates with low approval rates"""
     from rich.table import Table
@@ -1474,18 +1722,23 @@ def review(
 
     # Filter to templates that have actions and are below threshold
     flagged = [
-        t for t in items
+        t
+        for t in items
         if t["approval_rate"] is not None and t["approval_rate"] < threshold
     ]
 
     if not flagged:
-        console.print(f"[green]✓ All templates are above {threshold:.0%} approval rate.[/green]")
+        console.print(
+            f"[green]✓ All templates are above {threshold:.0%} approval rate.[/green]"
+        )
         # Still show a summary table
         if items:
             console.print(f"[dim]{len(items)} templates total, all healthy.[/dim]")
         return
 
-    console.print(f"\n[bold yellow]⚠  {len(flagged)} template(s) below {threshold:.0%} approval rate[/bold yellow]\n")
+    console.print(
+        f"\n[bold yellow]⚠  {len(flagged)} template(s) below {threshold:.0%} approval rate[/bold yellow]\n"
+    )
 
     if not fix:
         # Display-only mode
@@ -1496,19 +1749,25 @@ def review(
         table.add_column("Used", justify="right", width=6)
 
         for t in flagged:
-            rate = f"{t['approval_rate']:.0%}" if t["approval_rate"] is not None else "—"
+            rate = (
+                f"{t['approval_rate']:.0%}" if t["approval_rate"] is not None else "—"
+            )
             q = t["question"][:42] + "..." if len(t["question"]) > 45 else t["question"]
             a = t["answer"][:27] + "..." if len(t["answer"]) > 30 else t["answer"]
             table.add_row(q, a, rate, str(t["total_actions"]))
 
         console.print(table)
-        console.print("\n[dim]Run with --fix to interactively edit or delete these.[/dim]")
+        console.print(
+            "\n[dim]Run with --fix to interactively edit or delete these.[/dim]"
+        )
         return
 
     # Interactive fix mode
     for i, t in enumerate(flagged, 1):
         rate = f"{t['approval_rate']:.0%}" if t["approval_rate"] is not None else "—"
-        console.print(f"\n[bold]({i}/{len(flagged)})[/bold]  Rate: [yellow]{rate}[/yellow]  Used: {t['total_actions']}x")
+        console.print(
+            f"\n[bold]({i}/{len(flagged)})[/bold]  Rate: [yellow]{rate}[/yellow]  Used: {t['total_actions']}x"
+        )
         console.print(f"  [cyan]Q:[/cyan] {t['question']}")
         console.print(f"  [white]A:[/white] {t['answer']}")
 
@@ -1532,7 +1791,9 @@ def review(
     console.print("\n[green]✓ Review complete[/green]")
 
 
-answer_app = typer.Typer(help="Manage paste-ready application answers (save / copy / list / show).")
+answer_app = typer.Typer(
+    help="Manage paste-ready application answers (save / copy / list / show)."
+)
 app.add_typer(answer_app, name="answer")
 
 # Gigs lane (former GigPilot). Not lazy: Typer's add_typer needs the actual
@@ -1550,6 +1811,7 @@ app.add_typer(
 def _answers_dir() -> Path:
     """Root for stored answers: projects/jobpilot/data/answers/."""
     from jobpilot.core.config import DATA_DIR
+
     p = DATA_DIR / "answers"
     p.mkdir(parents=True, exist_ok=True)
     return p
@@ -1558,6 +1820,7 @@ def _answers_dir() -> Path:
 def _slug(s: str) -> str:
     """Lowercase dash slug for answer filenames and fuzzy JD lookup."""
     import re as _re
+
     return _re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-") or "untitled"
 
 
@@ -1601,8 +1864,7 @@ def _resolve_answer_jd(company: str, jd: Optional[str]) -> tuple[str, str]:
 
     company_slug = _slug(company)
     candidates = [
-        path for path in jds_dir.glob("*.txt")
-        if company_slug in _slug(path.stem)
+        path for path in jds_dir.glob("*.txt") if company_slug in _slug(path.stem)
     ]
     if not candidates:
         return "", "no JD provided"
@@ -1631,9 +1893,13 @@ def _latest_draft_title_for_company(company: str) -> str:
 def answer_save(
     company: str = typer.Argument(..., help="Company slug (e.g. 'extend')"),
     question: str = typer.Argument(..., help="Question slug (e.g. 'q1-vetnav')"),
-    from_file: Optional[Path] = typer.Option(None, "--from-file", "-f", help="Source text file (overrides --text)"),
+    from_file: Optional[Path] = typer.Option(
+        None, "--from-file", "-f", help="Source text file (overrides --text)"
+    ),
     text: Optional[str] = typer.Option(None, "--text", "-t", help="Inline answer text"),
-    pbcopy: bool = typer.Option(True, "--pbcopy/--no-pbcopy", help="Also load to clipboard after saving"),
+    pbcopy: bool = typer.Option(
+        True, "--pbcopy/--no-pbcopy", help="Also load to clipboard after saving"
+    ),
 ):
     """Save a paste-ready answer to `data/answers/<company>/<question>.txt`.
 
@@ -1660,29 +1926,63 @@ def answer_save(
 
     issue = _verify_ascii(target)
     if issue:
-        console.print(f"[yellow]⚠ {target.name} contains {issue} — paste-quality risk; clean and re-save.[/yellow]")
+        console.print(
+            f"[yellow]⚠ {target.name} contains {issue} — paste-quality risk; clean and re-save.[/yellow]"
+        )
     chars = len(target.read_text())
     words = len(target.read_text().split())
-    console.print(f"[green]✓ Saved[/green] {target.relative_to(_answers_dir().parent.parent)} · {chars} chars · {words} words")
+    console.print(
+        f"[green]✓ Saved[/green] {target.relative_to(_answers_dir().parent.parent)} · {chars} chars · {words} words"
+    )
 
     if pbcopy:
         if _copy_file_to_clipboard(target):
-            console.print(f"[cyan]→ on clipboard. Cmd+V in the field, then Enter where you want paragraph breaks.[/cyan]")
+            console.print(
+                f"[cyan]→ on clipboard. Cmd+V in the field, then Enter where you want paragraph breaks.[/cyan]"
+            )
         else:
-            console.print("[yellow]pbcopy not found — clipboard skipped (non-macOS?).[/yellow]")
+            console.print(
+                "[yellow]pbcopy not found — clipboard skipped (non-macOS?).[/yellow]"
+            )
 
 
 @answer_app.command("draft")
 def answer_draft(
     company: str = typer.Argument(..., help="Company slug/name, e.g. titan-ai"),
     question: str = typer.Argument(..., help="Exact application question text"),
-    jd: Optional[str] = typer.Option(None, "--jd", help="JD text or path. If omitted, JobPilot uses latest data/jds match for company."),
-    title: str = typer.Option("", "--title", help="Target role title. Defaults to latest draft title when company matches."),
-    question_slug: Optional[str] = typer.Option(None, "--question-slug", help="Filename slug to save under data/answers/<company>/"),
-    max_words: int = typer.Option(160, "--max-words", min=40, max=350, help="Target word cap for narrative answers."),
-    save: bool = typer.Option(True, "--save/--no-save", help="Save to data/answers after drafting."),
-    pbcopy: bool = typer.Option(True, "--pbcopy/--no-pbcopy", help="Copy saved/drafted answer to clipboard."),
-    bro: bool = typer.Option(True, "--bro/--no-bro", help="Use the AI backend (local Bro or Gemini) when available; fallback stays account-grounded."),
+    jd: Optional[str] = typer.Option(
+        None,
+        "--jd",
+        help="JD text or path. If omitted, JobPilot uses latest data/jds match for company.",
+    ),
+    title: str = typer.Option(
+        "",
+        "--title",
+        help="Target role title. Defaults to latest draft title when company matches.",
+    ),
+    question_slug: Optional[str] = typer.Option(
+        None,
+        "--question-slug",
+        help="Filename slug to save under data/answers/<company>/",
+    ),
+    max_words: int = typer.Option(
+        160,
+        "--max-words",
+        min=40,
+        max=350,
+        help="Target word cap for narrative answers.",
+    ),
+    save: bool = typer.Option(
+        True, "--save/--no-save", help="Save to data/answers after drafting."
+    ),
+    pbcopy: bool = typer.Option(
+        True, "--pbcopy/--no-pbcopy", help="Copy saved/drafted answer to clipboard."
+    ),
+    bro: bool = typer.Option(
+        True,
+        "--bro/--no-bro",
+        help="Use the AI backend (local Bro or Gemini) when available; fallback stays account-grounded.",
+    ),
 ):
     """Draft a role-tailored answer from true accounts and save/copy it."""
     jd_text, jd_label = _resolve_answer_jd(company, jd)
@@ -1704,16 +2004,18 @@ def answer_draft(
         console.print(f"[dim]Add true accounts in {TRUE_ACCOUNTS_PATH}.[/dim]")
         raise typer.Exit(1)
 
-    console.print(Panel.fit(
-        f"[bold cyan]{company}[/bold cyan]\n"
-        f"[white]{role_title or 'Role title not set'}[/white]\n"
-        f"[dim]Question:[/dim] {draft.question}\n"
-        f"[dim]JD:[/dim] {jd_label}\n"
-        f"[dim]Source:[/dim] {draft.source} | accounts: {', '.join(draft.account_ids)}\n\n"
-        f"{draft.answer}",
-        title="Application Answer Draft",
-        border_style="cyan",
-    ))
+    console.print(
+        Panel.fit(
+            f"[bold cyan]{company}[/bold cyan]\n"
+            f"[white]{role_title or 'Role title not set'}[/white]\n"
+            f"[dim]Question:[/dim] {draft.question}\n"
+            f"[dim]JD:[/dim] {jd_label}\n"
+            f"[dim]Source:[/dim] {draft.source} | accounts: {', '.join(draft.account_ids)}\n\n"
+            f"{draft.answer}",
+            title="Application Answer Draft",
+            border_style="cyan",
+        )
+    )
 
     for warning in draft.warnings:
         console.print(f"[yellow]{warning}[/yellow]")
@@ -1726,7 +2028,9 @@ def answer_draft(
         issue = _verify_ascii(target)
         if issue:
             console.print(f"[yellow]Paste-quality warning: {issue}[/yellow]")
-        console.print(f"[green]Saved[/green] {target.relative_to(_answers_dir().parent.parent)}")
+        console.print(
+            f"[green]Saved[/green] {target.relative_to(_answers_dir().parent.parent)}"
+        )
 
     if pbcopy:
         if target:
@@ -1734,6 +2038,7 @@ def answer_draft(
         else:
             import shutil
             import subprocess as _sp
+
             copied = bool(shutil.which("pbcopy"))
             if copied:
                 _sp.run(["pbcopy"], input=draft.answer.encode("utf-8"), check=True)
@@ -1750,7 +2055,9 @@ def answer_accounts():
 
     accounts = ApplicationAnswerer(use_bro=False).load_accounts()
     if not accounts:
-        console.print(f"[yellow]No true accounts found at {TRUE_ACCOUNTS_PATH}[/yellow]")
+        console.print(
+            f"[yellow]No true accounts found at {TRUE_ACCOUNTS_PATH}[/yellow]"
+        )
         return
 
     table = Table(title="True Accounts", show_header=True, header_style="bold")
@@ -1775,8 +2082,11 @@ def answer_copy(
     if not target.exists():
         # Try fuzzy: list anything matching either token
         hits = list(_answers_dir().rglob("*.txt"))
-        suggestions = [str(h.relative_to(_answers_dir())) for h in hits
-                       if company.lower() in str(h).lower() or question.lower() in str(h).lower()]
+        suggestions = [
+            str(h.relative_to(_answers_dir()))
+            for h in hits
+            if company.lower() in str(h).lower() or question.lower() in str(h).lower()
+        ]
         console.print(f"[red]Not found:[/red] {target}")
         if suggestions:
             console.print("[dim]Did you mean one of:[/dim]")
@@ -1792,15 +2102,20 @@ def answer_copy(
     _copy_file_to_clipboard(target)
     chars = len(target.read_text())
     console.print(f"[cyan]✓ on clipboard[/cyan] · {target.name} · {chars} chars")
-    console.print(f"[dim]Cmd+V in the field, then Enter where you want paragraph breaks.[/dim]")
+    console.print(
+        f"[dim]Cmd+V in the field, then Enter where you want paragraph breaks.[/dim]"
+    )
 
 
 @answer_app.command("list")
 def answer_list(
-    company: Optional[str] = typer.Argument(None, help="Optional: filter to one company"),
+    company: Optional[str] = typer.Argument(
+        None, help="Optional: filter to one company"
+    ),
 ):
     """List saved answers, grouped by company."""
     from rich.table import Table
+
     root = _answers_dir()
     rows: list[tuple[str, str, int, str]] = []
     for path in sorted(root.rglob("*.txt")):
@@ -1810,7 +2125,10 @@ def answer_list(
         chars = len(path.read_text())
         ts = path.stat().st_mtime
         from datetime import datetime as _dt
-        rows.append((comp, path.stem, chars, _dt.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M")))
+
+        rows.append(
+            (comp, path.stem, chars, _dt.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M"))
+        )
 
     if not rows:
         console.print("[yellow]No saved answers yet.[/yellow]")
@@ -1824,7 +2142,9 @@ def answer_list(
     for r in rows:
         table.add_row(r[0], r[1], str(r[2]), r[3])
     console.print(table)
-    console.print(f"[dim]Copy any of these with: jobpilot answer copy <company> <question>[/dim]")
+    console.print(
+        f"[dim]Copy any of these with: jobpilot answer copy <company> <question>[/dim]"
+    )
 
 
 @answer_app.command("show")
@@ -1842,8 +2162,11 @@ def answer_show(
 
 @app.command()
 def psyche(
-    sample: bool = typer.Option(True, "--sample/--no-sample",
-                                help="Show the top scoring breakdown for current queue.json"),
+    sample: bool = typer.Option(
+        True,
+        "--sample/--no-sample",
+        help="Show the top scoring breakdown for current queue.json",
+    ),
 ):
     """View your work-style profile + how it's scoring real jobs.
 
@@ -1852,8 +2175,11 @@ def psyche(
     (15 of 100 total points) is driven entirely by what's in there.
     """
     from jobpilot.core.queue_builder import (
-        _load_psyche_profile, _score_psyche_fit, _load_portal_notes,
-        MOAT_COMPANY_TAGS, PSYCHE_PROFILE_PATH,
+        _load_psyche_profile,
+        _score_psyche_fit,
+        _load_portal_notes,
+        MOAT_COMPANY_TAGS,
+        PSYCHE_PROFILE_PATH,
     )
     from rich.panel import Panel
     from rich.table import Table
@@ -1862,11 +2188,12 @@ def psyche(
     user = profile.get("user", "(unset)")
     dims = profile.get("dimensions", {}) or {}
 
-    console.print(Panel.fit(
-        f"[bold]Psyche profile:[/bold] {user}\n"
-        f"[dim]{PSYCHE_PROFILE_PATH}[/dim]",
-        title="🧠 jobpilot psyche",
-    ))
+    console.print(
+        Panel.fit(
+            f"[bold]Psyche profile:[/bold] {user}\n[dim]{PSYCHE_PROFILE_PATH}[/dim]",
+            title="🧠 jobpilot psyche",
+        )
+    )
 
     if dims:
         dim_table = Table(title="Dimensions", show_header=True, header_style="bold")
@@ -1895,13 +2222,17 @@ def psyche(
 
     queue_path = Path(__file__).parent / "data" / "queue.json"
     if not queue_path.exists():
-        console.print("[yellow]No queue.json yet — run `jobpilot queue --refresh` first to see scoring in action.[/yellow]")
+        console.print(
+            "[yellow]No queue.json yet — run `jobpilot queue --refresh` first to see scoring in action.[/yellow]"
+        )
         return
 
     queue = json.loads(queue_path.read_text())
     queue.sort(key=lambda j: -j.get("psyche_score", 0))
     top = queue[:8]
-    sample_table = Table(title="Top 8 by Psycho-fit (live queue)", show_header=True, header_style="bold")
+    sample_table = Table(
+        title="Top 8 by Psycho-fit (live queue)", show_header=True, header_style="bold"
+    )
     sample_table.add_column("Psy", style="magenta", width=4)
     sample_table.add_column("Total", style="cyan", width=6)
     sample_table.add_column("Company", style="white", max_width=18)
@@ -1926,10 +2257,18 @@ def psyche(
 def log(
     company: str = typer.Argument(..., help="Company name (used for dedup)"),
     title: str = typer.Option("", "--title", "-t", help="Role title"),
-    url: str = typer.Option("", "--url", "-u", help="Apply URL (used as primary dedup key)"),
-    status: str = typer.Option("applied", "--status", "-s",
-                               help="applied | submitted | rejected | interview | abandoned"),
-    date: Optional[str] = typer.Option(None, "--date", "-d", help="ISO date (defaults to today)"),
+    url: str = typer.Option(
+        "", "--url", "-u", help="Apply URL (used as primary dedup key)"
+    ),
+    status: str = typer.Option(
+        "applied",
+        "--status",
+        "-s",
+        help="applied | submitted | rejected | interview | abandoned",
+    ),
+    date: Optional[str] = typer.Option(
+        None, "--date", "-d", help="ISO date (defaults to today)"
+    ),
 ):
     """Log an application to the tracker.
 
@@ -1965,7 +2304,9 @@ def reconcile():
     from jobpilot.core.queue_builder import reconcile_queue_with_tracker
 
     changed, total = reconcile_queue_with_tracker()
-    console.print(f"[green]✓ Reconciled queue[/green] — {changed} changed / {total} jobs")
+    console.print(
+        f"[green]✓ Reconciled queue[/green] — {changed} changed / {total} jobs"
+    )
 
 
 @app.command()

@@ -55,11 +55,12 @@ install_authentication(app)
 @app.exception_handler(QueueLoadError)
 async def queue_recovery_required(request, exc):
     return JSONResponse(
-        {"error": "Your saved queue needs recovery.",
-         "action": "Repair queue.json from a recovery copy on your Mac, then retry."},
+        {
+            "error": "Your saved queue needs recovery.",
+            "action": "Repair queue.json from a recovery copy on your Mac, then retry.",
+        },
         status_code=503,
     )
-
 
 
 class ApplicationLogPayload(BaseModel):
