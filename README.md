@@ -1,6 +1,20 @@
 # JobPilot
 
-**Built by a Navy vet who was in your shoes. Free. Open source. Yours.**
+**For careers that don't follow a straight line. Free. Open source. Yours.**
+
+## The JobPilot app — macOS preview
+
+A local app for the repetitive parts of looking for work: import your resume,
+search company hiring boards, review matching terms and requirements, prepare
+an editable application starter, and track your applications. Save common
+details once, then reuse them through quick copy or an extension-free fill
+bookmark. No AI account is required.
+
+The app opens in your ordinary browser. Your profile and history stay in a
+separate local workspace. Its JSON API and exports let assistants use the same
+data and operations. See [the product guide](docs/PRODUCT.md) for launch,
+distribution, integration, and supported-site limits. The legacy command-line
+tools below remain available for advanced use.
 
 ---
 
@@ -145,7 +159,7 @@ JobPilot also has a **gigs lane** — a second track for freelance and contract 
 
 ## Privacy
 
-Everything stays on your computer. Your profile, your resume, your application history — none of it is uploaded anywhere by JobPilot. The only network calls are to the AI API you configure (if you use the resume feature) and to the company hiring portals you scan.
+The new product preview stores your profile, resume and application history on your computer and searches public boards without sending your profile. In the advanced CLI below, optional AI resume features send relevant source material to the AI provider you configure; browser application tools interact with the hiring sites you choose. Review those settings before using them.
 
 ---
 
