@@ -425,3 +425,42 @@ def test_skill_bonus_is_capped_so_ad_keyword_spam_cannot_saturate() -> None:
 
     # Title is non-engineering → must hit the title cap regardless of body
     assert scored.fit_score <= 45
+
+
+def test_relocation_offer_adds_bonus_and_reason() -> None:
+    """An employer-offered relocation package boosts the gig and names itself."""
+    base = Gig(
+        id="reloc-base",
+        source="hn",
+        title="AI Engineer",
+        url="https://example.com/a",
+        description="Build agent tooling with Python and LLMs.",
+    )
+    offered = Gig(
+        id="reloc-offered",
+        source="hn",
+        title="AI Engineer",
+        url="https://example.com/b",
+        description="Build agent tooling with Python and LLMs. Relocation package available.",
+    )
+
+    base_score = score_gig(base).fit_score
+    scored = score_gig(offered)
+
+    assert scored.fit_score == min(100, base_score + 10)
+    assert any("relocation offered" in r for r in scored.fit_reasons)
+
+
+def test_relocation_screening_question_scores_nothing() -> None:
+    """'Do you require relocation assistance?' is an ask, not an offer."""
+    gig = Gig(
+        id="reloc-ask",
+        source="hn",
+        title="AI Engineer",
+        url="https://example.com/c",
+        description="Build agent tooling. Do you require relocation assistance?",
+    )
+
+    scored = score_gig(gig)
+
+    assert not any("relocation offered" in r for r in scored.fit_reasons)
