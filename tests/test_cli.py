@@ -35,7 +35,9 @@ def test_doctor_reports_ready_stack():
                 "ollama_models": ["mistral"],
             },
         ),
-        patch("jobpilot.cli.connect_to_chrome", new=AsyncMock(return_value=fake_bridge)),
+        patch(
+            "jobpilot.cli.connect_to_chrome", new=AsyncMock(return_value=fake_bridge)
+        ),
     ):
         result = runner.invoke(app, ["doctor"])
 
@@ -110,14 +112,20 @@ def test_board_command_renders_dashboard():
 
 def test_apply_claim_lock_blocks_non_ready_target(tmp_path: Path):
     claim_file = tmp_path / "claude-vetted-targets.json"
-    claim_file.write_text(json.dumps({
-        "targets": [{
-            "company": "Huntress",
-            "title": "Forward Deployed Engineer",
-            "decision": "keep",
-            "materials_status": "claude-preparing",
-        }]
-    }))
+    claim_file.write_text(
+        json.dumps(
+            {
+                "targets": [
+                    {
+                        "company": "Huntress",
+                        "title": "Forward Deployed Engineer",
+                        "decision": "keep",
+                        "materials_status": "claude-preparing",
+                    }
+                ]
+            }
+        )
+    )
     job = SimpleNamespace(
         id="abc123",
         company="Huntress",

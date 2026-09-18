@@ -48,7 +48,9 @@ def _matches(candidate: str, expected: str) -> bool:
 
 
 def _session_value(token: str) -> str:
-    return hmac.new(token.encode(), b"jobpilot-browser-session", hashlib.sha256).hexdigest()
+    return hmac.new(
+        token.encode(), b"jobpilot-browser-session", hashlib.sha256
+    ).hexdigest()
 
 
 def _error(status: int, message: str, action: str) -> JSONResponse:
@@ -70,19 +72,37 @@ def install_authentication(app: FastAPI) -> None:
             authorized = _matches(request.cookies.get(COOKIE_NAME, ""), session)
 
         if not authorized:
-            response = _error(401, "Sign in to open JobPilot.",
-                              "Open the private access link printed by the server on your Mac.")
+            response = _error(
+                401,
+                "Sign in to open JobPilot.",
+                "Open the private access link printed by the server on your Mac.",
+            )
         elif bootstrap is not None:
             if request.method != "GET" or request.url.path not in ("/", "/install"):
-                response = _error(403, "This access link cannot be used here.",
-                                  "Open the dashboard access link first.")
+                response = _error(
+                    403,
+                    "This access link cannot be used here.",
+                    "Open the dashboard access link first.",
+                )
             else:
                 response = RedirectResponse(request.url.path, status_code=303)
-                response.set_cookie(COOKIE_NAME, session, httponly=True,
-                                    secure=request.url.scheme == "https", samesite="strict")
-        elif explicit is None and request.url.path.startswith("/api/") and request.headers.get("x-jobpilot-request") != "1":
-            response = _error(403, "This request could not be verified.",
-                              "Reload the dashboard and try again.")
+                response.set_cookie(
+                    COOKIE_NAME,
+                    session,
+                    httponly=True,
+                    secure=request.url.scheme == "https",
+                    samesite="strict",
+                )
+        elif (
+            explicit is None
+            and request.url.path.startswith("/api/")
+            and request.headers.get("x-jobpilot-request") != "1"
+        ):
+            response = _error(
+                403,
+                "This request could not be verified.",
+                "Reload the dashboard and try again.",
+            )
         else:
             response = await call_next(request)
         response.headers["Cache-Control"] = "no-store"

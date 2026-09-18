@@ -2,8 +2,7 @@
 Tests for core/bro_client.py — HTTP client with mocked requests.
 """
 
-import time
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
@@ -22,6 +21,7 @@ def _reset_health_cache():
 # ---------------------------------------------------------------------------
 # Health / connectivity
 # ---------------------------------------------------------------------------
+
 
 class TestGetHealth:
     @patch("jobpilot.core.bro_client.requests.get")
@@ -78,6 +78,7 @@ class TestIsWhisperReady:
 # Chat
 # ---------------------------------------------------------------------------
 
+
 class TestChat:
     @patch("jobpilot.core.bro_client.requests.post")
     def test_returns_reply_on_200(self, mock_post):
@@ -125,6 +126,7 @@ class TestChat:
 # Speak
 # ---------------------------------------------------------------------------
 
+
 class TestSpeak:
     @patch("jobpilot.core.bro_client.requests.post")
     def test_returns_true_on_200(self, mock_post):
@@ -144,6 +146,7 @@ class TestSpeak:
 # RAG
 # ---------------------------------------------------------------------------
 
+
 class TestQueryRag:
     @patch("jobpilot.core.bro_client.requests.post")
     def test_returns_context_on_200(self, mock_post):
@@ -162,6 +165,7 @@ class TestQueryRag:
 # ---------------------------------------------------------------------------
 # Retry decorator
 # ---------------------------------------------------------------------------
+
 
 class TestRetryDecorator:
     def test_retries_on_connection_error(self):

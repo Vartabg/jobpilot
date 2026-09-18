@@ -4,6 +4,7 @@ Covers: scrapers propagating instead of swallowing, collect_all recording
 ok=False, failure-push composition, heartbeat staleness, and the ntfy
 Latin-1 header sanitization.
 """
+
 from __future__ import annotations
 
 import json
@@ -19,7 +20,10 @@ from jobpilot.gigs.core.models import Gig
 from jobpilot.gigs.core.scrapers.hackernews import scrape_hn_hiring
 from jobpilot.gigs.core.scrapers.himalayas import scrape_himalayas
 from jobpilot.gigs.core.scrapers.remoteok import scrape_remoteok
-from jobpilot.gigs.core.scrapers.weworkremotely import WWR_CATEGORIES, scrape_weworkremotely
+from jobpilot.gigs.core.scrapers.weworkremotely import (
+    WWR_CATEGORIES,
+    scrape_weworkremotely,
+)
 
 runner = CliRunner()
 
@@ -67,7 +71,8 @@ def test_collect_all_records_failure_and_continues(tmp_path, monkeypatch) -> Non
         raise RuntimeError("DNS exploded")
 
     monkeypatch.setattr(
-        collect, "scraper_registry",
+        collect,
+        "scraper_registry",
         lambda: [("Boom", explode), ("Fine", lambda: [_gig()])],
     )
 
@@ -114,7 +119,9 @@ def test_hn_raises_when_thread_missing(monkeypatch) -> None:
 
 
 def test_wwr_raises_when_all_categories_fail(monkeypatch) -> None:
-    monkeypatch.setattr("jobpilot.gigs.core.scrapers.weworkremotely.requests.get", _boom)
+    monkeypatch.setattr(
+        "jobpilot.gigs.core.scrapers.weworkremotely.requests.get", _boom
+    )
     with pytest.raises(RuntimeError, match="all WeWorkRemotely categories failed"):
         scrape_weworkremotely()
 
@@ -128,7 +135,9 @@ def test_wwr_tolerates_partial_category_failure(monkeypatch) -> None:
             return _FakeResponse(text=empty_rss)
         raise requests.exceptions.ConnectionError("category down")
 
-    monkeypatch.setattr("jobpilot.gigs.core.scrapers.weworkremotely.requests.get", fake_get)
+    monkeypatch.setattr(
+        "jobpilot.gigs.core.scrapers.weworkremotely.requests.get", fake_get
+    )
     assert scrape_weworkremotely() == []  # degraded, but not a failure
 
 
@@ -151,10 +160,13 @@ def test_push_failure_posts_title_priority_and_body(monkeypatch) -> None:
     monkeypatch.setattr(dispatcher.requests, "post", fake_post)
     monkeypatch.delenv("NTFY_TOPIC", raising=False)
 
-    assert dispatcher.push_failure(
-        "GigPilot digest FAILED: RuntimeError: boom — détails",
-        topic="test-topic",
-    ) is True
+    assert (
+        dispatcher.push_failure(
+            "GigPilot digest FAILED: RuntimeError: boom — détails",
+            topic="test-topic",
+        )
+        is True
+    )
     assert calls["url"].endswith("/test-topic")
     assert "boom" in calls["data"].decode("utf-8")
     assert calls["headers"]["Priority"] == "high"
@@ -171,7 +183,9 @@ def test_push_failure_never_raises(monkeypatch) -> None:
 def test_digest_failure_records_heartbeat_and_pushes(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(run_state, "LAST_RUN_PATH", tmp_path / "last_run.json")
     pushes: list[str] = []
-    monkeypatch.setattr(cli, "push_failure", lambda msg, **kw: pushes.append(msg) or True)
+    monkeypatch.setattr(
+        cli, "push_failure", lambda msg, **kw: pushes.append(msg) or True
+    )
 
     def explode(**kwargs) -> None:
         raise RuntimeError("scrape exploded")
@@ -191,7 +205,9 @@ def test_digest_failure_records_heartbeat_and_pushes(tmp_path, monkeypatch) -> N
 def test_notify_failure_subcommand_pushes(monkeypatch) -> None:
     pushes: list[tuple] = []
     monkeypatch.setattr(
-        cli, "push_failure", lambda msg, **kw: pushes.append((msg, kw)) or True,
+        cli,
+        "push_failure",
+        lambda msg, **kw: pushes.append((msg, kw)) or True,
     )
     result = runner.invoke(cli.app, ["notify-failure", "digest exploded (exit 1)"])
     assert result.exit_code == 0
@@ -207,7 +223,8 @@ def test_warning_line_empty_when_healthy() -> None:
 
 def test_warning_line_mentions_failed_and_stale() -> None:
     line = source_health.warning_line(
-        stale=["Himalayas"], failed=[("RemoteOK", "503 Server Error")],
+        stale=["Himalayas"],
+        failed=[("RemoteOK", "503 Server Error")],
     )
     assert "failed: RemoteOK" in line
     assert "Himalayas" in line
@@ -216,7 +233,8 @@ def test_warning_line_mentions_failed_and_stale() -> None:
 def test_write_markdown_header_carries_source_warning(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(dispatcher, "ICLOUD_DIR", tmp_path)
     path = dispatcher.write_markdown(
-        [], source_warning="Source trouble — failed: RemoteOK",
+        [],
+        source_warning="Source trouble — failed: RemoteOK",
     )
     head = "\n".join(path.read_text().splitlines()[:5])
     assert "failed: RemoteOK" in head
@@ -231,7 +249,8 @@ def test_push_ntfy_body_carries_source_warning(monkeypatch) -> None:
 
     monkeypatch.setattr(dispatcher.requests, "post", fake_post)
     pushed = dispatcher.push_ntfy(
-        [_gig()], topic="test-topic",
+        [_gig()],
+        topic="test-topic",
         source_warning="Source trouble — failed: RemoteOK",
     )
     assert pushed is True
@@ -263,7 +282,9 @@ def test_health_heartbeat_stale_exits_nonzero_and_pushes(tmp_path, monkeypatch) 
     monkeypatch.setattr(run_state, "LAST_RUN_PATH", path)
     pushes: list[tuple] = []
     monkeypatch.setattr(
-        cli, "push_failure", lambda msg, **kw: pushes.append((msg, kw)) or True,
+        cli,
+        "push_failure",
+        lambda msg, **kw: pushes.append((msg, kw)) or True,
     )
 
     result = runner.invoke(cli.app, ["health", "--heartbeat"])
@@ -284,7 +305,9 @@ def test_health_heartbeat_fresh_exits_zero(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(run_state, "LAST_RUN_PATH", tmp_path / "last_run.json")
     run_state.record_digest(ok=True, ranked_new=2, pushed=True)
     pushes: list[str] = []
-    monkeypatch.setattr(cli, "push_failure", lambda msg, **kw: pushes.append(msg) or True)
+    monkeypatch.setattr(
+        cli, "push_failure", lambda msg, **kw: pushes.append(msg) or True
+    )
 
     result = runner.invoke(cli.app, ["health", "--heartbeat"])
 

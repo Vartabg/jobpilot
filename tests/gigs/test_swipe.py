@@ -9,18 +9,39 @@ from jobpilot.gigs.core.models import Gig
 
 
 def _gig(**kw):
-    base = dict(id="hn-1", source="hn", title="Senior AI Engineer", company="Acme",
-                description="rag agentic python", url="https://post.test/1",
-                apply_url="mailto:jobs@acme.test", fit_score=95, location="Remote",
-                salary_min=160000, salary_max=200000)
+    base = dict(
+        id="hn-1",
+        source="hn",
+        title="Senior AI Engineer",
+        company="Acme",
+        description="rag agentic python",
+        url="https://post.test/1",
+        apply_url="mailto:jobs@acme.test",
+        fit_score=95,
+        location="Remote",
+        salary_min=160000,
+        salary_max=200000,
+    )
     base.update(kw)
     return Gig(**base)
 
 
 def test_card_has_everything_the_phone_needs():
     c = swipe.card(_gig())
-    for key in ("id", "company", "role", "score", "pay", "location",
-                "offer", "subject", "draft", "apply_target", "is_mailto", "crib"):
+    for key in (
+        "id",
+        "company",
+        "role",
+        "score",
+        "pay",
+        "location",
+        "offer",
+        "subject",
+        "draft",
+        "apply_target",
+        "is_mailto",
+        "crib",
+    ):
         assert key in c
     assert c["is_mailto"] is True
     assert c["apply_target"].startswith("mailto:jobs@acme.test?subject=")
@@ -47,13 +68,19 @@ def test_card_non_mailto_uses_apply_url():
 @pytest.fixture
 def client(monkeypatch, tmp_path):
     # No network: stub the scan + the pipeline-writing record/undo.
-    monkeypatch.setattr(swipe, "build_queue", lambda **k: [_gig(), _gig(id="hn-2", company="Globex")])
+    monkeypatch.setattr(
+        swipe, "build_queue", lambda **k: [_gig(), _gig(id="hn-2", company="Globex")]
+    )
     recorded, undone = [], []
-    monkeypatch.setattr(swipe, "record_decision",
-                        lambda gig, action, reason="": recorded.append((gig.id, action)) or "sent")
+    monkeypatch.setattr(
+        swipe,
+        "record_decision",
+        lambda gig, action, reason="": recorded.append((gig.id, action)) or "sent",
+    )
     monkeypatch.setattr(swipe, "undo_decision", lambda gig: undone.append(gig.id))
     server._GIGS.clear()
     from jobpilot.core import config
+
     monkeypatch.setattr(config, "SERVER_AUTH_TOKEN", "test-only-swiper")
     c = TestClient(server.app, headers={"X-JobPilot-Token": "test-only-swiper"})
     c._recorded, c._undone = recorded, undone
@@ -113,16 +140,21 @@ def test_index_serves_the_mobile_page(client):
 
 # --- decision persistence (the showstopper: status must reach pipeline.md) ---
 
+
 def _seed_pipeline_with_new(gig_id: str):
     from jobpilot.gigs.core import pipeline
     from jobpilot.gigs.core.pipeline import Row
+
     pipeline.PIPELINE_PATH.parent.mkdir(parents=True, exist_ok=True)
     pipeline.PIPELINE_PATH.unlink(missing_ok=True)
-    pipeline.write([Row(status="new", company="Acme", role="Senior AI Engineer", gig_id=gig_id)])
+    pipeline.write(
+        [Row(status="new", company="Acme", role="Senior AI Engineer", gig_id=gig_id)]
+    )
 
 
 def test_apply_swipe_persists_sent_to_pipeline():
     from jobpilot.gigs.core import pipeline, swipe
+
     _seed_pipeline_with_new("sw-apply")
     assert swipe.record_decision(_gig(id="sw-apply"), "apply") == "sent"
     rows = {r.gig_id: r for r in pipeline.parse()}
@@ -131,6 +163,7 @@ def test_apply_swipe_persists_sent_to_pipeline():
 
 def test_pass_swipe_persists_passed_with_reason():
     from jobpilot.gigs.core import pipeline, swipe
+
     _seed_pipeline_with_new("sw-pass")
     assert swipe.record_decision(_gig(id="sw-pass"), "pass", "low-pay") == "passed"
     rows = {r.gig_id: r for r in pipeline.parse()}
@@ -140,9 +173,13 @@ def test_pass_swipe_persists_passed_with_reason():
 
 def test_refused_write_raises_and_does_not_mark_seen(monkeypatch):
     from jobpilot.gigs.core import pipeline, swipe
+
     _seed_pipeline_with_new("sw-refused")
-    monkeypatch.setattr(pipeline, "write",
-                        lambda rows, **k: pipeline.WriteResult(pipeline.PIPELINE_PATH, refused=True))
+    monkeypatch.setattr(
+        pipeline,
+        "write",
+        lambda rows, **k: pipeline.WriteResult(pipeline.PIPELINE_PATH, refused=True),
+    )
     seen: list[str] = []
     monkeypatch.setattr(swipe, "mark_seen", lambda ids: seen.extend(ids))
     with pytest.raises(RuntimeError):

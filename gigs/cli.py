@@ -16,9 +16,13 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from jobpilot.gigs.core.collect import collect_all, include_upwork_exports
-from jobpilot.gigs.core.dedupe import dedupe_cross_source, dedupe_cross_source_with_groups
 from jobpilot.gigs.core import feedback, pipeline, run_state, source_health
+from jobpilot.gigs.core.away import sync_reminders_from_pipeline
+from jobpilot.gigs.core.collect import collect_all, include_upwork_exports
+from jobpilot.gigs.core.dedupe import (
+    dedupe_cross_source,
+    dedupe_cross_source_with_groups,
+)
 from jobpilot.gigs.core.dispatcher import dispatch, push_failure
 from jobpilot.gigs.core.models import Gig
 from jobpilot.gigs.core.pipeline_migrate import migrate_applied_into_pipeline
@@ -26,7 +30,6 @@ from jobpilot.gigs.core.preferences import write_default_if_missing as _ensure_p
 from jobpilot.gigs.core.scorer import filter_and_rank
 from jobpilot.gigs.core.scrapers.weworkremotely import enrich_apply_urls as enrich_wwr
 from jobpilot.gigs.core.store import filter_new, mark_seen, seen_count
-from jobpilot.gigs.core.away import sync_reminders_from_pipeline
 
 app = typer.Typer(help="Daily tech-gig digest")
 console = Console()
@@ -64,9 +67,17 @@ def _collect_with_status() -> list[Gig]:
 def scan(
     min_score: int = typer.Option(55, "--min-score", help="Minimum fit score to show"),
     top_n: int = typer.Option(15, "--top", help="How many top gigs to show"),
-    all: bool = typer.Option(False, "--all", help="Show all gigs regardless of 'seen' state"),
-    contract_first: bool = typer.Option(False, "--contract-first", help="Prefer contract/1099/hourly; drop explicit W-2-only"),
-    anti_schedule: bool = typer.Option(False, "--anti-schedule", help="Drop postings with 9-5 / core-hours language"),
+    all: bool = typer.Option(
+        False, "--all", help="Show all gigs regardless of 'seen' state"
+    ),
+    contract_first: bool = typer.Option(
+        False,
+        "--contract-first",
+        help="Prefer contract/1099/hourly; drop explicit W-2-only",
+    ),
+    anti_schedule: bool = typer.Option(
+        False, "--anti-schedule", help="Drop postings with 9-5 / core-hours language"
+    ),
 ):
     """Scan all sources and show the top gigs. Doesn't send anything."""
     all_gigs = _collect_with_status()
@@ -95,10 +106,14 @@ def scan(
     if anti_schedule:
         filters.append("anti-9-5")
     filter_note = f" ({', '.join(filters)})" if filters else ""
-    console.print(f"\n[bold]Top {len(ranked)} gigs (min score {min_score}){filter_note}:[/bold]\n")
+    console.print(
+        f"\n[bold]Top {len(ranked)} gigs (min score {min_score}){filter_note}:[/bold]\n"
+    )
 
     if not ranked:
-        console.print("[yellow]Nothing met the bar. Try --min-score 40 or --all.[/yellow]")
+        console.print(
+            "[yellow]Nothing met the bar. Try --min-score 40 or --all.[/yellow]"
+        )
         return
 
     t = Table(show_lines=False)
@@ -110,7 +125,7 @@ def scan(
     for g in ranked:
         pay = ""
         if g.salary_max:
-            pay = f"${g.salary_min/1000:.0f}-${g.salary_max/1000:.0f}K"
+            pay = f"${g.salary_min / 1000:.0f}-${g.salary_max / 1000:.0f}K"
         elif g.pay_hourly_est:
             pay = f"${g.pay_hourly_est:.0f}/hr"
         t.add_row(str(g.fit_score), g.company or "-", g.title, pay or "?", g.source)
@@ -142,12 +157,22 @@ def criteria():
     console.print("=== Pipeline performance ===")
     console.print(f"Total rows: {len(rows)}")
     for status in (
-        "new", "saved", "drafted", "sent", "replied", "interview", "hired",
-        "passed", "archived",
+        "new",
+        "saved",
+        "drafted",
+        "sent",
+        "replied",
+        "interview",
+        "hired",
+        "passed",
+        "archived",
     ):
         if status in by_status:
             console.print(f"  {status:>10}: {by_status[status]}")
-    acted = sum(by_status.get(s, 0) for s in ("saved", "drafted", "sent", "replied", "interview", "hired", "passed"))
+    acted = sum(
+        by_status.get(s, 0)
+        for s in ("saved", "drafted", "sent", "replied", "interview", "hired", "passed")
+    )
     console.print(f"  {'acted':>10}: {acted}  ·  still-new: {by_status.get('new', 0)}")
     console.print("")
     console.print(run_state.format_summary())
@@ -156,7 +181,8 @@ def criteria():
 @app.command()
 def hygiene(
     dry_run: bool = typer.Option(
-        False, "--dry-run",
+        False,
+        "--dry-run",
         help="Show what would be archived without writing",
     ),
 ):
@@ -167,7 +193,6 @@ def hygiene(
     """
     if dry_run:
         from jobpilot.gigs.core import store
-        from datetime import datetime
 
         rows = pipeline.parse()
         new_ids = [r.gig_id for r in rows if r.status == "new" and r.gig_id]
@@ -175,16 +200,20 @@ def hygiene(
         days = pipeline.archive_after_days()
         cap = pipeline.max_live_new()
         keep, stale_age = pipeline.split_archivable(
-            rows, first_seen, after_days=days,
+            rows,
+            first_seen,
+            after_days=days,
         )
         keep2, stale_cap = pipeline.split_over_cap(keep, first_seen, max_new=cap)
         console.print(f"Would archive age: {len(stale_age)} (>{days}d)")
         console.print(f"Would archive cap: {len(stale_cap)} (over max_live_new={cap})")
-        console.print(f"Would keep total rows: {len(keep2)} (new={sum(1 for r in keep2 if r.status=='new')})")
+        console.print(
+            f"Would keep total rows: {len(keep2)} (new={sum(1 for r in keep2 if r.status == 'new')})"
+        )
         for r in (stale_age + stale_cap)[:15]:
             console.print(f"  · [{r.score}] {r.company} — {r.role[:50]}")
         if len(stale_age) + len(stale_cap) > 15:
-            console.print(f"  … +{len(stale_age)+len(stale_cap)-15} more")
+            console.print(f"  … +{len(stale_age) + len(stale_cap) - 15} more")
         return
 
     result = pipeline.archive_stale_new()
@@ -203,18 +232,25 @@ def hygiene(
 
 @app.command(name="now")
 def now(
-    min_score: int | None = typer.Option(None, "--min-score", help="Override preferences.search.min_score"),
-    top_n: int | None = typer.Option(None, "--top", help="Override preferences.search.top_n"),
+    min_score: int | None = typer.Option(
+        None, "--min-score", help="Override preferences.search.min_score"
+    ),
+    top_n: int | None = typer.Option(
+        None, "--top", help="Override preferences.search.top_n"
+    ),
     push: bool = typer.Option(
-        False, "--push",
+        False,
+        "--push",
         help="Also push a phone notification (off by default — you pull when ready)",
     ),
     contract_first: bool | None = typer.Option(
-        None, "--contract-first/--no-contract-first",
+        None,
+        "--contract-first/--no-contract-first",
         help="Override preferences.search.contract_first",
     ),
     anti_schedule: bool | None = typer.Option(
-        None, "--anti-schedule/--no-anti-schedule",
+        None,
+        "--anti-schedule/--no-anti-schedule",
         help="Override preferences.search.drop_rigid_schedule",
     ),
 ):
@@ -228,8 +264,16 @@ def now(
     cfg = _search_defaults()
     ms = min_score if min_score is not None else int(cfg.get("min_score", 60))
     tn = top_n if top_n is not None else int(cfg.get("top_n", 12))
-    cf = contract_first if contract_first is not None else bool(cfg.get("contract_first", False))
-    ar = anti_schedule if anti_schedule is not None else bool(cfg.get("drop_rigid_schedule", True))
+    cf = (
+        contract_first
+        if contract_first is not None
+        else bool(cfg.get("contract_first", False))
+    )
+    ar = (
+        anti_schedule
+        if anti_schedule is not None
+        else bool(cfg.get("drop_rigid_schedule", True))
+    )
 
     console.print(prefs.format_criteria_report())
     console.print("")
@@ -261,10 +305,19 @@ def now(
 def digest(
     min_score: int | None = typer.Option(None, "--min-score"),
     top_n: int | None = typer.Option(None, "--top"),
-    contract_first: bool | None = typer.Option(None, "--contract-first/--no-contract-first", help="Prefer contract/1099/hourly postings"),
-    anti_schedule: bool | None = typer.Option(None, "--anti-schedule/--no-anti-schedule", help="Drop rigid 9-5 / core-hours postings"),
+    contract_first: bool | None = typer.Option(
+        None,
+        "--contract-first/--no-contract-first",
+        help="Prefer contract/1099/hourly postings",
+    ),
+    anti_schedule: bool | None = typer.Option(
+        None,
+        "--anti-schedule/--no-anti-schedule",
+        help="Drop rigid 9-5 / core-hours postings",
+    ),
     push: bool = typer.Option(
-        True, "--push/--no-push",
+        True,
+        "--push/--no-push",
         help="Phone push (default on for legacy digest; use `gigs now` for on-demand)",
     ),
 ):
@@ -276,8 +329,16 @@ def digest(
     cfg = _search_defaults()
     ms = min_score if min_score is not None else int(cfg.get("min_score", 60))
     tn = top_n if top_n is not None else int(cfg.get("top_n", 12))
-    cf = contract_first if contract_first is not None else bool(cfg.get("contract_first", False))
-    ar = anti_schedule if anti_schedule is not None else bool(cfg.get("drop_rigid_schedule", True))
+    cf = (
+        contract_first
+        if contract_first is not None
+        else bool(cfg.get("contract_first", False))
+    )
+    ar = (
+        anti_schedule
+        if anti_schedule is not None
+        else bool(cfg.get("drop_rigid_schedule", True))
+    )
     try:
         _run_digest(
             min_score=ms,
@@ -316,7 +377,8 @@ def _run_digest(
     # Stamp Saved / Last touched on rows whose status the user edited since
     # the previous run (diffed against the end-of-run status snapshot).
     existing_pipeline = pipeline.stamp_status_changes(
-        pipeline.load_status_snapshot(), existing_pipeline,
+        pipeline.load_status_snapshot(),
+        existing_pipeline,
     )
     decided_ids = pipeline.excluded_ids(existing_pipeline)
 
@@ -419,6 +481,7 @@ def _run_digest(
         # when the user opens iCloud after a dry pull.
         if not push:
             from jobpilot.gigs.core.crib import write_crib_sheet
+
             write_crib_sheet([])
         console.print("[yellow]No new gigs this pull. Pipeline refreshed.[/yellow]")
         run_state.record_digest(
@@ -436,7 +499,9 @@ def _run_digest(
     if result.get("followups"):
         console.print(f"  Follow-ups due: {result['followups']}")
 
-    console.print(f"\n[green]✓[/green] Dispatched {result['gigs']} new gigs to pipeline")
+    console.print(
+        f"\n[green]✓[/green] Dispatched {result['gigs']} new gigs to pipeline"
+    )
     if push:
         console.print(f"  Push: {'sent' if pushed else 'skipped (NTFY_TOPIC unset)'}")
     else:
@@ -457,11 +522,13 @@ def _run_digest(
 @app.command()
 def health(
     heartbeat: bool = typer.Option(
-        False, "--heartbeat",
+        False,
+        "--heartbeat",
         help="Heartbeat mode: exit 1 + push a phone alert if no digest ran recently",
     ),
     max_age_hours: float = typer.Option(
-        run_state.HEARTBEAT_MAX_AGE_HOURS, "--max-age-hours",
+        run_state.HEARTBEAT_MAX_AGE_HOURS,
+        "--max-age-hours",
         help="Staleness threshold (hours) for --heartbeat",
     ),
 ):
@@ -527,8 +594,15 @@ def weekly_summary():
     console.print("[bold]GigPilot weekly summary[/bold]")
     console.print(f"Total in pipeline: {len(rows)}")
     for status in (
-        "new", "saved", "drafted", "sent", "replied", "interview", "hired",
-        "passed", "archived",
+        "new",
+        "saved",
+        "drafted",
+        "sent",
+        "replied",
+        "interview",
+        "hired",
+        "passed",
+        "archived",
     ):
         if status in by_status:
             console.print(f"  {status:>10}: {by_status[status]}")
@@ -537,6 +611,7 @@ def weekly_summary():
     console.print(feedback.format_summary())
 
     from datetime import datetime, timedelta
+
     today = datetime.now()
     stale: list[pipeline.Row] = []
     for r in rows:
@@ -546,7 +621,7 @@ def weekly_summary():
         if lt and (today - lt) > timedelta(days=7):
             stale.append(r)
     if stale:
-        console.print(f"\n[yellow]Stale (sent > 7 days, no follow-up):[/yellow]")
+        console.print("\n[yellow]Stale (sent > 7 days, no follow-up):[/yellow]")
         for r in stale:
             console.print(f"  • {r.company} — {r.role} (sent {r.last_touched})")
 
@@ -605,6 +680,7 @@ def swipe(
     tap Get jobs, then swipe: right to apply (opens a prepped email), left to
     pass. Decisions land in pipeline.md."""
     from jobpilot.gigs.server import run_server
+
     run_server(host=host, port=port)
 
 
@@ -628,6 +704,7 @@ def stats():
 # Back-compat for tests importing _scrapers from cli
 def _scrapers():
     from jobpilot.gigs.core.collect import scraper_registry
+
     return scraper_registry()
 
 

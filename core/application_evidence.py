@@ -7,7 +7,6 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 from urllib.parse import urlparse, urlunparse
 
 
@@ -32,14 +31,16 @@ def _norm_url(value: str) -> str:
     if not value:
         return ""
     parsed = urlparse(value)
-    return urlunparse((
-        parsed.scheme.lower(),
-        parsed.netloc.lower(),
-        parsed.path.rstrip("/"),
-        "",
-        "",
-        "",
-    ))
+    return urlunparse(
+        (
+            parsed.scheme.lower(),
+            parsed.netloc.lower(),
+            parsed.path.rstrip("/"),
+            "",
+            "",
+            "",
+        )
+    )
 
 
 def _same_role(left: str, right: str) -> bool:
@@ -56,7 +57,7 @@ class ApplicationEvidenceIndex:
     def __init__(
         self,
         records: list[EvidenceRecord],
-        errors: Optional[list[str]] = None,
+        errors: list[str] | None = None,
     ):
         self.records = records
         self.errors = errors or []
@@ -66,22 +67,24 @@ class ApplicationEvidenceIndex:
         cls,
         *,
         tracker,
-        employment_dir: Optional[Path] = None,
-        gmail_cache_path: Optional[Path] = None,
+        employment_dir: Path | None = None,
+        gmail_cache_path: Path | None = None,
         gmail_cache_max_age_hours: int = 0,
-    ) -> "ApplicationEvidenceIndex":
+    ) -> ApplicationEvidenceIndex:
         records: list[EvidenceRecord] = []
         errors: list[str] = []
 
         try:
             for item in tracker.get_recent(limit=10000):
-                records.append(EvidenceRecord(
-                    company=item.company,
-                    title=item.job_title,
-                    url=item.job_url,
-                    status=item.status,
-                    source="tracker",
-                ))
+                records.append(
+                    EvidenceRecord(
+                        company=item.company,
+                        title=item.job_title,
+                        url=item.job_url,
+                        status=item.status,
+                        source="tracker",
+                    )
+                )
         except Exception as exc:
             errors.append(f"canonical application tracker could not be read ({exc})")
 
@@ -117,12 +120,14 @@ class ApplicationEvidenceIndex:
                     continue
                 company, title = parts[0], parts[1]
                 status = "submitted" if path.name == "SUBMITTED.md" else "started"
-                records.append(EvidenceRecord(
-                    company=company,
-                    title=title,
-                    status=status,
-                    source="employment",
-                ))
+                records.append(
+                    EvidenceRecord(
+                        company=company,
+                        title=title,
+                        status=status,
+                        source="employment",
+                    )
+                )
         except Exception as exc:
             errors.append(f"application packet folder could not be read ({exc})")
 
@@ -142,8 +147,7 @@ class ApplicationEvidenceIndex:
                 generated_at = str(payload.get("generated_at", "")).strip()
                 if not generated_at:
                     errors.append(
-                        "Gmail application cache has no generated_at timestamp: "
-                        f"{path}"
+                        f"Gmail application cache has no generated_at timestamp: {path}"
                     )
                     return
                 generated = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
@@ -164,13 +168,15 @@ class ApplicationEvidenceIndex:
                     or not item.get("title")
                 ):
                     continue
-                records.append(EvidenceRecord(
-                    company=str(item["company"]),
-                    title=str(item["title"]),
-                    url=str(item.get("url", "")),
-                    status=str(item.get("status", "applied")),
-                    source="gmail",
-                ))
+                records.append(
+                    EvidenceRecord(
+                        company=str(item["company"]),
+                        title=str(item["title"]),
+                        url=str(item.get("url", "")),
+                        status=str(item.get("status", "applied")),
+                        source="gmail",
+                    )
+                )
         except Exception as exc:
             errors.append(f"Gmail application cache could not be read ({exc})")
 
@@ -183,7 +189,7 @@ class ApplicationEvidenceIndex:
                 f"run `jobpilot jobs` again: {detail}"
             )
 
-    def match(self, company: str, title: str, url: str) -> Optional[EvidenceRecord]:
+    def match(self, company: str, title: str, url: str) -> EvidenceRecord | None:
         url_n = _norm_url(url)
         if url_n:
             for record in self.records:

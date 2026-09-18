@@ -9,21 +9,39 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Optional, Protocol
+from typing import Protocol
 
 from jobpilot.core import llm_client
 from jobpilot.core.bro_client import is_bro_running, query_rag
 from jobpilot.core.jd_parser import _SALARY_PATTERN, JDParser, ParsedJD
-from jobpilot.core.relocation_signals import detect_relocation_offer
 from jobpilot.core.policy_config import Policy, get_policy
-from jobpilot.core.work_style import score_work_style, title_seniority_penalty
 from jobpilot.core.profile_store import ProfileStore, UserProfile, get_profile_store
-
+from jobpilot.core.relocation_signals import detect_relocation_offer
+from jobpilot.core.work_style import score_work_style, title_seniority_penalty
 
 _STOPWORDS = {
-    "a", "an", "and", "at", "for", "in", "of", "on", "or", "the", "to",
-    "engineer", "engineering", "developer", "software", "senior", "staff",
-    "principal", "lead", "manager", "role", "job",
+    "a",
+    "an",
+    "and",
+    "at",
+    "for",
+    "in",
+    "of",
+    "on",
+    "or",
+    "the",
+    "to",
+    "engineer",
+    "engineering",
+    "developer",
+    "software",
+    "senior",
+    "staff",
+    "principal",
+    "lead",
+    "manager",
+    "role",
+    "job",
 }
 
 
@@ -97,8 +115,12 @@ class JobScorer:
         jd_skills = parsed_jd.skills or JDParser._extract_skills(raw_text)
         candidate_skills = self._candidate_skills(profile)
 
-        matched_skills = [skill for skill in jd_skills if skill.lower() in candidate_skills]
-        missing_skills = [skill for skill in jd_skills if skill.lower() not in candidate_skills]
+        matched_skills = [
+            skill for skill in jd_skills if skill.lower() in candidate_skills
+        ]
+        missing_skills = [
+            skill for skill in jd_skills if skill.lower() not in candidate_skills
+        ]
 
         # Policy filter (applied first; refused roles never accumulate other points)
         alignment_status, alignment_rationale = self._check_alignment(parsed_jd)
@@ -119,12 +141,22 @@ class JobScorer:
         else:
             alignment_points = 0
 
-        title_points = self._score_title_alignment(profile.current_title, parsed_jd.title)
+        title_points = self._score_title_alignment(
+            profile.current_title, parsed_jd.title
+        )
         skill_points = self._score_skills(jd_skills, matched_skills)
-        exp_points, exp_risk = self._score_experience(profile.years_of_experience, raw_text)
-        auth_points, auth_risk = self._score_work_auth(profile.authorized_to_work, profile.requires_sponsorship, raw_text)
-        location_points = self._score_location(parsed_jd.location_type or self._extract_location_type(raw_text))
-        work_style_points, work_style_reasons = self._score_work_style(raw_text, parsed_jd.title)
+        exp_points, exp_risk = self._score_experience(
+            profile.years_of_experience, raw_text
+        )
+        auth_points, auth_risk = self._score_work_auth(
+            profile.authorized_to_work, profile.requires_sponsorship, raw_text
+        )
+        location_points = self._score_location(
+            parsed_jd.location_type or self._extract_location_type(raw_text)
+        )
+        work_style_points, work_style_reasons = self._score_work_style(
+            raw_text, parsed_jd.title
+        )
         relocation_offer = detect_relocation_offer(raw_text)
         relocation_points = 8 if relocation_offer else 0
 
@@ -157,7 +189,9 @@ class JobScorer:
         if relocation_offer:
             strengths.append(f"Relocation on the table ({relocation_offer})")
         if work_style_points >= 12:
-            strengths.append("Work style looks autonomous (async/contract/deadline signals)")
+            strengths.append(
+                "Work style looks autonomous (async/contract/deadline signals)"
+            )
         for reason in work_style_reasons:
             if reason.startswith("-schedule:") or reason.startswith("-w2-only"):
                 risks.append(f"Schedule/employment flag: {reason.split(':', 1)[-1]}")
@@ -171,11 +205,15 @@ class JobScorer:
         if parsed_jd.location_type == "onsite":
             risks.append("Onsite role may need extra scrutiny")
 
-        ai_summary = self._maybe_get_ai_summary(profile, parsed_jd, matched_skills, missing_skills)
+        ai_summary = self._maybe_get_ai_summary(
+            profile, parsed_jd, matched_skills, missing_skills
+        )
 
         return JobFitResult(
             score=total,
-            recommendation=self._recommendation(total, alignment_status=alignment_status),
+            recommendation=self._recommendation(
+                total, alignment_status=alignment_status
+            ),
             parsed_jd=parsed_jd,
             components=components,
             matched_skills=matched_skills,
@@ -189,7 +227,8 @@ class JobScorer:
     def _normalize_tokens(text: str) -> set[str]:
         cleaned = re.sub(r"[^a-z0-9+.#]+", " ", (text or "").lower())
         return {
-            token for token in cleaned.split()
+            token
+            for token in cleaned.split()
             if len(token) > 1 and token not in _STOPWORDS
         }
 
@@ -265,9 +304,13 @@ class JobScorer:
         return points, risk
 
     @staticmethod
-    def _score_work_auth(authorized_to_work: bool, requires_sponsorship: bool, raw_text: str) -> tuple[int, str]:
+    def _score_work_auth(
+        authorized_to_work: bool, requires_sponsorship: bool, raw_text: str
+    ) -> tuple[int, str]:
         lowered = raw_text.lower()
-        mentions_auth = "authorized to work" in lowered or "work authorization" in lowered
+        mentions_auth = (
+            "authorized to work" in lowered or "work authorization" in lowered
+        )
         mentions_no_sponsorship = any(
             phrase in lowered
             for phrase in [
@@ -281,7 +324,10 @@ class JobScorer:
         if mentions_no_sponsorship and requires_sponsorship:
             return 0, "Posting requires work authorization without sponsorship."
         if mentions_auth and not authorized_to_work:
-            return 2, "Posting mentions work authorization and profile is not authorized."
+            return (
+                2,
+                "Posting mentions work authorization and profile is not authorized.",
+            )
         if mentions_auth and authorized_to_work:
             return 10, ""
         return (8 if authorized_to_work else 5), ""
@@ -300,7 +346,9 @@ class JobScorer:
         """Autonomy / contract / anti-9-5 adjustment mapped to 0-20 points."""
         queue_policy = self.policy.queue
         deprioritize = queue_policy.title_deprioritize_keywords or (
-            "senior engineer", "senior software", "senior ai",
+            "senior engineer",
+            "senior software",
+            "senior ai",
         )
         senior_pen, _ = title_seniority_penalty(title, deprioritize)
         delta, reasons = score_work_style(raw_text, title=title)
@@ -371,7 +419,9 @@ class JobScorer:
 
     @staticmethod
     def _guess_title(text: str) -> str:
-        labeled = JobScorer._labeled_value(text, ("role", "title", "position", "job title"))
+        labeled = JobScorer._labeled_value(
+            text, ("role", "title", "position", "job title")
+        )
         if labeled:
             return labeled
         for line in text.splitlines():
@@ -393,7 +443,9 @@ class JobScorer:
 
     @staticmethod
     def _guess_company(text: str) -> str:
-        labeled = JobScorer._labeled_value(text, ("company", "employer", "organization"))
+        labeled = JobScorer._labeled_value(
+            text, ("company", "employer", "organization")
+        )
         if labeled:
             return labeled
         candidates = [
@@ -424,9 +476,20 @@ class JobScorer:
             return False
         label = line.partition(":")[0].strip().lower()
         return label in {
-            "company", "employer", "organization", "role", "title",
-            "position", "job title", "location", "compensation", "pay",
-            "salary", "source", "source links", "apply",
+            "company",
+            "employer",
+            "organization",
+            "role",
+            "title",
+            "position",
+            "job title",
+            "location",
+            "compensation",
+            "pay",
+            "salary",
+            "source",
+            "source links",
+            "apply",
         }
 
     @staticmethod

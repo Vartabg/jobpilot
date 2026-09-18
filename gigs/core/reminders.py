@@ -74,17 +74,17 @@ def create_reminder_for_gig(gig: Gig, now: datetime | None = None) -> bool:
 
     script = (
         'tell application "Reminders"\n'
-        '  try\n'
+        "  try\n"
         f'    set targetList to list "{list_name}"\n'
-        '  on error\n'
+        "  on error\n"
         f'    set targetList to make new list with properties {{name:"{list_name}"}}\n'
-        '  end try\n'
-        '  tell targetList\n'
-        '    make new reminder with properties {'
+        "  end try\n"
+        "  tell targetList\n"
+        "    make new reminder with properties {"
         f'name:"{name}", body:"{body}", due date:date "{due_str}"'
-        '}\n'
-        '  end tell\n'
-        'end tell\n'
+        "}\n"
+        "  end tell\n"
+        "end tell\n"
     )
 
     try:
@@ -107,9 +107,9 @@ def create_reminder_for_gig(gig: Gig, now: datetime | None = None) -> bool:
 
 def _pay_str(gig: Gig) -> str:
     if gig.salary_max and gig.salary_min:
-        return f"${gig.salary_min/1000:.0f}-${gig.salary_max/1000:.0f}K/yr"
+        return f"${gig.salary_min / 1000:.0f}-${gig.salary_max / 1000:.0f}K/yr"
     if gig.salary_max:
-        return f"up to ${gig.salary_max/1000:.0f}K/yr"
+        return f"up to ${gig.salary_max / 1000:.0f}K/yr"
     if gig.pay_hourly_est:
         return f"${gig.pay_hourly_est:.0f}/hr"
     return "pay not stated"

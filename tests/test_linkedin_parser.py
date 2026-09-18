@@ -2,10 +2,9 @@
 Tests for linkedin_parser.py — semantic type inference from field labels.
 """
 
-import pytest
 from jobpilot.core.linkedin_parser import (
-    LinkedInParser,
     FieldType,
+    LinkedInParser,
     SemanticType,
 )
 
@@ -70,7 +69,6 @@ class TestSemanticInference:
 
 
 class TestFieldTypeEnum:
-
     def test_all_values_are_strings(self):
         for ft in FieldType:
             assert isinstance(ft.value, str)
@@ -85,7 +83,6 @@ class TestFieldTypeEnum:
 
 
 class TestSemanticTypeEnum:
-
     def test_known_types_exist(self):
         names = {st.name for st in SemanticType}
         assert "FIRST_NAME" in names

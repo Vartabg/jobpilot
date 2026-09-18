@@ -1,10 +1,13 @@
 import json
-from pathlib import Path
 
-from jobpilot.gigs.core import feedback, pipeline, run_state, source_health
+from jobpilot.gigs.core import feedback, run_state, source_health
 from jobpilot.gigs.core.feedback import parse_pass_reason, sync_from_pipeline
 from jobpilot.gigs.core.pipeline import Row
-from jobpilot.gigs.core.source_health import SourceResult, record_results, stale_zero_sources
+from jobpilot.gigs.core.source_health import (
+    SourceResult,
+    record_results,
+    stale_zero_sources,
+)
 
 
 def test_parse_pass_reason_extracts_code() -> None:

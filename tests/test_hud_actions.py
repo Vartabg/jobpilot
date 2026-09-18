@@ -26,10 +26,20 @@ def test_copy_text_uses_pbcopy():
 
 def test_skip_job(monkeypatch):
     job = QueueJob(
-        id="x", company="Co", title="T", url="u", location="Austin",
-        portal="gh", track="tech", fit_score=50, keywords=[], status="queued",
+        id="x",
+        company="Co",
+        title="T",
+        url="u",
+        location="Austin",
+        portal="gh",
+        track="tech",
+        fit_score=50,
+        keywords=[],
+        status="queued",
     )
-    monkeypatch.setattr("jobpilot.ui.hud_actions.update_job_status", lambda _id, st: st == "skipped")
+    monkeypatch.setattr(
+        "jobpilot.ui.hud_actions.update_job_status", lambda _id, st: st == "skipped"
+    )
     assert "skipped" in hud_actions.skip_job(job)
 
 
@@ -41,7 +51,14 @@ def test_pick_with_fzf_returns_index():
 
 
 def test_draft_gig_proposal_returns_message(monkeypatch):
-    gig = Gig(id="gig-123", source="hn", title="Build API", url="https://x.com", company="Acme", fit_score=80)
+    gig = Gig(
+        id="gig-123",
+        source="hn",
+        title="Build API",
+        url="https://x.com",
+        company="Acme",
+        fit_score=80,
+    )
     monkeypatch.setattr(
         "jobpilot.gigs.core.proposals.build_revenue_brief",
         lambda g: type("B", (), {"offer": "hi", "action": "do"})(),

@@ -9,10 +9,11 @@ AI answer generation and cover letter tailoring.
 
 import re
 from dataclasses import dataclass, field
-from typing import Optional
+
 from playwright.async_api import Page
-from jobpilot.core.selector_registry import JD_CONTAINER, JOB_TITLE, COMPANY_NAME
+
 from jobpilot.core.logger import get_logger
+from jobpilot.core.selector_registry import COMPANY_NAME, JD_CONTAINER, JOB_TITLE
 
 log = get_logger(__name__)
 
@@ -58,6 +59,7 @@ _LOCATION_KEYWORDS = {
 @dataclass
 class ParsedJD:
     """Structured representation of a job description."""
+
     title: str = ""
     company: str = ""
     raw_text: str = ""
@@ -93,7 +95,7 @@ class JDParser:
         self.page = page
         self._cache: dict[str, ParsedJD] = {}
 
-    async def parse(self) -> Optional[ParsedJD]:
+    async def parse(self) -> ParsedJD | None:
         """Parse the JD on the current page. Results are cached by URL."""
         url = self.page.url
         if url in self._cache:
@@ -121,9 +123,7 @@ class JDParser:
         # --- Raw JD text via text-anchor + class-selector fallback ---
         jd.raw_text = await self._extract_jd_text()
         if not jd.raw_text:
-            log.warning(
-                "Could not extract JD text via text anchor or class selectors"
-            )
+            log.warning("Could not extract JD text via text anchor or class selectors")
             self._cache[url] = jd
             return jd
 
@@ -216,7 +216,7 @@ class JDParser:
         lines = text.split("\n")
         requirements: list[str] = []
         nice_to_haves: list[str] = []
-        current_bucket: Optional[list[str]] = None
+        current_bucket: list[str] | None = None
 
         for line in lines:
             stripped = line.strip()
@@ -245,16 +245,56 @@ class JDParser:
         """Extract common tech skills mentioned in the JD text."""
         # Ordered by specificity so longer matches are preferred
         _SKILL_PATTERNS = [
-            "TypeScript", "JavaScript", "Python", "Java", "C++", "C#", "Go",
-            "Rust", "Ruby", "Swift", "Kotlin", "Scala", "PHP",
-            "React", "Angular", "Vue", "Next.js", "Node.js", "Django",
-            "Flask", "Spring", "FastAPI", "Express",
-            "AWS", "Azure", "GCP", "Docker", "Kubernetes", "Terraform",
-            "PostgreSQL", "MySQL", "MongoDB", "Redis", "ElasticSearch",
-            "GraphQL", "REST", "gRPC", "Kafka", "RabbitMQ",
-            "CI/CD", "Git", "Jenkins", "GitHub Actions",
-            "Machine Learning", "Deep Learning", "NLP", "TensorFlow", "PyTorch",
-            "Figma", "Sketch",
+            "TypeScript",
+            "JavaScript",
+            "Python",
+            "Java",
+            "C++",
+            "C#",
+            "Go",
+            "Rust",
+            "Ruby",
+            "Swift",
+            "Kotlin",
+            "Scala",
+            "PHP",
+            "React",
+            "Angular",
+            "Vue",
+            "Next.js",
+            "Node.js",
+            "Django",
+            "Flask",
+            "Spring",
+            "FastAPI",
+            "Express",
+            "AWS",
+            "Azure",
+            "GCP",
+            "Docker",
+            "Kubernetes",
+            "Terraform",
+            "PostgreSQL",
+            "MySQL",
+            "MongoDB",
+            "Redis",
+            "ElasticSearch",
+            "GraphQL",
+            "REST",
+            "gRPC",
+            "Kafka",
+            "RabbitMQ",
+            "CI/CD",
+            "Git",
+            "Jenkins",
+            "GitHub Actions",
+            "Machine Learning",
+            "Deep Learning",
+            "NLP",
+            "TensorFlow",
+            "PyTorch",
+            "Figma",
+            "Sketch",
         ]
         found = []
         for skill in _SKILL_PATTERNS:

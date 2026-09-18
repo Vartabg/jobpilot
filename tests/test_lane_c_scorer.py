@@ -24,8 +24,13 @@ from jobpilot.core.queue_builder import (
 FIXTURE_POLICY = {
     "queue": {
         "title_kill_keywords": [
-            "senior manager", "principal", "staff engineer",
-            "director", "vp ", "head of", "vice president",
+            "senior manager",
+            "principal",
+            "staff engineer",
+            "director",
+            "vp ",
+            "head of",
+            "vice president",
         ],
         "moat_company_tags": {
             "happyrobot": "logistics_ai",
@@ -37,13 +42,23 @@ FIXTURE_POLICY = {
         "location_gate": {
             "enabled": True,
             "allowed_locations": [
-                "new york", "nyc", "austin", "denver", "portland", "seattle",
-                "san francisco", "bay area",
+                "new york",
+                "nyc",
+                "austin",
+                "denver",
+                "portland",
+                "seattle",
+                "san francisco",
+                "bay area",
             ],
             "remote_terms": ["remote"],
             "country_terms": ["united states", "usa", "us"],
             "blocked_locations": [
-                "london", "europe", "latam", "german speaking", "move to the us",
+                "london",
+                "europe",
+                "latam",
+                "german speaking",
+                "move to the us",
             ],
             "blocked_without_country": ["canada"],
         },
@@ -74,7 +89,13 @@ def neutral_policy(monkeypatch):
 
 
 def _job(title: str, company: str, location: str = "") -> PortalJob:
-    return PortalJob(company=company, title=title, url="http://x/y", location=location, portal="ashby")
+    return PortalJob(
+        company=company,
+        title=title,
+        url="http://x/y",
+        location=location,
+        portal="ashby",
+    )
 
 
 def test_configured_kill_titles_are_hard_gated(gated_policy):
@@ -111,9 +132,13 @@ def test_founding_fde_in_moat_industry_scores_high(gated_policy):
         },
         "hated_signals": {"title": [], "company_or_note": [], "industry": []},
     }
-    score, track, psy = _score_job(_job(
-        "Founding Forward Deployed Engineer", "HappyRobot", "Remote",
-    ))
+    score, track, psy = _score_job(
+        _job(
+            "Founding Forward Deployed Engineer",
+            "HappyRobot",
+            "Remote",
+        )
+    )
     assert score >= 75, f"expected ≥75 for founding FDE in high-moat, got {score}"
     assert track == "both"
     assert psy >= 12, f"psycho-fit should be high for founding/FDE titles, got {psy}"
@@ -121,7 +146,9 @@ def test_founding_fde_in_moat_industry_scores_high(gated_policy):
 
 def test_location_gate_allows_configured_metros_and_remote(gated_policy):
     """An enabled gate allows only the configured metros, remote, and country."""
-    assert _is_allowed_location("Forward Deployed Engineer", "Clarion Health", "New York")
+    assert _is_allowed_location(
+        "Forward Deployed Engineer", "Clarion Health", "New York"
+    )
     assert _is_allowed_location("Forward Deployed Engineer", "Soff", "San Francisco")
     assert _is_allowed_location("Forward Deployed Engineer", "Acme", "Austin")
     assert _is_allowed_location("Forward Deployed Engineer", "Acme", "Denver")
@@ -133,19 +160,31 @@ def test_location_gate_allows_configured_metros_and_remote(gated_policy):
 def test_location_gate_blocks_international_and_unknown_locations(gated_policy):
     """Blocked terms / unknown locations should not queue."""
     assert not _is_allowed_location("Forward Deployed Engineer", "Acme", "London")
-    assert not _is_allowed_location("Forward Deployed Engineer", "Acme", "Remote, Europe")
-    assert not _is_allowed_location("Forward Deployed Engineer", "Acme", "Not specified")
+    assert not _is_allowed_location(
+        "Forward Deployed Engineer", "Acme", "Remote, Europe"
+    )
+    assert not _is_allowed_location(
+        "Forward Deployed Engineer", "Acme", "Not specified"
+    )
     assert _is_allowed_location("Forward Deployed Engineer", "Acme", "Remote US/Canada")
-    assert not _is_allowed_location("Forward Deployed Engineer", "Acme", "Remote Canada")
+    assert not _is_allowed_location(
+        "Forward Deployed Engineer", "Acme", "Remote Canada"
+    )
 
 
 def test_blocked_terms_in_title_still_disqualify(gated_policy):
     """A clearly disallowed marker in the TITLE is a conservative block —
     even when the company HQ fallback would otherwise qualify the job."""
     # HQ fallbacks: HappyRobot → San Francisco, Haast → Remote (COMPANY_HQ)
-    assert not _is_allowed_location("Forward Deployed Engineer | Europe/LATAM", "HappyRobot", "")
-    assert not _is_allowed_location("Forward Deployed Engineer - German Speaking", "HappyRobot", "")
-    assert not _is_allowed_location("Forward Deployed Engineer - Move to the US!", "Haast", "")
+    assert not _is_allowed_location(
+        "Forward Deployed Engineer | Europe/LATAM", "HappyRobot", ""
+    )
+    assert not _is_allowed_location(
+        "Forward Deployed Engineer - German Speaking", "HappyRobot", ""
+    )
+    assert not _is_allowed_location(
+        "Forward Deployed Engineer - Move to the US!", "Haast", ""
+    )
 
 
 def test_title_text_never_qualifies_a_location(gated_policy):
@@ -157,9 +196,15 @@ def test_title_text_never_qualifies_a_location(gated_policy):
     for a real location. Titles must not QUALIFY a job's location.
     """
     assert not _is_allowed_location("Help us build the future of AI", "Acme", "")
-    assert not _is_allowed_location("Help us build the future of AI", "Acme", "Not specified")
-    assert not _is_allowed_location("Join us — Forward Deployed Engineer", "Acme", "London")
-    assert not _is_allowed_location("Forward Deployed Engineer | NYC", "Acme", "Not specified")
+    assert not _is_allowed_location(
+        "Help us build the future of AI", "Acme", "Not specified"
+    )
+    assert not _is_allowed_location(
+        "Join us — Forward Deployed Engineer", "Acme", "London"
+    )
+    assert not _is_allowed_location(
+        "Forward Deployed Engineer | NYC", "Acme", "Not specified"
+    )
     # ...but the same words in the LOCATION field still qualify.
     assert _is_allowed_location("Help us build the future of AI", "Acme", "Remote (US)")
     assert _is_allowed_location("Forward Deployed Engineer", "Acme", "NYC")
@@ -176,10 +221,14 @@ def test_location_gate_disabled_allows_everything(neutral_policy):
     """Gate off (the shipped default) → every location passes, even empty."""
     assert _is_allowed_location("Forward Deployed Engineer", "Acme", "London")
     assert _is_allowed_location("Forward Deployed Engineer", "Acme", "")
-    assert _is_allowed_location("Forward Deployed Engineer", "UnknownCo", "Not specified")
+    assert _is_allowed_location(
+        "Forward Deployed Engineer", "UnknownCo", "Not specified"
+    )
 
 
-def test_hq_fallback_allows_known_allowed_company_when_role_location_empty(gated_policy):
+def test_hq_fallback_allows_known_allowed_company_when_role_location_empty(
+    gated_policy,
+):
     """Empty role location uses the company-HQ fallback; no-HQ roles are excluded."""
     known, _, _ = _score_job(_job("Forward Deployed Engineer", "HappyRobot", ""))
     unknown, _, _ = _score_job(_job("Forward Deployed Engineer", "UnknownCo", ""))
@@ -204,6 +253,8 @@ def test_psyche_fit_responds_to_loved_signal():
         "loved_signals": {"title": ["founding"], "company_or_note": [], "industry": []},
         "hated_signals": {"title": [], "company_or_note": [], "industry": []},
     }
-    loved = _score_psyche_fit("founding forward deployed engineer", "x", None, "", profile)
+    loved = _score_psyche_fit(
+        "founding forward deployed engineer", "x", None, "", profile
+    )
     plain = _score_psyche_fit("forward deployed engineer", "x", None, "", profile)
     assert loved > plain, f"loved ({loved}) should beat plain ({plain})"

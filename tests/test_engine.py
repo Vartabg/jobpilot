@@ -4,23 +4,24 @@ Tests for core/engine.py — ApplicationEngine with mocked browser/services.
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass, field
-from typing import Optional
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from jobpilot.core.events import EventBus, INFO, WARNING, FIELD_FILLED, APPLICATION_STARTED, APPLICATION_SUBMITTED
+from jobpilot.core.autonomy import AutonomyConfig, AutonomyMode
 from jobpilot.core.engine import ApplicationEngine, _build_job_context
 from jobpilot.core.engine_run import _build_review_fields
-from jobpilot.core.autonomy import AutonomyConfig, AutonomyMode
+from jobpilot.core.events import (
+    INFO,
+    EventBus,
+)
 from jobpilot.core.linkedin_parser import FieldType, SemanticType
-
 
 # ---------------------------------------------------------------------------
 # Lightweight fakes
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class FakePageInfo:
@@ -28,7 +29,7 @@ class FakePageInfo:
     title: str = "Senior Engineer - Easy Apply"
     is_linkedin: bool = True
     is_job_application: bool = True
-    application_step: Optional[int] = 1
+    application_step: int | None = 1
 
 
 @dataclass
@@ -57,6 +58,7 @@ class FakeApplicationPage:
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def events():
@@ -127,15 +129,26 @@ def mock_recorder():
 def mock_tracker():
     tracker = MagicMock()
     tracker.get_status.return_value = None
-    tracker.get_stats.return_value = {"submitted": 0, "abandoned": 0, "in_progress": 0, "total": 0}
+    tracker.get_stats.return_value = {
+        "submitted": 0,
+        "abandoned": 0,
+        "in_progress": 0,
+        "total": 0,
+    }
     tracker.get_recent.return_value = []
     return tracker
 
 
 @pytest.fixture
 def engine(
-    mock_bridge, events, mock_overlay, mock_chat,
-    mock_profile_store, mock_question_matcher, mock_recorder, mock_tracker,
+    mock_bridge,
+    events,
+    mock_overlay,
+    mock_chat,
+    mock_profile_store,
+    mock_question_matcher,
+    mock_recorder,
+    mock_tracker,
 ):
     return ApplicationEngine(
         bridge=mock_bridge,
@@ -153,6 +166,7 @@ def engine(
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 class TestBuildJobContext:
     def test_basic_context(self):
@@ -231,7 +245,7 @@ class TestChatDispatch:
     async def test_freeform_message_backend_down_replies_with_hint(
         self, mock_complete, engine, mock_chat
     ):
-        from jobpilot.core.llm_client import LLMUnavailable, NO_BACKEND_MESSAGE
+        from jobpilot.core.llm_client import NO_BACKEND_MESSAGE, LLMUnavailable
 
         mock_complete.side_effect = LLMUnavailable(NO_BACKEND_MESSAGE)
         await engine.handle_chat("what is python?", FakePageInfo(), None, None)
@@ -304,7 +318,9 @@ class TestFillField:
 
 
 class TestReviewGate:
-    def test_build_review_fields_include_fit_and_resume_context(self, engine, mock_profile_store):
+    def test_build_review_fields_include_fit_and_resume_context(
+        self, engine, mock_profile_store
+    ):
         profile = mock_profile_store.load.return_value
         profile.resume_path = "/tmp/alex_resume.pdf"
         profile.authorized_to_work = True
@@ -350,7 +366,9 @@ class TestReviewGate:
 
 class TestResumeUpload:
     @pytest.mark.asyncio
-    async def test_upload_files_prefers_latest_tailored_pdf(self, engine, mock_profile_store, tmp_path):
+    async def test_upload_files_prefers_latest_tailored_pdf(
+        self, engine, mock_profile_store, tmp_path
+    ):
         profile = mock_profile_store.load.return_value
         primary_resume = tmp_path / "profile_resume.pdf"
         tailored_resume = tmp_path / "tailored_resume.pdf"
@@ -363,7 +381,10 @@ class TestResumeUpload:
         app = FakeApplicationPage(has_resume_upload=True)
 
         with (
-            patch("jobpilot.core.engine.FILE_INPUTS.query_all", new=AsyncMock(return_value=[file_input])),
+            patch(
+                "jobpilot.core.engine.FILE_INPUTS.query_all",
+                new=AsyncMock(return_value=[file_input]),
+            ),
             patch(
                 "jobpilot.core.engine.ResumeTailor.load_latest_draft_summary",
                 return_value={"pdf_path": str(tailored_resume)},
@@ -388,7 +409,9 @@ class TestEventEmission:
 
     @pytest.mark.asyncio
     @patch("jobpilot.core.engine.get_health")
-    async def test_run_reports_bro_status(self, mock_health, engine, events, mock_bridge):
+    async def test_run_reports_bro_status(
+        self, mock_health, engine, events, mock_bridge
+    ):
         mock_health.return_value = {"status": "ok", "whisper": "ready"}
         received = []
         events.on(INFO, lambda **kw: received.append(kw))

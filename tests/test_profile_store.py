@@ -5,8 +5,10 @@ Covers edge cases: missing fields, defaults, field mapping, update method.
 """
 
 import json
-import pytest
 from pathlib import Path
+
+import pytest
+
 from jobpilot.core.profile_store import ProfileStore, UserProfile
 
 
@@ -38,7 +40,6 @@ def store(tmp_path: Path) -> ProfileStore:
 
 
 class TestFieldMapping:
-
     def test_email_field(self, store: ProfileStore):
         assert store.get_field_value("email") == "jane@example.com"
 
@@ -57,7 +58,6 @@ class TestFieldMapping:
 
 
 class TestUpdate:
-
     def test_update_changes_field(self, store: ProfileStore):
         store.load()
         store.update(first_name="Janet")
@@ -66,7 +66,6 @@ class TestUpdate:
 
 
 class TestDefaults:
-
     def test_empty_dir_creates_default_profile(self, tmp_path: Path):
         s = ProfileStore(data_dir=tmp_path)
         p = s.load()
@@ -76,7 +75,6 @@ class TestDefaults:
 
 
 class TestCustomAnswers:
-
     def test_custom_answers_loaded(self, store: ProfileStore):
         profile = store.load()
         assert profile.custom_answers.get("clearance") == "No"

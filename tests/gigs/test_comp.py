@@ -1,10 +1,10 @@
 """Shared comp parsing — hourly/salary disambiguation used by all scrapers."""
+
 from __future__ import annotations
 
 from jobpilot.gigs.core.scrapers.comp import parse_comp
 from jobpilot.gigs.core.scrapers.hackernews import _parse_post
 from jobpilot.gigs.core.scrapers.weworkremotely import _parse_comp as wwr_parse_comp
-
 
 # ---- regression: hourly range misread as salary --------------------------
 #

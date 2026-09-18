@@ -18,10 +18,10 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from jobpilot.core.application_evidence import ApplicationEvidenceIndex
 from jobpilot.core.application_tracker import get_application_tracker
@@ -29,8 +29,8 @@ from jobpilot.core.atomic_io import atomic_write_text
 from jobpilot.core.config import DATA_DIR
 from jobpilot.core.logger import get_logger
 from jobpilot.core.policy_config import get_policy, reset_policy_cache
-from jobpilot.core.work_style import score_work_style, title_seniority_penalty
 from jobpilot.core.portal_scanner import PortalJob, PortalScanner, ScanTarget
+from jobpilot.core.work_style import score_work_style, title_seniority_penalty
 
 PSYCHE_PROFILE_PATH = DATA_DIR / "psyche_profile.json"
 PORTALS_PATH = DATA_DIR / "portals.json"
@@ -113,8 +113,8 @@ class QueueJob:
 
 
 # Loaded once per queue build — profiles, _notes — keep at module level.
-_psyche_profile_cache: Optional[dict[str, Any]] = None
-_portal_notes_cache: Optional[dict[str, str]] = None
+_psyche_profile_cache: dict[str, Any] | None = None
+_portal_notes_cache: dict[str, str] | None = None
 
 
 def _load_psyche_profile() -> dict[str, Any]:
@@ -292,7 +292,7 @@ def _is_allowed_location(title: str, company: str, location: str | None) -> bool
     )
 
 
-def _evidence_path(value: str) -> Optional[Path]:
+def _evidence_path(value: str) -> Path | None:
     if not value:
         return None
     path = Path(value).expanduser()
@@ -311,7 +311,7 @@ def get_application_evidence_index(tracker=None) -> ApplicationEvidenceIndex:
     )
 
 
-def policy_block_reason(company: str, title: str) -> Optional[str]:
+def policy_block_reason(company: str, title: str) -> str | None:
     """Return the personal-policy reason a role must not enter the active queue."""
     policy = get_policy()
     company_l = (company or "").strip().lower()
@@ -344,7 +344,7 @@ def policy_block_reason(company: str, title: str) -> Optional[str]:
 def _score_psyche_fit(
     title_l: str,
     company_l: str,
-    industry: Optional[str],
+    industry: str | None,
     note_l: str,
     profile: dict[str, Any],
 ) -> int:
@@ -484,7 +484,7 @@ def _score_job(job: PortalJob) -> tuple[int, str, int]:
 
 
 def build_queue(
-    extra_targets: Optional[list[ScanTarget]] = None,
+    extra_targets: list[ScanTarget] | None = None,
     limit: int = 50,
 ) -> list[QueueJob]:
     """Scan all portals, score jobs, return sorted queue."""
@@ -582,7 +582,7 @@ def save_queue(jobs: list[QueueJob]) -> Path:
     return QUEUE_PATH
 
 
-def tracker_status_for_job(tracker, url: str, company: str) -> Optional[str]:
+def tracker_status_for_job(tracker, url: str, company: str) -> str | None:
     """Return the tracker-derived status for a queued job."""
     tracker_company_status = tracker.company_status(company)
     if tracker.has_applied(url):
@@ -718,7 +718,7 @@ def focus_queue_company_first() -> tuple[int, int, int]:
     return changed, len(queue), focused_companies
 
 
-def get_job(job_id: str) -> Optional[QueueJob]:
+def get_job(job_id: str) -> QueueJob | None:
     """Get a single job by ID."""
     for job in load_queue():
         if job.id == job_id:

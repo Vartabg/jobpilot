@@ -8,19 +8,26 @@ from jobpilot.gigs.core.pipeline import Row
 
 
 def _gig(**kw):
-    base = dict(id="hn-1", source="hn", title="AI Engineer", company="Acme",
-                description="rag, agentic workflows, python", url="https://post.test/1")
+    base = dict(
+        id="hn-1",
+        source="hn",
+        title="AI Engineer",
+        company="Acme",
+        description="rag, agentic workflows, python",
+        url="https://post.test/1",
+    )
     base.update(kw)
     return Gig(**base)
 
 
 # --- FTE vs contract framing ----------------------------------------------
 
+
 def test_fte_draft_leads_with_engineer_framing_and_cta():
     body = proposals.email_body(_gig(title="Founding Engineer"))
-    assert "Is this still open?" in body          # low-friction CTA
+    assert "Is this still open?" in body  # low-friction CTA
     assert "I build" in body or "I work" in body or "builder" in body
-    assert "Service outline" not in body          # no contractor service pitch
+    assert "Service outline" not in body  # no contractor service pitch
     assert "example.com" not in body
     # humble/straight: no flourish words
     for flourish in ("end to end", "ships end to end", "the glue between"):
@@ -48,14 +55,22 @@ def test_fte_ai_engineer_track_maps_to_applied_ai():
 
 
 def test_contract_draft_keeps_service_framing():
-    body = proposals.email_body(_gig(id="up-1", source="upwork",
-                                     title="Contract: automation freelancer"))
+    body = proposals.email_body(
+        _gig(id="up-1", source="upwork", title="Contract: automation freelancer")
+    )
     assert "Service outline" in body
     assert "scope it" in body
-    g = _gig(id="up-1", source="upwork", title="Contract: automation freelancer",
-             description="n8n llm crm slack")
+    g = _gig(
+        id="up-1",
+        source="upwork",
+        title="Contract: automation freelancer",
+        description="n8n llm crm slack",
+    )
     assert proposals.draft_mode(g) == "contract"
-    assert "audit" in proposals.pick_offer(g).lower() or "automation" in proposals.pick_offer(g).lower()
+    assert (
+        "audit" in proposals.pick_offer(g).lower()
+        or "automation" in proposals.pick_offer(g).lower()
+    )
 
 
 def test_is_contract_lead_detection():
@@ -78,11 +93,13 @@ _TODAY = datetime(2026, 6, 19)
 
 def test_followups_due_picks_stale_sent_rows():
     rows = [
-        Row(status="sent", company="A", role="R1", last_touched="6/10"),   # 9 days → due
-        Row(status="sent", company="B", role="R2", last_touched="6/18"),   # 1 day → not
-        Row(status="replied", company="C", role="R3", last_touched="6/1"), # replied → not
-        Row(status="new", company="D", role="R4", last_touched="6/1"),     # not sent
-        Row(status="sent", company="E", role="R5", last_touched=""),       # no date → skip
+        Row(status="sent", company="A", role="R1", last_touched="6/10"),  # 9 days → due
+        Row(status="sent", company="B", role="R2", last_touched="6/18"),  # 1 day → not
+        Row(
+            status="replied", company="C", role="R3", last_touched="6/1"
+        ),  # replied → not
+        Row(status="new", company="D", role="R4", last_touched="6/1"),  # not sent
+        Row(status="sent", company="E", role="R5", last_touched=""),  # no date → skip
     ]
     due = pipeline.followups_due(rows, days=3, today=_TODAY)
     assert [r.company for r in due] == ["A"]

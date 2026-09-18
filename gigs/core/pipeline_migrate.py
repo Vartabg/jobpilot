@@ -56,19 +56,21 @@ def migrate_applied_into_pipeline(
                     saved_short = dt.strftime("%-m/%-d")
                 except Exception:
                     pass
-            existing.append(pipeline.Row(
-                status="sent",
-                score=int(row.get("fit_score", 0)),
-                company=row.get("company", "") or "",
-                role=(row.get("title", "") or "").split("|")[0].strip()[:80],
-                pay="",
-                apply=row.get("apply_url", "") or row.get("url", "") or "",
-                saved=saved_short,
-                last_touched=saved_short,
-                next_action="follow up if no reply by Friday",
-                notes="migrated from applied.jsonl",
-                gig_id=gid,
-            ))
+            existing.append(
+                pipeline.Row(
+                    status="sent",
+                    score=int(row.get("fit_score", 0)),
+                    company=row.get("company", "") or "",
+                    role=(row.get("title", "") or "").split("|")[0].strip()[:80],
+                    pay="",
+                    apply=row.get("apply_url", "") or row.get("url", "") or "",
+                    saved=saved_short,
+                    last_touched=saved_short,
+                    next_action="follow up if no reply by Friday",
+                    notes="migrated from applied.jsonl",
+                    gig_id=gid,
+                )
+            )
             existing_ids.add(gid)
             added += 1
     except Exception:

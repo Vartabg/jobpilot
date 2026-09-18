@@ -8,6 +8,8 @@ def test_form_location_guard_blocks_uk_work_authorization():
 
 
 def test_form_location_guard_blocks_munich_requirement():
-    text = "Candidates must be based in Germany and within commuting distance of Munich."
+    text = (
+        "Candidates must be based in Germany and within commuting distance of Munich."
+    )
 
     assert _detect_disallowed_form_location(text) == "based in germany"

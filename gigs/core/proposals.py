@@ -311,23 +311,40 @@ def _pick_fte_track(gig: Gig) -> str:
     text = _text(gig)
 
     fde_title = (
-        "forward deployed", "solutions engineer", "implementation engineer",
-        "customer engineer", "customer success engineer", "technical support",
-        "support engineer", "field engineer", "field service", "deployed engineer",
+        "forward deployed",
+        "solutions engineer",
+        "implementation engineer",
+        "customer engineer",
+        "customer success engineer",
+        "technical support",
+        "support engineer",
+        "field engineer",
+        "field service",
+        "deployed engineer",
     )
     if any(p in title for p in fde_title):
         return "Forward Deployed / Solutions"
 
     ai_title = (
-        "applied ai", "ai engineer", "llm engineer", "agent engineer",
-        "agent builder", "ml engineer", "ai automation", "ai architect",
+        "applied ai",
+        "ai engineer",
+        "llm engineer",
+        "agent engineer",
+        "agent builder",
+        "ml engineer",
+        "ai automation",
+        "ai architect",
     )
     if any(p in title for p in ai_title):
         return "Applied AI / builder"
 
     fs_title = (
-        "full stack", "fullstack", "full-stack", "founding engineer",
-        "software engineer", "product engineer",
+        "full stack",
+        "fullstack",
+        "full-stack",
+        "founding engineer",
+        "software engineer",
+        "product engineer",
     )
     if any(p in title for p in fs_title):
         return "Full-stack / product engineer"
@@ -444,32 +461,25 @@ def _is_contract_lead(gig: Gig) -> bool:
 # Full-time framing: honest builder + field/customer track. No year counts,
 # no "end to end", no company-SWE tenure claim. Not a contractor audit pitch.
 _FTE_CAPABILITY = {
-    "RAG / internal knowledge assistant":
-        "I build AI and document-retrieval systems in Python and TypeScript, "
-        "with human review and security in mind. Shipped solo products are "
-        "the proof — I don't have company SWE tenure.",
-    "Interactive 3D performance rescue":
-        "I build web and 3D front-ends in React/Next.js and Three.js, including "
-        "performance work on mobile (solo production work, not a company ladder).",
-    "Forward Deployed / Solutions":
-        "I'm a customer-facing technical builder — Navy electronics, field "
-        "service deployments, and solo AI/full-stack products. I like sitting "
-        "with real users, shipping the fix, and owning the outcome.",
-    "Applied AI / builder":
-        "I build practical LLM and agent tooling (Python/TypeScript, browser "
-        "automation, human-in-the-loop). Solo shipped work is the proof — "
-        "I don't claim company SWE years.",
-    "Full-stack / product engineer":
-        "I ship full-stack web and AI product work as a solo builder "
-        "(Next.js, React, APIs, deploy). Customer-facing field background "
-        "plus the products I ship.",
+    "RAG / internal knowledge assistant": "I build AI and document-retrieval systems in Python and TypeScript, "
+    "with human review and security in mind. Shipped solo products are "
+    "the proof — I don't have company SWE tenure.",
+    "Interactive 3D performance rescue": "I build web and 3D front-ends in React/Next.js and Three.js, including "
+    "performance work on mobile (solo production work, not a company ladder).",
+    "Forward Deployed / Solutions": "I'm a customer-facing technical builder — Navy electronics, field "
+    "service deployments, and solo AI/full-stack products. I like sitting "
+    "with real users, shipping the fix, and owning the outcome.",
+    "Applied AI / builder": "I build practical LLM and agent tooling (Python/TypeScript, browser "
+    "automation, human-in-the-loop). Solo shipped work is the proof — "
+    "I don't claim company SWE years.",
+    "Full-stack / product engineer": "I ship full-stack web and AI product work as a solo builder "
+    "(Next.js, React, APIs, deploy). Customer-facing field background "
+    "plus the products I ship.",
     # Legacy contract offer names can still appear if stack-matched on FTE.
-    "AI workflow audit + one automation":
-        "I work on practical LLM and automation workflows — tools, "
-        "orchestration, and human-in-the-loop. Not model training.",
-    "AI workflow audit":
-        "I build practical AI and automation with LLM APIs and tools, with "
-        "human review in the loop.",
+    "AI workflow audit + one automation": "I work on practical LLM and automation workflows — tools, "
+    "orchestration, and human-in-the-loop. Not model training.",
+    "AI workflow audit": "I build practical AI and automation with LLM APIs and tools, with "
+    "human review in the loop.",
 }
 _FTE_CAPABILITY_DEFAULT = (
     "I'm a customer-facing technical builder with field deployment experience "
@@ -480,22 +490,18 @@ _FTE_CAPABILITY_DEFAULT = (
 # Contract framing: a bounded, service-shaped offer (appropriate for Upwork /
 # explicit contract roles).
 _CONTRACT_CAPABILITY = {
-    "RAG / internal knowledge assistant":
-        "The scope looks like a fit for a lean RAG MVP: ingestion, chunking, "
-        "citations, a simple UI, and a clear update path. I'd start with a small "
-        "architecture pass, then ship the first working assistant.",
-    "Interactive 3D performance rescue":
-        "My strongest fit is stabilizing Three.js/R3F experiences that are slow "
-        "or fragile on mobile — a focused performance triage, then a short pass "
-        "on the highest-impact fixes.",
-    "AI workflow audit + one automation":
-        "This looks like a practical AI workflow problem, not a model-training "
-        "one. I'd map the current workflow, find the one automation with the "
-        "fastest ROI, and keep anything sensitive out of cloud AI.",
-    "AI workflow audit":
-        "I think the fastest path is a bounded AI workflow audit before "
-        "building — separating no-AI fixes from AI-worthy work and recommending "
-        "the smallest useful automation.",
+    "RAG / internal knowledge assistant": "The scope looks like a fit for a lean RAG MVP: ingestion, chunking, "
+    "citations, a simple UI, and a clear update path. I'd start with a small "
+    "architecture pass, then ship the first working assistant.",
+    "Interactive 3D performance rescue": "My strongest fit is stabilizing Three.js/R3F experiences that are slow "
+    "or fragile on mobile — a focused performance triage, then a short pass "
+    "on the highest-impact fixes.",
+    "AI workflow audit + one automation": "This looks like a practical AI workflow problem, not a model-training "
+    "one. I'd map the current workflow, find the one automation with the "
+    "fastest ROI, and keep anything sensitive out of cloud AI.",
+    "AI workflow audit": "I think the fastest path is a bounded AI workflow audit before "
+    "building — separating no-AI fixes from AI-worthy work and recommending "
+    "the smallest useful automation.",
 }
 _CONTRACT_CAPABILITY_DEFAULT = _CONTRACT_CAPABILITY["AI workflow audit"]
 
@@ -547,7 +553,9 @@ def build_revenue_brief(gig: Gig) -> RevenueBrief:
         parts.append(_CONTRACT_CAPABILITY.get(offer, _CONTRACT_CAPABILITY_DEFAULT))
         if proof:
             parts.append(f"A bit of relevant work: {proof}")
-        parts.append(f"Service outline: {pages['service_page']} · Relevant work: {pages['work_page']}")
+        parts.append(
+            f"Service outline: {pages['service_page']} · Relevant work: {pages['work_page']}"
+        )
         parts.append("Open to a short call to scope it? Happy to share more first.")
     else:
         parts.append(_FTE_CAPABILITY.get(offer, _FTE_CAPABILITY_DEFAULT))
@@ -568,6 +576,7 @@ def build_revenue_brief(gig: Gig) -> RevenueBrief:
             "Draft for %s contains placeholder %r — identity/links did not "
             "resolve. Fix data/gigs/preferences.json or the jobpilot profile "
             "before sending.",
-            gig.id, leak,
+            gig.id,
+            leak,
         )
     return RevenueBrief(offer=offer, action=action, draft=draft)

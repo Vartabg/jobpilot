@@ -7,7 +7,7 @@ All data stays on your machine - nothing is sent externally.
 
 import json
 from pathlib import Path
-from typing import Optional
+
 from pydantic import BaseModel, Field
 from rich.console import Console
 from rich.table import Table
@@ -75,11 +75,11 @@ class UserProfile(BaseModel):
 class ProfileStore:
     """Manages loading/saving of user profile data"""
 
-    def __init__(self, data_dir: Optional[Path] = None):
+    def __init__(self, data_dir: Path | None = None):
         self.data_dir = data_dir or DATA_DIR
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.profile_path = self.data_dir / "profile.json"
-        self._profile: Optional[UserProfile] = None
+        self._profile: UserProfile | None = None
 
     def load(self) -> UserProfile:
         """Load profile from disk, or create empty one"""
@@ -98,7 +98,7 @@ class ProfileStore:
 
         return self._profile
 
-    def save(self, profile: Optional[UserProfile] = None):
+    def save(self, profile: UserProfile | None = None):
         """Save profile to disk"""
         if profile:
             self._profile = profile
@@ -166,7 +166,7 @@ class ProfileStore:
 
         console.print(table)
 
-    def get_field_value(self, field_type: str) -> Optional[str]:
+    def get_field_value(self, field_type: str) -> str | None:
         """Get the appropriate profile value for a detected field type"""
         profile = self.load()
 
@@ -196,7 +196,7 @@ class ProfileStore:
 
 
 # Global instance for convenience
-_store: Optional[ProfileStore] = None
+_store: ProfileStore | None = None
 
 
 def get_profile_store() -> ProfileStore:

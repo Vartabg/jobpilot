@@ -13,7 +13,7 @@ posting. Saved as plain text in data/cover_letters/.
 import hashlib
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+
 from jobpilot.core.logger import get_logger
 
 log = get_logger(__name__)
@@ -33,7 +33,7 @@ def generate_cover_letter(
     jd_raw_text: str,
     candidate_name: str = "",
     candidate_title: str = "",
-) -> Optional[str]:
+) -> str | None:
     """Generate a tailored cover letter.
 
     Returns the cover letter text, or None if generation fails.
@@ -64,7 +64,11 @@ def generate_cover_letter(
                 top_k=5,
             )
 
-        reqs_text = "\n".join(f"- {r}" for r in jd_requirements[:8]) if jd_requirements else "Not specified"
+        reqs_text = (
+            "\n".join(f"- {r}" for r in jd_requirements[:8])
+            if jd_requirements
+            else "Not specified"
+        )
 
         prompt = f"""Write a professional, compelling cover letter for the following job application.
 Keep it to 3 concise paragraphs. Use first person. Do NOT include placeholder brackets.
@@ -75,13 +79,13 @@ Key Requirements:
 {reqs_text}
 
 Candidate Background:
-{resume_ctx or 'Experienced professional'}
-{f'Name: {candidate_name}' if candidate_name else ''}
-{f'Current Title: {candidate_title}' if candidate_title else ''}
+{resume_ctx or "Experienced professional"}
+{f"Name: {candidate_name}" if candidate_name else ""}
+{f"Current Title: {candidate_title}" if candidate_title else ""}
 
-Today's date: {datetime.now().strftime('%B %d, %Y')}
+Today's date: {datetime.now().strftime("%B %d, %Y")}
 
-Begin the letter with "Dear Hiring Manager," and end with "Sincerely, {candidate_name or 'The Candidate'}".
+Begin the letter with "Dear Hiring Manager," and end with "Sincerely, {candidate_name or "The Candidate"}".
 """
 
         try:
@@ -94,7 +98,9 @@ Begin the letter with "Dear Hiring Manager," and end with "Sincerely, {candidate
             # Clean up
             letter = letter.strip()
             cache_path.write_text(letter)
-            log.info(f"Generated cover letter ({len(letter)} chars) → {cache_path.name}")
+            log.info(
+                f"Generated cover letter ({len(letter)} chars) → {cache_path.name}"
+            )
             return letter
 
         log.warning("Cover letter generation returned insufficient text")
@@ -105,7 +111,7 @@ Begin the letter with "Dear Hiring Manager," and end with "Sincerely, {candidate
         return None
 
 
-def get_cached_path(jd_raw_text: str) -> Optional[Path]:
+def get_cached_path(jd_raw_text: str) -> Path | None:
     """Return the cached cover letter file path if it exists."""
     hash_key = _jd_hash(jd_raw_text)
     path = DATA_DIR / f"{hash_key}.txt"

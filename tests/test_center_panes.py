@@ -9,7 +9,7 @@ from jobpilot.ui.center_panes import (
 
 
 def test_translate_log_line_mark_applied():
-    line = '2026-06-18 12:00:00 INFO: POST /api/job/abc123/mark-applied'
+    line = "2026-06-18 12:00:00 INFO: POST /api/job/abc123/mark-applied"
     assert _translate_log_line(line) == "You marked an application as submitted"
 
 

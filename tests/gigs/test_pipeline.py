@@ -1,13 +1,13 @@
 """Pipeline schema, parser, renderer, merge logic, and migration tests."""
+
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from pathlib import Path
 
 from jobpilot.gigs.core import pipeline
 from jobpilot.gigs.core.models import Gig
-from datetime import datetime
-
 from jobpilot.gigs.core.pipeline import (
     Row,
     excluded_ids,
@@ -44,11 +44,28 @@ def _gig(**overrides) -> Gig:
 
 def test_render_then_parse_preserves_row_data() -> None:
     rows = [
-        Row(status="new", score=100, company="Acme", role="Sr Eng",
-            pay="$180-200K", apply="mailto:jobs@acme.io", gig_id="hn-1"),
-        Row(status="sent", score=95, company="Bjak", role="QA Eng",
-            pay="", apply="https://bjak.my/en", saved="5/3", last_touched="5/4",
-            next_action="follow up by 5/10", notes="applied via email", gig_id="wwr-2"),
+        Row(
+            status="new",
+            score=100,
+            company="Acme",
+            role="Sr Eng",
+            pay="$180-200K",
+            apply="mailto:jobs@acme.io",
+            gig_id="hn-1",
+        ),
+        Row(
+            status="sent",
+            score=95,
+            company="Bjak",
+            role="QA Eng",
+            pay="",
+            apply="https://bjak.my/en",
+            saved="5/3",
+            last_touched="5/4",
+            next_action="follow up by 5/10",
+            notes="applied via email",
+            gig_id="wwr-2",
+        ),
     ]
     rendered = render(rows)
     parsed = parse_text(rendered)
@@ -103,8 +120,15 @@ def test_merge_new_gigs_appends_only_unseen_ids() -> None:
 
 def test_merge_preserves_user_edits_on_existing_rows() -> None:
     existing = [
-        Row(gig_id="hn-1", status="sent", company="Acme", role="X",
-            saved="5/3", last_touched="5/4", next_action="ping by 5/10"),
+        Row(
+            gig_id="hn-1",
+            status="sent",
+            company="Acme",
+            role="X",
+            saved="5/3",
+            last_touched="5/4",
+            next_action="ping by 5/10",
+        ),
     ]
     merged = merge_new_gigs(existing, [_gig(id="hn-1")])
     # Existing row unchanged, no duplicate added
@@ -215,7 +239,9 @@ def _simulated_digest_run(md: Path, snap: Path, ranked: list[Gig], today: str) -
     """Mirror cli.digest's pipeline flow: parse → diff vs snapshot → merge →
     write → persist snapshot at end of run."""
     existing = stamp_status_changes(
-        pipeline.load_status_snapshot(snap), parse(md), today=today,
+        pipeline.load_status_snapshot(snap),
+        parse(md),
+        today=today,
     )
     updated = merge_new_gigs(existing, ranked)
     write(updated, md)
@@ -252,7 +278,9 @@ def test_snapshot_diff_stamps_user_edit_between_runs(tmp_path: Path) -> None:
 
 
 def test_write_refuses_to_shrink_and_keeps_disk_file(
-    tmp_path: Path, monkeypatch, caplog,
+    tmp_path: Path,
+    monkeypatch,
+    caplog,
 ) -> None:
     out = tmp_path / "pipeline.md"
     rows = [
@@ -264,7 +292,9 @@ def test_write_refuses_to_shrink_and_keeps_disk_file(
 
     # Simulate a regression that silently loses rows (preservation disabled).
     monkeypatch.setattr(
-        pipeline, "_preserve_user_edits", lambda merged, on_disk, **kw: merged,
+        pipeline,
+        "_preserve_user_edits",
+        lambda merged, on_disk, **kw: merged,
     )
     with caplog.at_level(logging.ERROR, logger="jobpilot.gigs.core.pipeline"):
         refused = write(rows[:1], out)  # shrink of 4 > tolerance — must abort

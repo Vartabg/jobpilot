@@ -1,4 +1,5 @@
 """seen.json semantics: archived permanence and first-seen stamps."""
+
 from __future__ import annotations
 
 import json
@@ -40,15 +41,19 @@ def test_mark_seen_keeps_first_timestamp(tmp_path: Path, monkeypatch) -> None:
 def test_sync_first_seen_stamps_keeps_and_drops(tmp_path: Path, monkeypatch) -> None:
     _point_store_at(tmp_path, monkeypatch)
     old = (datetime.now() - timedelta(days=10)).isoformat()
-    (tmp_path / "first_seen.json").write_text(json.dumps({
-        "still-new": old,
-        "decided-since": old,
-    }))
+    (tmp_path / "first_seen.json").write_text(
+        json.dumps(
+            {
+                "still-new": old,
+                "decided-since": old,
+            }
+        )
+    )
 
     out = store.sync_first_seen(["still-new", "fresh"])
 
-    assert out["still-new"] == old           # existing stamp preserved
-    assert "decided-since" not in out        # no longer `new` → dropped
+    assert out["still-new"] == old  # existing stamp preserved
+    assert "decided-since" not in out  # no longer `new` → dropped
     assert datetime.fromisoformat(out["fresh"])  # stamped now
     assert json.loads((tmp_path / "first_seen.json").read_text()) == out
 

@@ -24,15 +24,13 @@ from dataclasses import asdict
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from pydantic import BaseModel
 
-from jobpilot.core.server_auth import access_url, install_authentication
+from jobpilot.core.application_tracker import get_application_tracker
 from jobpilot.core.logger import get_logger
 from jobpilot.core.profile_store import get_profile_store
-from jobpilot.core.application_tracker import get_application_tracker
 from jobpilot.core.queue_builder import (
-    QUEUE_PATH,
     QueueLoadError,
     build_queue,
     focus_queue_company_first,
@@ -42,6 +40,7 @@ from jobpilot.core.queue_builder import (
     save_queue,
     update_job_status,
 )
+from jobpilot.core.server_auth import access_url, install_authentication
 
 log = get_logger(__name__)
 
@@ -589,9 +588,9 @@ def get_local_ip() -> str:
 
 
 def run_server(host: str = "127.0.0.1", port: int | None = None) -> None:
-    from jobpilot.core.config import DEFAULT_SERVE_PORT
-
     import uvicorn
+
+    from jobpilot.core.config import DEFAULT_SERVE_PORT
 
     serve_port = port or DEFAULT_SERVE_PORT
     print(f"\n  JobPilot — private access link:\n    {access_url(host, serve_port)}\n")

@@ -2,18 +2,16 @@
 Tests for selector_registry.py — SelectorChain and known selector definitions.
 """
 
-import pytest
 from jobpilot.core.selector_registry import (
-    SelectorChain,
-    NEXT_BUTTON,
-    FILE_INPUTS,
     EASY_APPLY_MODAL,
+    FILE_INPUTS,
+    NEXT_BUTTON,
     SUBMIT_BUTTON,
+    SelectorChain,
 )
 
 
 class TestSelectorChain:
-
     def test_has_selectors_attribute(self):
         chain = SelectorChain(
             name="test",
@@ -34,7 +32,6 @@ class TestSelectorChain:
 
 
 class TestKnownSelectors:
-
     def test_next_button_exists(self):
         assert isinstance(NEXT_BUTTON, SelectorChain)
         assert len(NEXT_BUTTON.selectors) > 0

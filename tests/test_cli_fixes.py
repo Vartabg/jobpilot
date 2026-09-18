@@ -20,6 +20,7 @@ runner = CliRunner()
 # Fix 2: score command on non-UTF-8 / PDF files
 # ---------------------------------------------------------------------------
 
+
 def test_score_binary_file_friendly_error(tmp_path: Path):
     binary = tmp_path / "job-description.txt"
     binary.write_bytes(b"\x89PNG\r\n\x1a\n\x00\xff\xfe\x80binary garbage")
@@ -45,6 +46,7 @@ def test_score_pdf_file_tailored_error(tmp_path: Path):
 # ---------------------------------------------------------------------------
 # Fix 3: claim-lock — missing file skips the gate; glob picks newest by mtime
 # ---------------------------------------------------------------------------
+
 
 def _fake_job() -> SimpleNamespace:
     return SimpleNamespace(
@@ -116,6 +118,7 @@ def test_resolve_claim_lock_path_honors_explicit_override(tmp_path: Path):
 # ---------------------------------------------------------------------------
 # Fix 4: years-of-experience parsing
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize(
     ("raw", "expected"),
