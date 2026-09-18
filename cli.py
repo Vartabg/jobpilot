@@ -1089,42 +1089,20 @@ def history(
 
 @app.command()
 def serve(
-    host: str = typer.Option(
-        "127.0.0.1",
-        help="Bind address. Loopback by default (safe). The dashboard serves "
-        "your name/email/phone with no authentication, so only widen this "
-        "deliberately — e.g. --host 100.x.y.z for a specific Tailscale IP. "
-        "Avoid 0.0.0.0, which exposes your PII to everyone on the network.",
-    ),
-    port: Optional[int] = typer.Option(
-        None,
-        help="Port (default: 8767 — EYE uses 8766)",
-    ),
+    host: str = typer.Option("127.0.0.1", help="Bind address. Use a specific Tailscale IP for phone access."),
+    port: Optional[int] = typer.Option(None, help="Port (default: 8767)"),
+    allow_lan: bool = typer.Option(False, "--allow-lan", help="Allow a non-loopback bind address."),
 ):
-    """Start the remote dashboard (access from phone via Tailscale).
+    """Start the dashboard and print its private sign-in link.
 
-    Binds to loopback (127.0.0.1) by default. To reach it from your phone over
-    Tailscale, pass your machine's Tailscale IP explicitly with --host.
+    Phone access: pass --host <tailscale-ip> --allow-lan.
     """
-    from jobpilot.core.config import DEFAULT_SERVE_PORT
-    from jobpilot.core.server import run_server, get_tailscale_ip, get_local_ip
+    from jobpilot.core.server import run_server
 
-    serve_port = port or DEFAULT_SERVE_PORT
-    ts_ip = get_tailscale_ip()
-    lan_ip = get_local_ip()
-
-    console.print(Panel.fit(
-        f"[bold cyan]🚀 JobPilot Remote Dashboard[/bold cyan]\n"
-        + (f"[bold green]Tailscale:[/bold green]  http://{ts_ip}:{serve_port}\n" if ts_ip else "[yellow]Tailscale not detected — start it with `tailscale up`[/yellow]\n")
-        + f"[bold]LAN:[/bold]        http://{lan_ip}:{serve_port}\n"
-        + f"[dim]Local:       http://127.0.0.1:{serve_port}[/dim]\n"
-        + f"\n[dim]Open the Tailscale URL on your phone to apply remotely.[/dim]\n"
-        + f"[dim]Keep this terminal open. Ctrl+C to stop.[/dim]",
-        border_style="cyan",
-        title="Mobile Access",
-    ))
-
-    run_server(host=host, port=serve_port)
+    if host not in ("127.0.0.1", "localhost", "::1") and not allow_lan:
+        console.print("[red]Remote access needs --allow-lan.[/red] Use --host with your specific Tailscale IP.")
+        raise typer.Exit(code=1)
+    run_server(host=host, port=port)
 
 
 @app.command()

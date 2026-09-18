@@ -25,6 +25,7 @@ from typing import Any, Optional
 
 from jobpilot.core.application_evidence import ApplicationEvidenceIndex
 from jobpilot.core.application_tracker import get_application_tracker
+from jobpilot.core.atomic_io import atomic_write_text
 from jobpilot.core.config import DATA_DIR
 from jobpilot.core.logger import get_logger
 from jobpilot.core.policy_config import get_policy, reset_policy_cache
@@ -500,9 +501,9 @@ def save_queue(jobs: list[QueueJob]) -> Path:
     """Write queue to disk (JSON + JS so file:// dashboards can load it)."""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     data = [asdict(j) for j in jobs]
-    QUEUE_PATH.write_text(json.dumps(data, indent=2))
+    atomic_write_text(QUEUE_PATH, json.dumps(data, indent=2))
     js_path = DATA_DIR / "queue.js"
-    js_path.write_text(f"window.JOBS = {json.dumps(data)};")
+    atomic_write_text(js_path, f"window.JOBS = {json.dumps(data)};")
     log.info("Saved %d jobs to %s", len(jobs), QUEUE_PATH)
     return QUEUE_PATH
 
@@ -519,22 +520,36 @@ def tracker_status_for_job(tracker, url: str, company: str) -> Optional[str]:
     return None
 
 
+class QueueLoadError(ValueError):
+    """The queue needs recovery before normal reads or refreshes can continue."""
+
+
 def load_queue() -> list[QueueJob]:
-    """Load queue from disk."""
+    """Read without removing damaged state or silently discarding history."""
     if not QUEUE_PATH.exists():
         return []
+    # Read failures are not evidence of corrupt contents; leave the file alone.
+    content = QUEUE_PATH.read_text()
     try:
-        data = json.loads(QUEUE_PATH.read_text())
-        # Drop unknown keys so a schema change in queue.json (e.g. a field added
-        # in a newer version) doesn't crash the load and wipe applied/skipped history.
+        data = json.loads(content)
+        if not isinstance(data, list):
+            raise ValueError("queue must be a list")
         known = QueueJob.__dataclass_fields__
-        return [
-            QueueJob(**{k: v for k, v in item.items() if k in known})
-            for item in data
-        ]
-    except Exception as e:
-        log.warning("Could not load queue: %s", e)
-        return []
+        return [QueueJob(**{k: v for k, v in item.items() if k in known}) for item in data]
+    except (ValueError, TypeError, AttributeError) as exc:
+        # One recovery copy per distinct payload. Repeated polling neither
+        # creates endless copies nor overwrites a previous corrupt version.
+        fingerprint = hashlib.sha256(content.encode()).hexdigest()
+        backup = QUEUE_PATH.with_name(f"{QUEUE_PATH.name}.{fingerprint}.corrupt")
+        try:
+            if not backup.exists():
+                atomic_write_text(backup, content)
+        except OSError as backup_error:
+            log.error("Queue backup failed: %s", backup_error)
+        log.error("Queue needs recovery; original retained at %s", QUEUE_PATH)
+        raise QueueLoadError(
+            f"The saved queue could not be read. Repair {QUEUE_PATH} from a recovery copy before retrying."
+        ) from exc
 
 
 def update_job_status(job_id: str, status: str) -> bool:

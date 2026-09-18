@@ -1,0 +1,29 @@
+name: Checks
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install test dependencies
+        run: |
+          python -m pip install -e '.[dev]'
+          python -m playwright install --with-deps chromium
+          npm install --prefix "$RUNNER_TEMP/ui-audit" --no-save --no-package-lock axe-core@4.13.0
+      - name: Python regressions
+        run: PYTHONPATH="$(dirname "$PWD")" python -m pytest tests/ -q
+      - name: Swipe action regressions
+        run: node --test tests/swipe_actions.test.cjs
+      - name: Browser and accessibility checks
+        run: python scripts/check_ui.py --axe "$RUNNER_TEMP/ui-audit/node_modules/axe-core/axe.min.js"
