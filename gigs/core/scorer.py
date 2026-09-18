@@ -35,6 +35,7 @@ import re
 
 from jobpilot.gigs.core import preferences
 from jobpilot.gigs.core.models import Gig
+from jobpilot.core.relocation_signals import detect_relocation_offer
 from jobpilot.core.work_style import is_contract_friendly, is_w2_only, score_work_style
 from jobpilot.gigs.core import scoring_rules as _rules
 
@@ -483,6 +484,12 @@ def score_gig(gig: Gig) -> Gig:
     elif hourly_eq >= 50:
         score += 5
         reasons.append(f"+5 pay ${hourly_eq:.0f}/hr")
+
+    # ----- Employer-offered relocation (mobility help on the table) -----
+    relocation_offer = detect_relocation_offer(full_text)
+    if relocation_offer:
+        score += 10
+        reasons.append(f"+10 relocation offered ({relocation_offer})")
 
     # ----- Work style (autonomy / contract / anti-9-5) -----
     ws_delta, ws_reasons = score_work_style(full_text, title=gig.title or "")
