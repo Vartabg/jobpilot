@@ -100,11 +100,6 @@ def clear_stale_locks(profile_dir: Path) -> None:
 def _launch_command(debug_port: int, profile_dir: Path) -> list[str] | None:
     args = [
         f"--remote-debugging-port={debug_port}",
-        # Restrict DevTools WebSocket connections to the local tooling origin so
-        # a hostile page loaded in this same browser (e.g. a job listing during
-        # a fill run) cannot connect to the CDP endpoint and drive the browser
-        # as the logged-in user. Playwright's connect_over_cdp is unaffected.
-        f"--remote-allow-origins=http://127.0.0.1:{debug_port}",
         "--enable-automation",
         f"--user-data-dir={profile_dir}",
         "--no-first-run",
