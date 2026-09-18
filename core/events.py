@@ -13,6 +13,7 @@ or any UI library directly.
 
 from __future__ import annotations
 
+import contextlib
 from collections import defaultdict
 from collections.abc import Callable
 
@@ -39,10 +40,8 @@ class EventBus:
 
     def off(self, event: str, callback: Callable) -> None:
         """Remove *callback* from *event*."""
-        try:
+        with contextlib.suppress(ValueError):
             self._listeners[event].remove(callback)
-        except ValueError:
-            pass
 
     def emit(self, event: str, **data) -> None:
         """Invoke every listener registered for *event*."""

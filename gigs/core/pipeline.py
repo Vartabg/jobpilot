@@ -633,10 +633,7 @@ def split_over_cap(
     Spill is the rest. Decided rows are never spilled.
     """
     now = now or datetime.now()
-    if max_new is None:
-        cap = max_live_new()
-    else:
-        cap = max(1, int(max_new))
+    cap = max_live_new() if max_new is None else max(1, int(max_new))
     news = [r for r in rows if r.status == "new"]
     others = [r for r in rows if r.status != "new"]
     if len(news) <= cap:

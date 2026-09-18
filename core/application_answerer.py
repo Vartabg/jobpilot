@@ -94,7 +94,6 @@ class ApplicationAnswerer:
         """Generate one answer for one application question."""
         clean_question = " ".join((question or "").split())
         profile = self.profile_store.load()
-        accounts = self.load_accounts()
         selected = self.select_accounts(
             clean_question, jd_text=jd_text, company=company, title=title
         )

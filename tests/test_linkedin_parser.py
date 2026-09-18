@@ -19,43 +19,43 @@ class TestSemanticInference:
         return self.parser._infer_semantic_type(label, placeholder, field_type)
 
     def test_first_name(self):
-        stype, conf = self._infer("First name")
+        stype, _conf = self._infer("First name")
         assert stype == SemanticType.FIRST_NAME
 
     def test_last_name(self):
-        stype, conf = self._infer("Last name")
+        stype, _conf = self._infer("Last name")
         assert stype == SemanticType.LAST_NAME
 
     def test_email(self):
-        stype, conf = self._infer("Email address")
+        stype, _conf = self._infer("Email address")
         assert stype == SemanticType.EMAIL
 
     def test_phone(self):
-        stype, conf = self._infer("Phone number")
+        stype, _conf = self._infer("Phone number")
         assert stype == SemanticType.PHONE
 
     def test_city(self):
-        stype, conf = self._infer("City")
+        stype, _conf = self._infer("City")
         assert stype == SemanticType.CITY
 
     def test_linkedin_url(self):
-        stype, conf = self._infer("LinkedIn Profile URL")
+        stype, _conf = self._infer("LinkedIn Profile URL")
         assert stype == SemanticType.LINKEDIN_URL
 
     def test_resume(self):
-        stype, conf = self._infer("Upload resume", FieldType.FILE)
+        stype, _conf = self._infer("Upload resume", FieldType.FILE)
         assert stype == SemanticType.RESUME
 
     def test_years_of_experience(self):
-        stype, conf = self._infer("Years of experience")
+        stype, _conf = self._infer("Years of experience")
         assert stype == SemanticType.YEARS_EXPERIENCE
 
     def test_unknown_label(self):
-        stype, conf = self._infer("What is your favorite color?")
+        stype, _conf = self._infer("What is your favorite color?")
         assert stype in (SemanticType.UNKNOWN, SemanticType.CUSTOM_QUESTION)
 
     def test_case_insensitive(self):
-        stype, conf = self._infer("EMAIL ADDRESS")
+        stype, _conf = self._infer("EMAIL ADDRESS")
         assert stype == SemanticType.EMAIL
 
     def test_confidence_above_zero_for_known(self):

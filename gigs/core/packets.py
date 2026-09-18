@@ -62,7 +62,8 @@ def prep_result(index: int, gig: Gig) -> list[str]:
     if gig.apply_url and gig.apply_url != gig.url:
         snapshot.append(f"- Post: {gig.url}")
     snapshot.append("")
-    return snapshot + [
+    return [
+        *snapshot,
         "### Why This Fits",
         "",
         "- AI workflow/RAG/automation language matches your current service offer.",
@@ -83,12 +84,10 @@ def prep_result(index: int, gig: Gig) -> list[str]:
         "",
         "### Two-Sentence Pitch",
         "",
-        (
-            "I build practical AI workflow systems: retrieval, tool use, automation, "
-            "and human-in-the-loop interfaces. I would start by mapping the current "
-            "workflow, shipping the smallest useful path, and keeping sensitive data "
-            "out of cloud AI unless it is explicitly safe."
-        ),
+        "I build practical AI workflow systems: retrieval, tool use, automation, "
+        "and human-in-the-loop interfaces. I would start by mapping the current "
+        "workflow, shipping the smallest useful path, and keeping sensitive data "
+        "out of cloud AI unless it is explicitly safe.",
         "",
         "### Resume Bullet Set",
         "",

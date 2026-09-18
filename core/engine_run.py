@@ -404,7 +404,7 @@ async def run_watch_loop(engine: ApplicationEngine, *, watch: bool) -> None:
 
                     suggestions = []
                     auto_filled_count = 0
-                    for i, field in enumerate(app_page.fields):
+                    for _i, field in enumerate(app_page.fields):
                         suggestion = {
                             "label": (field.label or field.semantic_type.value),
                             "confidence": field.confidence,

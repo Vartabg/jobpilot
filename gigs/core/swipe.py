@@ -8,6 +8,7 @@ on-demand model: "give me the jobs", swipe through, apply with one tap.
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Callable
 from datetime import datetime
 from urllib.parse import quote
@@ -84,10 +85,8 @@ def build_queue(
     # Resolve WWR listings to a real apply target (mailto/ATS/careers) so the
     # Apply tap doesn't dead-end on the paywalled aggregator page. Network
     # fetches are capped inside enrich_apply_urls.
-    try:
+    with contextlib.suppress(Exception):
         enrich_apply_urls(ranked)
-    except Exception:
-        pass
     return ranked
 
 

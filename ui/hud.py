@@ -271,7 +271,7 @@ def _header_panel(
 
 
 def _gigs_table(gigs: list[Gig], state: HudState, *, plain: bool = False) -> Table:
-    title = f"Contract gigs ({len(gigs)})" if plain else f"Contract gigs ({len(gigs)})"
+    title = f"Contract gigs ({len(gigs)})"
     t = Table(
         title=title,
         box=box.SIMPLE_HEAD,

@@ -38,9 +38,7 @@ def supports_inline_images(stream: TextIO | None = None) -> bool:
 
     if os.environ.get("TERM_PROGRAM") == "iTerm.app":
         return True
-    if os.environ.get("LC_TERMINAL", "").lower() == "iterm2":
-        return True
-    return False
+    return os.environ.get("LC_TERMINAL", "").lower() == "iterm2"
 
 
 def format_inline_image(

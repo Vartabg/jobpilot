@@ -9,12 +9,12 @@ Three modes from conservative to aggressive:
 
 import json
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 from jobpilot.core.config import DATA_DIR, SETTINGS_FILE
 
 
-class AutonomyMode(str, Enum):
+class AutonomyMode(StrEnum):
     """Graduated autonomy levels."""
 
     SUGGEST = "suggest"
@@ -44,9 +44,8 @@ class AutonomyConfig:
         """Should we auto-click Next after all fields are filled?"""
         if self.mode == AutonomyMode.SUGGEST:
             return False
-        if is_final_step and self.never_auto_submit:
-            return False
-        return True  # SEMI_AUTO and FULL_AUTO both auto-advance non-final steps
+        # SEMI_AUTO and FULL_AUTO both auto-advance; never auto-submit the final step.
+        return not (is_final_step and self.never_auto_submit)
 
     def save(self) -> None:
         """Persist settings to disk."""

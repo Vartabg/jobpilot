@@ -155,7 +155,7 @@ OVERLAY_TEMPLATE = (
     const CHAT_ACTIONS = __JP_CHAT_ACTIONS__;
     const SECTION_CONFIG = __JP_SURFACE_SECTIONS__;
     const DENSITY_LABELS = __JP_DENSITY_LABELS__;
-    
+
     // Create container with Shadow DOM for style isolation
     const container = document.createElement('div');
     container.id = 'jobpilot-overlay-container';
@@ -166,16 +166,16 @@ OVERLAY_TEMPLATE = (
         z-index: 999999;
         pointer-events: none;
     `;
-    
+
     const shadow = container.attachShadow({ mode: 'open' });
-    
+
     // Inject styles
     const styles = document.createElement('style');
     styles.textContent = `
         :host {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         }
-        
+
         .jp-panel {
             position: fixed;
             top: 80px;
@@ -189,7 +189,7 @@ OVERLAY_TEMPLATE = (
             pointer-events: auto;
             overflow: hidden;
         }
-        
+
         .jp-header {
             background: rgba(100, 255, 218, 0.1);
             padding: 12px 16px;
@@ -198,7 +198,7 @@ OVERLAY_TEMPLATE = (
             justify-content: space-between;
             border-bottom: 1px solid rgba(100, 255, 218, 0.2);
         }
-        
+
         .jp-title {
             font-size: 14px;
             font-weight: 600;
@@ -217,7 +217,7 @@ OVERLAY_TEMPLATE = (
             font-size: 10px;
             cursor: pointer;
         }
-        
+
         .jp-state-card {
             margin: 10px 12px 0;
             padding: 10px 12px;
@@ -289,13 +289,13 @@ OVERLAY_TEMPLATE = (
             color: #7e8a98;
             text-transform: none;
         }
-        
+
         .jp-body {
             padding: 12px;
             max-height: 400px;
             overflow-y: auto;
         }
-        
+
         .jp-field {
             background: rgba(255, 255, 255, 0.05);
             border-radius: 8px;
@@ -303,15 +303,15 @@ OVERLAY_TEMPLATE = (
             margin-bottom: 8px;
             border-left: 3px solid #64ffda;
         }
-        
+
         .jp-field.low-confidence {
             border-left-color: #ffa726;
         }
-        
+
         .jp-field.no-match {
             border-left-color: #ef5350;
         }
-        
+
         .jp-field-label {
             font-size: 11px;
             color: #888;
@@ -320,7 +320,7 @@ OVERLAY_TEMPLATE = (
             align-items: center;
             gap: 6px;
         }
-        
+
         .jp-field-value {
             font-size: 13px;
             color: #fff;
@@ -330,12 +330,12 @@ OVERLAY_TEMPLATE = (
             margin-bottom: 8px;
             word-break: break-word;
         }
-        
+
         .jp-actions {
             display: flex;
             gap: 6px;
         }
-        
+
         .jp-btn {
             flex: 1;
             padding: 6px 10px;
@@ -345,58 +345,58 @@ OVERLAY_TEMPLATE = (
             cursor: pointer;
             transition: all 0.2s;
         }
-        
+
         .jp-btn-approve {
             background: rgba(100, 255, 218, 0.2);
             color: #64ffda;
         }
-        
+
         .jp-btn-approve:hover {
             background: rgba(100, 255, 218, 0.4);
         }
-        
+
         .jp-btn-edit {
             background: rgba(255, 167, 38, 0.2);
             color: #ffa726;
         }
-        
+
         .jp-btn-edit:hover {
             background: rgba(255, 167, 38, 0.4);
         }
-        
+
         .jp-btn-skip {
             background: rgba(239, 83, 80, 0.2);
             color: #ef5350;
         }
-        
+
         .jp-btn-skip:hover {
             background: rgba(239, 83, 80, 0.4);
         }
-        
+
         .jp-footer {
             padding: 10px 16px;
             background: rgba(0, 0, 0, 0.2);
             font-size: 11px;
             color: #666;
         }
-        
+
         .jp-shortcut {
             background: rgba(255, 255, 255, 0.1);
             padding: 2px 6px;
             border-radius: 3px;
             font-family: monospace;
         }
-        
+
         .jp-confidence {
             font-size: 10px;
             padding: 2px 6px;
             border-radius: 10px;
         }
-        
+
         .jp-confidence.high { background: rgba(100, 255, 218, 0.2); color: #64ffda; }
         .jp-confidence.medium { background: rgba(255, 167, 38, 0.2); color: #ffa726; }
         .jp-confidence.low { background: rgba(239, 83, 80, 0.2); color: #ef5350; }
-        
+
         .jp-empty {
             text-align: center;
             padding: 20px;
@@ -500,11 +500,11 @@ OVERLAY_TEMPLATE = (
         .jp-chat-input-row button {
             flex: 0 0 auto;
         }
-        
+
         .jp-flash {
             animation: jp-flash-anim 0.3s ease-out;
         }
-        
+
         @keyframes jp-flash-anim {
             0% { background: rgba(100, 255, 218, 0.4); }
             100% { background: transparent; }
@@ -542,7 +542,7 @@ OVERLAY_TEMPLATE = (
             50% { transform: scale(1.1); opacity: 1; }
             100% { transform: scale(1); opacity: 1; }
         }
-        
+
         .jp-minimize-btn {
             background: none;
             border: none;
@@ -551,7 +551,7 @@ OVERLAY_TEMPLATE = (
             font-size: 16px;
             padding: 0 4px;
         }
-        
+
         .jp-minimized .jp-state-card,
         .jp-minimized .jp-body,
         .jp-minimized .jp-assistant,
@@ -610,7 +610,7 @@ OVERLAY_TEMPLATE = (
             font-style: italic !important;
             opacity: 0.7;
         }
-        
+
         /* --- Progress Dashboard --- */
         .jp-progress-bar {
             display: flex;
@@ -622,40 +622,40 @@ OVERLAY_TEMPLATE = (
             font-size: 11px;
             color: #999;
         }
-        
+
         .jp-progress-ring {
             width: 28px;
             height: 28px;
             flex-shrink: 0;
         }
-        
+
         .jp-progress-ring circle {
             fill: none;
             stroke-width: 3;
         }
-        
+
         .jp-progress-ring .bg { stroke: rgba(255,255,255,0.1); }
         .jp-progress-ring .fg {
             stroke: #64ffda;
             stroke-linecap: round;
             transition: stroke-dashoffset 0.5s ease;
         }
-        
+
         .jp-progress-text {
             display: flex;
             flex-direction: column;
             gap: 2px;
             line-height: 1.2;
         }
-        
+
         .jp-progress-text .main { color: #ccc; font-weight: 500; }
         .jp-progress-text .sub { color: #666; font-size: 10px; }
-        
+
         /* --- Field Highlight Beam --- */
         .jp-field:hover {
             background: rgba(255, 255, 255, 0.08);
         }
-        
+
         /* --- Pre-Submit Review --- */
         .jp-review-overlay {
             position: fixed;
@@ -667,7 +667,7 @@ OVERLAY_TEMPLATE = (
             z-index: 1000000;
             pointer-events: auto;
         }
-        
+
         .jp-review-card {
             background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
             border: 1px solid rgba(100, 255, 218, 0.4);
@@ -677,7 +677,7 @@ OVERLAY_TEMPLATE = (
             overflow-y: auto;
             box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
         }
-        
+
         .jp-review-title {
             font-size: 16px;
             font-weight: 700;
@@ -685,26 +685,26 @@ OVERLAY_TEMPLATE = (
             padding: 16px 20px;
             border-bottom: 1px solid rgba(100, 255, 218, 0.2);
         }
-        
+
         .jp-review-body { padding: 16px 20px; }
-        
+
         .jp-review-row {
             display: flex;
             justify-content: space-between;
             padding: 6px 0;
             border-bottom: 1px solid rgba(255,255,255,0.05);
         }
-        
+
         .jp-review-label { color: #888; font-size: 12px; }
         .jp-review-value { color: #fff; font-size: 12px; text-align: right; max-width: 60%; word-break: break-word; }
-        
+
         .jp-review-actions {
             display: flex;
             gap: 10px;
             padding: 16px 20px;
             justify-content: flex-end;
         }
-        
+
         .jp-review-btn {
             padding: 8px 18px;
             border: none;
@@ -713,19 +713,19 @@ OVERLAY_TEMPLATE = (
             font-weight: 600;
             cursor: pointer;
         }
-        
+
         .jp-review-btn.submit {
             background: #64ffda;
             color: #0a0a12;
         }
-        
+
         .jp-review-btn.cancel {
             background: rgba(239, 83, 80, 0.3);
             color: #ef5350;
         }
     `;
     shadow.appendChild(styles);
-    
+
     // Icons Helper — plain glyphs keep the injected overlay reliable on LinkedIn pages.
     const ICONS = {
         fill: '✓',
@@ -853,7 +853,7 @@ OVERLAY_TEMPLATE = (
 
     panel.append(header, stateCard, body, assistant, progress, footer);
     shadow.appendChild(panel);
-    
+
     // --- State & Minimized logic ---
     const setMinimized = (min) => {
         if (min) {
@@ -893,26 +893,26 @@ OVERLAY_TEMPLATE = (
             + '[data-test-modal-id="easy-apply-modal"], '
             + '.jobs-easy-apply-modal'
         );
-        
+
         if (modal) {
             const rect = modal.getBoundingClientRect();
             const panelWidth = panel.classList.contains('jp-density-compact') ? 316 : 340;
             const margin = 20;
-            
+
             // Dock to the right of the modal
             let targetLeft = rect.right + margin;
             let targetTop = rect.top;
-            
+
             // Check if we hit the right boundary
             if (targetLeft + panelWidth > window.innerWidth - margin) {
                 // If not enough room on the right, overlay on the modal (right side)
                 targetLeft = rect.right - panelWidth - margin;
             }
-            
+
             panel.style.left = `${targetLeft}px`;
             panel.style.top = `${targetTop}px`;
             panel.style.right = 'auto';
-            
+
             // Auto-expand if minimized and modal just appeared
             if (panel.classList.contains('minimized') && !window.__jp_auto_expanded) {
                 setMinimized(false);
@@ -925,11 +925,11 @@ OVERLAY_TEMPLATE = (
             panel.style.left = 'auto';
             window.__jp_auto_expanded = false;
         }
-        
+
         requestAnimationFrame(updatePosition);
     };
     updatePosition();
-    
+
     document.body.appendChild(container);
 
     function buildReviewShell(content) {
@@ -1002,7 +1002,7 @@ OVERLAY_TEMPLATE = (
     if (chatLog.children.length === 0) {
         addChatMessage(__JP_CHAT_WELCOME__, 'ai');
     }
-    
+
     // Expose API for Python to communicate with
     window.__jobpilot = {
         updateStatus: function(status) {
@@ -1019,10 +1019,10 @@ OVERLAY_TEMPLATE = (
                 guidance.textContent = payload.guidance || 'Use Enter to approve, E to edit, or Esc to skip.';
             }
         },
-        
+
         showSuggestions: function(fields, fitScore = null) {
             const body = shadow.querySelector('.jp-body');
-            
+
             // Update fit score if provided
             const fitEl = shadow.querySelector('#jp-fit-score');
             if (fitScore !== null && fitEl) {
@@ -1045,7 +1045,7 @@ OVERLAY_TEMPLATE = (
                 tone: 'active',
                 guidance: 'Approve, edit, or skip the highlighted suggestions below.'
             });
-            
+
             body.innerHTML = buildReviewShell(fields.map((f, i) => `
                 <div class="jp-field ${f.status === 'thinking' ? 'jp-thinking' : ''} ${f.confidence < 0.65 ? 'low-confidence' : ''} ${f.confidence < 0.45 ? 'no-match' : ''}" data-field-id="${i}">
                     <div class="jp-field-label">
@@ -1068,17 +1068,17 @@ OVERLAY_TEMPLATE = (
                     </div>
                 </div>
             `).join(''));
-            
+
             // --- Ghost Previews Logic ---
             const inputs = document.querySelectorAll(
                 '.jobs-easy-apply-modal input, .jobs-easy-apply-modal textarea, '
                 + '.jobs-easy-apply-modal select'
             );
-            
+
             fields.forEach((f, i) => {
                 const target = inputs[i];
                 if (!target || !f.suggestion || f.status === 'thinking') return;
-                
+
                 // If the field is empty, show the suggestion as a "ghost" placeholder
                 if (!target.value) {
                     target.setAttribute('placeholder', `[JobPilot]: ${f.suggestion}`);
@@ -1093,7 +1093,7 @@ OVERLAY_TEMPLATE = (
                     const action = source.dataset.action;
                     const id = parseInt(source.dataset.id, 10);
                     window.__jobpilot_action = { action, id };
-                    
+
                     // Visual feedback
                     const fieldEl = shadow.querySelector(`[data-field-id="${id}"]`);
                     if (fieldEl) {
@@ -1105,7 +1105,7 @@ OVERLAY_TEMPLATE = (
                 });
             });
         },
-        
+
         flashField: function(fieldId) {
             const fieldEl = shadow.querySelector(`[data-field-id="${fieldId}"]`);
             if (fieldEl) {
@@ -1113,48 +1113,48 @@ OVERLAY_TEMPLATE = (
                 setTimeout(() => fieldEl.classList.remove('jp-flash'), 300);
             }
         },
-        
+
         hide: function() {
             panel.style.display = 'none';
         },
-        
+
         show: function() {
             panel.style.display = 'block';
         },
-        
+
         updateProgress: function({filled, total, step, totalSteps, appsToday}) {
             const bar = shadow.querySelector('#jp-progress');
             if (!bar) return;
             bar.style.display = 'flex';
-            
+
             const pct = total > 0 ? filled / total : 0;
             const circumference = 94.2;
             const offset = circumference * (1 - pct);
             const ring = shadow.querySelector('#jp-ring-fg');
             if (ring) ring.setAttribute('stroke-dashoffset', offset);
-            
+
             const main = shadow.querySelector('#jp-prog-main');
             if (main) main.textContent = `${filled}/${total} fields`;
-            
+
             const sub = shadow.querySelector('#jp-prog-sub');
             if (sub) sub.textContent = `Step ${step}/${totalSteps}` + (appsToday ? ` · ${appsToday} apps today` : '');
         },
-        
+
         showReview: function(fields) {
             // Pre-submit review dialog
             const existing = shadow.querySelector('.jp-review-overlay');
             if (existing) existing.remove();
-            
+
             const overlay = document.createElement('div');
             overlay.className = 'jp-review-overlay';
-            
+
             const rows = fields.map(f => `
                 <div class="jp-review-row">
                     <span class="jp-review-label">${f.label}</span>
                     <span class="jp-review-value">${f.value || '(empty)'}</span>
                 </div>
             `).join('');
-            
+
             overlay.innerHTML = `
                 <div class="jp-review-card">
                     <div class="jp-review-title">📋 Ready to Submit</div>
@@ -1165,9 +1165,9 @@ OVERLAY_TEMPLATE = (
                     </div>
                 </div>
             `;
-            
+
             shadow.appendChild(overlay);
-            
+
             const submitBtn = overlay.querySelector('#jp-review-submit');
             const cancelBtn = overlay.querySelector('#jp-review-cancel');
             if (submitBtn) {
@@ -1183,7 +1183,7 @@ OVERLAY_TEMPLATE = (
                 });
             }
         },
-        
+
         showSuccess: function() {
             const body = shadow.querySelector('.jp-body');
             body.innerHTML = `
@@ -1236,21 +1236,21 @@ OVERLAY_TEMPLATE = (
         restoreFromSession: () => window.__jobpilot.restoreChatHistory(),
         getPendingMessages: () => window.__jobpilot.getPendingMessages(),
     };
-    
+
     // --- Keyboard Shortcuts ---
     // Only active when Easy Apply modal is open and user isn't typing in a field
     document.addEventListener('keydown', (e) => {
         const modal = document.querySelector('[data-test-modal-id="easy-apply-modal"]');
         if (!modal) return;
-        
+
         const tag = document.activeElement?.tagName?.toLowerCase();
         const isTyping = tag === 'input' || tag === 'textarea' || tag === 'select';
-        
+
         // Find the first visible suggestion field
         const firstField = shadow.querySelector('.jp-field');
         if (!firstField) return;
         const fieldId = parseInt(firstField.dataset.fieldId);
-        
+
         if (e.key === 'Enter' && !isTyping) {
             e.preventDefault();
             window.__jobpilot_action = { action: 'approve', id: fieldId };
@@ -1267,7 +1267,7 @@ OVERLAY_TEMPLATE = (
             setTimeout(() => firstField.remove(), 300);
         }
     });
-    
+
     // --- MutationObserver on Easy Apply modal ---
     window.__jobpilot_mutations = [];
     const _startObserver = () => {
@@ -1277,7 +1277,7 @@ OVERLAY_TEMPLATE = (
             + '.jobs-easy-apply-modal'
         );
         if (!modal || window.__jobpilot_observer_active) return;
-        
+
         const obs = new MutationObserver((mutations) => {
             const dominated = mutations.some(m =>
                 m.type === 'childList' && (m.addedNodes.length > 0 || m.removedNodes.length > 0)
@@ -1296,7 +1296,7 @@ OVERLAY_TEMPLATE = (
     // Try immediately and then poll for the modal to appear
     _startObserver();
     setInterval(_startObserver, 2000);
-    
+
     // --- Field Highlight Beams ---
     shadow.addEventListener('mouseenter', (e) => {
         const fieldEl = e.target.closest?.('.jp-field');
@@ -1316,7 +1316,7 @@ OVERLAY_TEMPLATE = (
             window.__jobpilot_highlighted = target;
         }
     }, true);
-    
+
     shadow.addEventListener('mouseleave', (e) => {
         const fieldEl = e.target.closest?.('.jp-field');
         if (!fieldEl) return;
@@ -1327,7 +1327,7 @@ OVERLAY_TEMPLATE = (
             window.__jobpilot_highlighted = null;
         }
     }, true);
-    
+
     window.__jobpilot_overlay = true;
     console.log('✓ JobPilot overlay injected (v2 — MutationObserver + Progress + Highlights)');
 })();

@@ -136,10 +136,7 @@ class JobScorer:
                 risks=[alignment_rationale] if alignment_rationale else [],
             )
 
-        if alignment_status == "deprioritized":
-            alignment_points = -25
-        else:
-            alignment_points = 0
+        alignment_points = -25 if alignment_status == "deprioritized" else 0
 
         title_points = self._score_title_alignment(
             profile.current_title, parsed_jd.title
@@ -266,14 +263,14 @@ class JobScorer:
 
         overlap = current_tokens & jd_tokens
         ratio = len(overlap) / max(len(jd_tokens), 1)
-        return min(25, max(0, int(round(25 * ratio))))
+        return min(25, max(0, round(25 * ratio)))
 
     @staticmethod
     def _score_skills(jd_skills: list[str], matched_skills: list[str]) -> int:
         if not jd_skills:
             return 18
         ratio = len(matched_skills) / max(len(jd_skills), 1)
-        return min(35, max(0, int(round(35 * ratio))))
+        return min(35, max(0, round(35 * ratio)))
 
     # "N years" only counts as a requirement in an experience context
     # (e.g. "5+ years of experience", "minimum 3 years") — not "founded 20 years ago".
@@ -297,7 +294,7 @@ class JobScorer:
             return (12 if years_of_experience else 8), ""
 
         ratio = min(1.0, (years_of_experience or 0) / required_years)
-        points = min(20, max(0, int(round(20 * ratio))))
+        points = min(20, max(0, round(20 * ratio)))
         risk = ""
         if years_of_experience < required_years:
             risk = f"Role asks for about {required_years}+ years; profile shows {years_of_experience}."

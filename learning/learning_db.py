@@ -7,6 +7,7 @@ single ``learning.db`` that supports concurrent access and SQL queries.
 
 from __future__ import annotations
 
+import contextlib
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -301,8 +302,6 @@ def get_learning_db(db_path: Path | None = None) -> LearningDB:
 def _reset_learning_db() -> None:
     """Close all cached instances. Used by tests for isolation."""
     for db in _dbs.values():
-        try:
+        with contextlib.suppress(Exception):
             db.close()
-        except Exception:
-            pass
     _dbs.clear()

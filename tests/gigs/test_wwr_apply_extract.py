@@ -124,7 +124,7 @@ def test_enrich_apply_urls_skips_non_wwr() -> None:
     with patch("jobpilot.gigs.core.scrapers.weworkremotely.requests.get") as get:
         get.return_value.text = '<a href="mailto:jobs@acme.io">Apply</a>'
         get.return_value.raise_for_status = lambda: None
-        out = enrich_apply_urls([hn_gig, wwr_gig])
+        enrich_apply_urls([hn_gig, wwr_gig])
 
     assert hn_gig.apply_url == ""
     assert wwr_gig.apply_url == "mailto:jobs@acme.io"

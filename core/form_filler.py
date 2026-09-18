@@ -10,6 +10,7 @@ Stops before submit.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -83,44 +84,45 @@ class FillResult:
 
 
 def _field_to_value(label: str, profile: UserProfile) -> str | None:
-    l = label.lower()
+    low = label.lower()
 
-    if any(k in l for k in ["first name", "firstname", "given name", "first_name"]):
+    if any(k in low for k in ["first name", "firstname", "given name", "first_name"]):
         return profile.first_name
     if any(
-        k in l for k in ["last name", "lastname", "family name", "surname", "last_name"]
+        k in low
+        for k in ["last name", "lastname", "family name", "surname", "last_name"]
     ):
         return profile.last_name
-    if "preferred name" in l or "nickname" in l or "goes by" in l:
+    if "preferred name" in low or "nickname" in low or "goes by" in low:
         return profile.first_name
-    if "full name" in l or l.strip() in ("name", "your name", "full_name"):
+    if "full name" in low or low.strip() in ("name", "your name", "full_name"):
         return f"{profile.first_name} {profile.last_name}".strip()
 
-    if "email" in l:
+    if "email" in low:
         return profile.email
-    if any(k in l for k in ["phone", "mobile", "cell", "telephone"]):
+    if any(k in low for k in ["phone", "mobile", "cell", "telephone"]):
         return profile.phone
 
-    if "location (city)" in l or l in ("city", "town"):
+    if "location (city)" in low or low in ("city", "town"):
         return profile.city
-    if l == "state" or "region" in l:
+    if low == "state" or "region" in low:
         return profile.state
-    if l.strip() == "zip" or "postal" in l or "zip code" in l:
+    if low.strip() == "zip" or "postal" in low or "zip code" in low:
         return profile.zip_code
-    if "country" in l:
+    if "country" in low:
         return profile.country
-    if "location" in l or "based" in l or "address" in l:
+    if "location" in low or "based" in low or "address" in low:
         return f"{profile.city}, {profile.state}"
 
-    if "linkedin" in l:
+    if "linkedin" in low:
         return profile.linkedin_url
-    if "github" in l:
+    if "github" in low:
         return profile.github_url
-    if any(k in l for k in ["portfolio", "website", "personal site", "blog"]):
+    if any(k in low for k in ["portfolio", "website", "personal site", "blog"]):
         return profile.portfolio_url
 
     if any(
-        k in l
+        k in low
         for k in [
             "current title",
             "current role",
@@ -131,21 +133,21 @@ def _field_to_value(label: str, profile: UserProfile) -> str | None:
     ):
         return profile.current_title
     if any(
-        k in l
+        k in low
         for k in ["current company", "current employer", "employer", "organization"]
     ):
         return profile.current_company or "Independent"
-    if "years of experience" in l or "years experience" in l:
+    if "years of experience" in low or "years experience" in low:
         return str(profile.years_of_experience)
-    if "salary" in l or "compensation" in l or "desired pay" in l:
+    if "salary" in low or "compensation" in low or "desired pay" in low:
         return profile.desired_salary or "Negotiable"
 
     # "How did you hear about this job?" — common required field
     if (
-        "how did you hear" in l
-        or "how you heard" in l
-        or "hear about" in l
-        or "referral source" in l
+        "how did you hear" in low
+        or "how you heard" in low
+        or "hear about" in low
+        or "referral source" in low
     ):
         answers = profile.custom_answers or {}
         for q, a in answers.items():
@@ -187,9 +189,9 @@ def _demographic_value(profile: UserProfile, key: str) -> str:
 
 
 def _yesno_for_question(label: str, profile: UserProfile) -> str | None:
-    l = label.lower()
+    low = label.lower()
     if any(
-        p in l
+        p in low
         for p in [
             "authorized to work",
             "legally authorized",
@@ -204,7 +206,7 @@ def _yesno_for_question(label: str, profile: UserProfile) -> str | None:
     ):
         return "Yes" if profile.authorized_to_work else "No"
     if any(
-        p in l
+        p in low
         for p in [
             "sponsorship",
             "visa sponsorship",
@@ -218,7 +220,7 @@ def _yesno_for_question(label: str, profile: UserProfile) -> str | None:
     # (Austin/remote-only per pinned rule). User-said answers in
     # custom_answers are checked first (valueFor) and always win.
     if any(
-        p in l
+        p in low
         for p in [
             "willing to relocate",
             "open to relocation",
@@ -229,7 +231,7 @@ def _yesno_for_question(label: str, profile: UserProfile) -> str | None:
     ):
         return "Yes" if profile.open_to_relocation else "No"
     if any(
-        p in l
+        p in low
         for p in [
             "willing to work",
             "open to work",
@@ -252,7 +254,7 @@ def _yesno_for_question(label: str, profile: UserProfile) -> str | None:
         return "Yes"
     # Don't preemptively request relocation ASSISTANCE — skip those, user reviews
     if any(
-        p in l
+        p in low
         for p in [
             "relocation assistance",
             "require relocation",
@@ -267,22 +269,22 @@ def _yesno_for_question(label: str, profile: UserProfile) -> str | None:
     # Returns a PIPE-SEPARATED synonym list so the select/dropdown matcher
     # can find ANY of these substrings in the option text. The answer_selects
     # code splits on "||" and tries each.
-    if "gender identity" in l or ("gender" in l and "violence" not in l):
+    if "gender identity" in low or ("gender" in low and "violence" not in low):
         return _demographic_value(profile, "gender")
-    if "sexual orientation" in l:
+    if "sexual orientation" in low:
         return _demographic_value(profile, "sexual_orientation")
-    if "hispanic" in l or "latino" in l:
+    if "hispanic" in low or "latino" in low:
         return _demographic_value(profile, "hispanic")
-    if "race" in l or "ethnicity" in l:
+    if "race" in low or "ethnicity" in low:
         return _demographic_value(profile, "race")
-    if "veteran" in l:
+    if "veteran" in low:
         return _demographic_value(profile, "veteran")
-    if "disability" in l or "disabled" in l:
+    if "disability" in low or "disabled" in low:
         return _demographic_value(profile, "disability")
 
     # Okta-style conflict-of-interest / prior-employment dropdowns — default No
     if any(
-        p in l
+        p in low
         for p in [
             "family member",
             "close personal relationship",
@@ -306,7 +308,7 @@ def _yesno_for_question(label: str, profile: UserProfile) -> str | None:
     # Direct custom answer match (substring in either direction)
     for q, a in answers.items():
         ql = q.lower()
-        if ql in l or l in ql:
+        if ql in low or low in ql:
             return a
     return None
 
@@ -493,7 +495,7 @@ async def _fill_text_inputs(
             else:
                 await el.fill(value)
                 # Fire change/input events for React-controlled forms
-                try:
+                with contextlib.suppress(Exception):
                     await page.evaluate(
                         """el => {
                             el.dispatchEvent(new Event('input', { bubbles: true }));
@@ -501,8 +503,6 @@ async def _fill_text_inputs(
                         }""",
                         el,
                     )
-                except Exception:
-                    pass
                 filled.append(f"{combined[:50]} → {value[:40]}")
             await asyncio.sleep(0.15)
         except Exception as e:
@@ -718,7 +718,6 @@ async def _answer_all_selects(
                 continue
 
             label = await _label_text(page, sel)
-            l_lower = label.lower()
 
             # Decide target value
             target = _field_to_value(label, profile) or _yesno_for_question(
@@ -860,15 +859,19 @@ async def _answer_react_dropdowns(
 
             # Check if already filled (trigger text includes something other than "Select..." / "Choose...")
             current_text = (await trigger.inner_text()).strip().lower()
-            if current_text and current_text not in (
-                "select...",
-                "select",
-                "choose...",
-                "choose",
-                "",
+            if (
+                current_text
+                and current_text
+                not in (
+                    "select...",
+                    "select",
+                    "choose...",
+                    "choose",
+                    "",
+                )
+                and target.lower() in current_text
             ):
-                if target.lower() in current_text:
-                    continue  # already correct
+                continue  # already correct
                 # else: user had a stale value — leave alone
 
             # Click to open
@@ -911,17 +914,13 @@ async def _answer_react_dropdowns(
                 await asyncio.sleep(0.2)
             else:
                 # Close the dropdown by pressing Escape
-                try:
+                with contextlib.suppress(Exception):
                     await page.keyboard.press("Escape")
-                except Exception:
-                    pass
                 skipped.append(f"[react-dropdown] {label[:50]} — no option '{target}'")
         except Exception as e:
             log.debug("React dropdown handling failed: %s", e)
-            try:
+            with contextlib.suppress(Exception):
                 await page.keyboard.press("Escape")
-            except Exception:
-                pass
             continue
     return filled, skipped
 
@@ -938,7 +937,7 @@ async def _check_required_acknowledgments(page: Page) -> list[str]:
                 continue
 
             label = await _label_text(page, cb)
-            l = label.lower()
+            low = label.lower()
 
             required_attr = (await cb.get_attribute("required")) is not None or (
                 await cb.get_attribute("aria-required") == "true"
@@ -954,11 +953,11 @@ async def _check_required_acknowledgments(page: Page) -> list[str]:
                 "consent to",
                 "read and understand",
             ]
-            looks_like_ack = any(k in l for k in ack_keywords)
+            looks_like_ack = any(k in low for k in ack_keywords)
 
             # Skip marketing opt-ins unless also required
             is_marketing = any(
-                m in l
+                m in low
                 for m in [
                     "marketing",
                     "newsletter",

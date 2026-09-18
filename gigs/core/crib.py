@@ -155,7 +155,8 @@ def _gig_section(index: int, gig: Gig) -> list[str]:
     resume = preferences.resume_for(brief.offer)
     if resume:
         lines.append(f"- **Resume to attach:** {resume}")
-    return lines + [
+    return [
+        *lines,
         "",
         "**Cover-letter / first-message body** (copy as-is, edit if needed):",
         "",
