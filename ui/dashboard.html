@@ -699,9 +699,10 @@ let profile = {};
 let draft = {};
 let applications = { stats: {}, status_counts: {}, recent: [] };
 let filter = 'queued';
+const AUTH_TOKEN = "__AUTH_TOKEN__";
 
 function api(path, opts = {}) {
-  return fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts })
+  return fetch(path, { headers: { 'Content-Type': 'application/json', 'X-JobPilot-Token': AUTH_TOKEN }, ...opts })
     .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)));
 }
 

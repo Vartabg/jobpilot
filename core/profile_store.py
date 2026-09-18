@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from rich.console import Console
 from rich.table import Table
 
+from jobpilot.core.atomic_io import atomic_write_text
 from jobpilot.core.config import DATA_DIR
 from jobpilot.core.logger import get_logger
 
@@ -48,7 +49,9 @@ class UserProfile(BaseModel):
     requires_sponsorship: bool = False
 
     # Mobility — controls generic relocation-question fill (profile.json flag).
-    open_to_relocation: bool = True
+    # Default False (fail-closed): Austin/remote-only per pinned rule. A missing
+    # profile.json field must NOT silently answer relocation "Yes".
+    open_to_relocation: bool = False
 
     # Experience (for common questions)
     years_of_experience: int = 0
@@ -100,7 +103,9 @@ class ProfileStore:
         if profile:
             self._profile = profile
         if self._profile:
-            self.profile_path.write_text(self._profile.model_dump_json(indent=2))
+            atomic_write_text(
+                self.profile_path, self._profile.model_dump_json(indent=2)
+            )
             log.info("Profile saved to %s", self.profile_path)
 
     def update(self, **kwargs):
