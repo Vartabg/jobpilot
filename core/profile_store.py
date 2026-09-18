@@ -49,6 +49,8 @@ class UserProfile(BaseModel):
     requires_sponsorship: bool = False
 
     # Mobility — controls generic relocation-question fill (profile.json flag).
+    # Default False (fail-closed): Austin/remote-only per pinned rule. A missing
+    # profile.json field must NOT silently answer relocation "Yes".
     open_to_relocation: bool = False
 
     # Experience (for common questions)
@@ -101,7 +103,9 @@ class ProfileStore:
         if profile:
             self._profile = profile
         if self._profile:
-            atomic_write_text(self.profile_path, self._profile.model_dump_json(indent=2))
+            atomic_write_text(
+                self.profile_path, self._profile.model_dump_json(indent=2)
+            )
             log.info("Profile saved to %s", self.profile_path)
 
     def update(self, **kwargs):

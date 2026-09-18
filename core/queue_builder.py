@@ -40,17 +40,50 @@ log = get_logger(__name__)
 QUEUE_PATH = DATA_DIR / "queue.json"
 
 TECH_KEYWORDS = [
-    "engineer", "software", "developer", "python", "automation",
-    "technical", "platform", "backend", "fullstack", "full-stack",
-    "infrastructure", "devops", "sre", "reliability", "systems",
-    "data", "ml", "ai", "forward deployed", "solutions",
+    "engineer",
+    "software",
+    "developer",
+    "python",
+    "automation",
+    "technical",
+    "platform",
+    "backend",
+    "fullstack",
+    "full-stack",
+    "infrastructure",
+    "devops",
+    "sre",
+    "reliability",
+    "systems",
+    "data",
+    "ml",
+    "ai",
+    "forward deployed",
+    "solutions",
 ]
 
 FIELD_OPS_KEYWORDS = [
-    "facilities", "field", "technician", "operations", "maintenance",
-    "data center", "datacenter", "critical", "electro", "mechanical",
-    "building", "bms", "scada", "hvac", "ups", "power", "network ops",
-    "it operations", "site", "infrastructure", "service engineer",
+    "facilities",
+    "field",
+    "technician",
+    "operations",
+    "maintenance",
+    "data center",
+    "datacenter",
+    "critical",
+    "electro",
+    "mechanical",
+    "building",
+    "bms",
+    "scada",
+    "hvac",
+    "ups",
+    "power",
+    "network ops",
+    "it operations",
+    "site",
+    "infrastructure",
+    "service engineer",
 ]
 
 ALL_KEYWORDS = list(dict.fromkeys(TECH_KEYWORDS + FIELD_OPS_KEYWORDS))
@@ -59,18 +92,19 @@ ALL_KEYWORDS = list(dict.fromkeys(TECH_KEYWORDS + FIELD_OPS_KEYWORDS))
 @dataclass
 class QueueJob:
     """A scored, queued job ready to apply to."""
+
     id: str
     company: str
     title: str
     url: str
     location: str
     portal: str
-    track: str           # "tech" | "field_ops" | "both"
-    fit_score: int       # 0-100 (sum of all dimensions)
+    track: str  # "tech" | "field_ops" | "both"
+    fit_score: int  # 0-100 (sum of all dimensions)
     keywords: list[str]
-    status: str = "queued"   # queued | applied | skipped
+    status: str = "queued"  # queued | applied | skipped
     queued_at: str = ""
-    psyche_score: int = 0    # 0-15 sub-score (work-style fit, exposed for transparency)
+    psyche_score: int = 0  # 0-15 sub-score (work-style fit, exposed for transparency)
     suppression_reason: str = ""
 
     def __post_init__(self):
@@ -91,7 +125,9 @@ def _load_psyche_profile() -> dict[str, Any]:
     try:
         _psyche_profile_cache = json.loads(PSYCHE_PROFILE_PATH.read_text())
     except Exception as exc:
-        log.warning("Could not load psyche_profile.json (%s) — psycho-fit will be neutral.", exc)
+        log.warning(
+            "Could not load psyche_profile.json (%s) — psycho-fit will be neutral.", exc
+        )
         _psyche_profile_cache = {"loved_signals": {}, "hated_signals": {}}
     return _psyche_profile_cache
 
@@ -149,9 +185,15 @@ def __getattr__(name: str):
 #     gated: no kill-keywords, location gate off.
 
 LANE_A_FUNCTION_HITS = (
-    "forward deployed", "fde", "solutions engineer", "sales engineer",
-    "customer engineer", "field engineer", "field service",
-    "implementation engineer", "deployment engineer",
+    "forward deployed",
+    "fde",
+    "solutions engineer",
+    "sales engineer",
+    "customer engineer",
+    "field engineer",
+    "field service",
+    "implementation engineer",
+    "deployment engineer",
 )
 FOUNDING_HITS = ("founding",)
 
@@ -160,25 +202,25 @@ FOUNDING_HITS = ("founding",)
 # location gate (if enabled in policy.json) still has something to bite on.
 # Extend or override per-user via `queue.company_hq` in data/policy.json.
 COMPANY_HQ = {
-    "happyrobot":        "San Francisco",
-    "soff":              "San Francisco",
-    "bretton ai":        "San Francisco",
-    "paratus health":    "Menlo Park",
-    "promise":           "Oakland",
-    "decagon":           "San Francisco",
-    "zymbly":            "London",
-    "n8n":               "Berlin",
-    "credal":            "New York",
-    "starbridge":        "New York",
-    "haast":             "Remote",
-    "clarion health":    "New York",
-    "avallon ai":        "New York",
-    "pylon":             "New York",
-    "ravenna":           "Remote",
-    "signal messenger":  "Remote",
-    "titan ai":          "Remote",
-    "scaled cognition":  "New York",
-    "p-1 ai":            "Remote",
+    "happyrobot": "San Francisco",
+    "soff": "San Francisco",
+    "bretton ai": "San Francisco",
+    "paratus health": "Menlo Park",
+    "promise": "Oakland",
+    "decagon": "San Francisco",
+    "zymbly": "London",
+    "n8n": "Berlin",
+    "credal": "New York",
+    "starbridge": "New York",
+    "haast": "Remote",
+    "clarion health": "New York",
+    "avallon ai": "New York",
+    "pylon": "New York",
+    "ravenna": "Remote",
+    "signal messenger": "Remote",
+    "titan ai": "Remote",
+    "scaled cognition": "New York",
+    "p-1 ai": "Remote",
 }
 
 
@@ -238,7 +280,9 @@ def _is_allowed_location(title: str, company: str, location: str | None) -> bool
     if _has_location_hit(loc_haystack, gate.blocked_locations):
         return False
     has_country = _has_location_hit(loc_haystack, gate.country_terms)
-    if not has_country and _has_location_hit(loc_haystack, gate.blocked_without_country):
+    if not has_country and _has_location_hit(
+        loc_haystack, gate.blocked_without_country
+    ):
         return False
 
     return (
@@ -274,7 +318,9 @@ def policy_block_reason(company: str, title: str) -> Optional[str]:
     title_l = (title or "").strip().lower()
 
     if company_l in policy.scoring.refused_companies:
-        return policy.scoring.refused_companies[company_l] or "company refused by policy"
+        return (
+            policy.scoring.refused_companies[company_l] or "company refused by policy"
+        )
     for keyword, reason in policy.scoring.refused_title_keywords.items():
         if keyword in title_l:
             return reason or f"title contains refused term: {keyword}"
@@ -296,7 +342,10 @@ def policy_block_reason(company: str, title: str) -> Optional[str]:
 
 
 def _score_psyche_fit(
-    title_l: str, company_l: str, industry: Optional[str], note_l: str,
+    title_l: str,
+    company_l: str,
+    industry: Optional[str],
+    note_l: str,
     profile: dict[str, Any],
 ) -> int:
     """Work-style fit (0-15) — title + company-note + industry vs psyche_profile.json.
@@ -317,8 +366,16 @@ def _score_psyche_fit(
 
     # Company name + portals.json _note text (stage / size / flags)
     company_haystack = f"{company_l} {note_l}"
-    company_loved = sum(1 for tok in (loved.get("company_or_note") or []) if tok and tok in company_haystack)
-    company_hated = sum(1 for tok in (hated.get("company_or_note") or []) if tok and tok in company_haystack)
+    company_loved = sum(
+        1
+        for tok in (loved.get("company_or_note") or [])
+        if tok and tok in company_haystack
+    )
+    company_hated = sum(
+        1
+        for tok in (hated.get("company_or_note") or [])
+        if tok and tok in company_haystack
+    )
     score += min(company_loved, 3)
     score -= min(company_hated * 2, 4)
 
@@ -376,14 +433,20 @@ def _score_job(job: PortalJob) -> tuple[int, str, int]:
     # --- Tier fit (0-20). portals.json is curated early-stage so default high;
     # penalize enterprise/Fortune-500 motion hints in titles.
     tier = 18
-    if any(k in title_l for k in ("enterprise", "majors", "fortune", "sr staff", "senior staff")):
+    if any(
+        k in title_l
+        for k in ("enterprise", "majors", "fortune", "sr staff", "senior staff")
+    ):
         tier = 6
 
     # --- Skill overlap (0-12) — title-only proxy (no JD fetch at scan time).
     skill = 0
-    if "ai" in title_l or "agent" in title_l: skill += 5
-    if "full" in title_l or "stack" in title_l: skill += 3
-    if "deploy" in title_l or "customer" in title_l or "field" in title_l: skill += 4
+    if "ai" in title_l or "agent" in title_l:
+        skill += 5
+    if "full" in title_l or "stack" in title_l:
+        skill += 3
+    if "deploy" in title_l or "customer" in title_l or "field" in title_l:
+        skill += 4
     skill = min(skill, 12)
 
     # --- Logistics fit (0-10) — already hard-gated above.
@@ -397,7 +460,10 @@ def _score_job(job: PortalJob) -> tuple[int, str, int]:
     score = moat + tier + func + skill + loc + psyche
 
     deprioritize = policy.title_deprioritize_keywords or (
-        "senior engineer", "senior software", "senior ai", "senior full",
+        "senior engineer",
+        "senior software",
+        "senior ai",
+        "senior full",
     )
     senior_pen, _ = title_seniority_penalty(job.title, deprioritize)
     score += senior_pen
@@ -406,8 +472,10 @@ def _score_job(job: PortalJob) -> tuple[int, str, int]:
     ws_delta, _ = score_work_style("", title=job.title)
     score += max(-15, min(10, ws_delta))
 
-    if industry in policy.high_moat_industries or any(k in title_l for k in
-            ("field", "deployed", "customer engineer", "service engineer")):
+    if industry in policy.high_moat_industries or any(
+        k in title_l
+        for k in ("field", "deployed", "customer engineer", "service engineer")
+    ):
         track = "both"
     else:
         track = "tech"
@@ -461,7 +529,11 @@ def build_queue(
         evidence_match = evidence.match(job.company, job.title, job.url)
         # Status precedence: exact tracker URL > explicit prior skip > company
         # tracker status > prior queue.json > default queued.
-        if prior_job and prior_job.status == "skipped" and not tracker.has_applied(job.url):
+        if (
+            prior_job
+            and prior_job.status == "skipped"
+            and not tracker.has_applied(job.url)
+        ):
             status = "skipped"
         else:
             status = (
@@ -469,20 +541,22 @@ def build_queue(
                 or (evidence_match.status if evidence_match else None)
                 or (prior_job.status if prior_job else "queued")
             )
-        queue.append(QueueJob(
-            id=job_id,
-            company=job.company,
-            title=job.title,
-            url=job.url,
-            location=job.location or "Not specified",
-            portal=job.portal,
-            track=track,
-            fit_score=score,
-            keywords=job.matched_keywords[:5],
-            status=status,
-            queued_at=prior_job.queued_at if prior_job else "",
-            psyche_score=psyche_score,
-        ))
+        queue.append(
+            QueueJob(
+                id=job_id,
+                company=job.company,
+                title=job.title,
+                url=job.url,
+                location=job.location or "Not specified",
+                portal=job.portal,
+                track=track,
+                fit_score=score,
+                keywords=job.matched_keywords[:5],
+                status=status,
+                queued_at=prior_job.queued_at if prior_job else "",
+                psyche_score=psyche_score,
+            )
+        )
 
     # Also carry over applied/skipped jobs whose URL fell out of the scan
     # (e.g. listing got removed) so the user's history isn't lost.
@@ -535,7 +609,9 @@ def load_queue() -> list[QueueJob]:
         if not isinstance(data, list):
             raise ValueError("queue must be a list")
         known = QueueJob.__dataclass_fields__
-        return [QueueJob(**{k: v for k, v in item.items() if k in known}) for item in data]
+        return [
+            QueueJob(**{k: v for k, v in item.items() if k in known}) for item in data
+        ]
     except (ValueError, TypeError, AttributeError) as exc:
         # One recovery copy per distinct payload. Repeated polling neither
         # creates endless copies nor overwrites a previous corrupt version.
@@ -584,12 +660,15 @@ def reconcile_queue_with_tracker() -> tuple[int, int]:
             continue
         tracker_status = tracker_status_for_job(tracker, job.url, job.company)
         evidence_match = evidence.match(job.company, job.title, job.url)
-        evidence_status = tracker_status or (evidence_match.status if evidence_match else None)
+        evidence_status = tracker_status or (
+            evidence_match.status if evidence_match else None
+        )
         if evidence_status and job.status != evidence_status:
             job.status = evidence_status
             job.suppression_reason = (
                 f"application evidence: {evidence_match.source}"
-                if evidence_match else "application evidence: tracker"
+                if evidence_match
+                else "application evidence: tracker"
             )
             changed += 1
     if changed:
