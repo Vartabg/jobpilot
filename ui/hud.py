@@ -77,6 +77,8 @@ def _gig_badges_plain(gig: Gig) -> str:
         bits.append("Contract")
     if any("async" in r for r in (gig.fit_reasons or [])):
         bits.append("Flexible")
+    if any("relocation offered" in r for r in (gig.fit_reasons or [])):
+        bits.append("Relocation")
     if is_schedule_rigid(text, title=gig.title):
         bits.append("Fixed hours")
     return ", ".join(bits) if bits else "—"

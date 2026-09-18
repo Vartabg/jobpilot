@@ -116,3 +116,36 @@ def test_labeled_jd_parses_role_and_company_correctly():
     result = scorer.score_text(jd)
     assert result.parsed_jd.title == "Service Technician - Security / Access Control Systems"
     assert result.parsed_jd.company == "Entech Sales & Service LLC"
+
+
+def test_relocation_offer_boosts_score_with_strength():
+    profile = UserProfile(
+        current_title="AI Engineer",
+        years_of_experience=5,
+        authorized_to_work=True,
+        requires_sponsorship=False,
+        custom_answers={"skills": "Python LLMs agents"},
+    )
+    scorer = JobScorer(profile_store=DummyProfileStore(profile), use_bro=False)
+    base_text = "AI Engineer\nAcme\nBuild agent tooling with Python and LLMs.\n"
+    plain = scorer.score_text(base_text)
+    offered = scorer.score_text(base_text + "We offer a relocation package for new hires.\n")
+
+    assert offered.components["Relocation"] == 8
+    assert plain.components["Relocation"] == 0
+    assert offered.score == min(100, plain.score + 8)
+    assert any("Relocation on the table" in s for s in offered.strengths)
+
+
+def test_relocation_question_is_not_an_offer():
+    profile = UserProfile(
+        current_title="AI Engineer",
+        years_of_experience=5,
+        authorized_to_work=True,
+        requires_sponsorship=False,
+    )
+    scorer = JobScorer(profile_store=DummyProfileStore(profile), use_bro=False)
+    result = scorer.score_text("AI Engineer\nAcme\nDo you require relocation assistance?\n")
+
+    assert result.components["Relocation"] == 0
+    assert not any("Relocation on the table" in s for s in result.strengths)
