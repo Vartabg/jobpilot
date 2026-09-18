@@ -116,6 +116,8 @@
 </div>
 <script>
 let cards = [], i = 0, busy = false, last = null, snackTimer = null, meta = null;
+const AUTH_TOKEN = "__AUTH_TOKEN__";
+const authHeaders = () => ({ 'X-JobPilot-Token': AUTH_TOKEN });
 const $ = id => document.getElementById(id);
 const show = (id, on) => $(id).hidden = !on;
 const safeUrl = u => /^https?:\/\//i.test(u || "");
@@ -179,7 +181,7 @@ async function load(refresh) {
   show("loading", true);
   let data = null, ok = false;
   try {
-    const r = await fetch("/api/queue?refresh=" + (refresh ? 1 : 0));
+    const r = await fetch("/api/queue?refresh=" + (refresh ? 1 : 0), { headers: authHeaders() });
     ok = r.ok;
     data = await r.json();
   } catch (e) { ok = false; }
@@ -275,13 +277,9 @@ async function decide(action, viaFling) {
   const c = cards[i];
   if (!c) return;
   busy = true;
-  if (action === "apply") {
-    if (c.is_mailto) window.location.href = c.apply_target;
-    else if (safeUrl(c.apply_target)) window.open(c.apply_target, "_blank", "noopener,noreferrer");
-  }
   let ok = false;
   try {
-    const r = await fetch("/api/decision", { method:"POST", headers:{"Content-Type":"application/json"},
+    const r = await fetch("/api/decision", { method:"POST", headers:{"Content-Type":"application/json", ...authHeaders()},
       body: JSON.stringify({ id: c.id, action }) });
     ok = r.ok;
   } catch (e) { ok = false; }
@@ -290,6 +288,13 @@ async function decide(action, viaFling) {
     const el = $("card"); if (el) { el.style.transform = ""; el.style.opacity = 1; }
     toast("Couldn't save — try again", null);
     return;
+  }
+  // Decision persisted FIRST — only now open the apply target, so a failed
+  // save can never leave the user having emailed/applied while the pipeline
+  // believes nothing happened (which would invite a double-apply).
+  if (action === "apply") {
+    if (c.is_mailto) window.location.href = c.apply_target;
+    else if (safeUrl(c.apply_target)) window.open(c.apply_target, "_blank", "noopener,noreferrer");
   }
   last = c;
   if (!viaFling) flingNow(action);
@@ -302,7 +307,7 @@ async function decide(action, viaFling) {
 async function undo() {
   if (!last) return;
   const c = last; last = null; hideSnack();
-  try { await fetch("/api/undo", { method:"POST", headers:{"Content-Type":"application/json"},
+  try { await fetch("/api/undo", { method:"POST", headers:{"Content-Type":"application/json", ...authHeaders()},
     body: JSON.stringify({ id: c.id }) }); } catch (e) {}
   cards.splice(i, 0, c);
   render();
@@ -341,7 +346,7 @@ function flingEl(el, dir) { el.style.transform = `translateX(${dir * 600}px) rot
 // Prefetch criteria for the start screen without a full scan.
 (async () => {
   try {
-    const r = await fetch("/api/meta");
+    const r = await fetch("/api/meta", { headers: authHeaders() });
     if (r.ok) setCriteria(await r.json());
   } catch (e) {}
 })();

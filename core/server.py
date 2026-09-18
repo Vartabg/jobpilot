@@ -18,15 +18,19 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import secrets
 import socket
 import subprocess
 from dataclasses import asdict
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
+from jobpilot.core.atomic_io import atomic_write_text
+from jobpilot.core.config import DATA_DIR
 from jobpilot.core.logger import get_logger
 from jobpilot.core.profile_store import get_profile_store
 from jobpilot.core.application_tracker import get_application_tracker
@@ -49,6 +53,48 @@ DASHBOARD_PATH = PROJECT_ROOT / "ui" / "dashboard.html"
 app = FastAPI(title="JobPilot Remote", version="0.3.0")
 
 
+def _load_or_create_token() -> str:
+    """Shared bearer token for the dashboard/bookmarklet.
+
+    Stable across restarts (persisted to data/server_token) so a saved
+    bookmarklet keeps working; overridable via JOBPILOT_SERVER_TOKEN.
+    """
+    env = os.environ.get("JOBPILOT_SERVER_TOKEN")
+    if env:
+        return env
+    token_path = DATA_DIR / "server_token"
+    if token_path.exists():
+        token = token_path.read_text().strip()
+        if token:
+            return token
+    token = secrets.token_urlsafe(24)
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    atomic_write_text(token_path, token)
+    return token
+
+
+AUTH_TOKEN = _load_or_create_token()
+
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    """Require the bearer token on every route except the dashboard shell.
+
+    The dashboard HTML is served token-free (it's the entry point) but has the
+    token injected into its JS; every /api/* call and /install (which bakes PII
+    into a bookmarklet) must present it via X-JobPilot-Token header or ?token=.
+    This blocks cross-origin CSRF (a hostile page can't set the custom header)
+    and tailnet neighbors reading PII when bound off-loopback.
+    """
+    path = request.url.path
+    if path == "/" or path.startswith("/favicon"):
+        return await call_next(request)
+    token = request.headers.get("x-jobpilot-token") or request.query_params.get("token")
+    if token != AUTH_TOKEN:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    return await call_next(request)
+
+
 class ApplicationLogPayload(BaseModel):
     company: str
     title: str = ""
@@ -64,12 +110,12 @@ class ApplicationLogPayload(BaseModel):
 
 
 @app.get("/", include_in_schema=False)
-async def dashboard() -> FileResponse:
+async def dashboard() -> HTMLResponse:
     if not DASHBOARD_PATH.exists():
         raise HTTPException(404, "dashboard.html missing")
-    return FileResponse(
-        DASHBOARD_PATH,
-        media_type="text/html",
+    html = DASHBOARD_PATH.read_text().replace("__AUTH_TOKEN__", AUTH_TOKEN)
+    return HTMLResponse(
+        html,
         headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
     )
 
@@ -574,4 +620,9 @@ def run_server(host: str = "127.0.0.1", port: int | None = None) -> None:
 
     import uvicorn
 
-    uvicorn.run(app, host=host, port=port or DEFAULT_SERVE_PORT, log_level="info")
+    serve_port = port or DEFAULT_SERVE_PORT
+    print(f"\n  Auth token: {AUTH_TOKEN}")
+    print(
+        f"  Install bookmarklet: http://127.0.0.1:{serve_port}/install?token={AUTH_TOKEN}\n"
+    )
+    uvicorn.run(app, host=host, port=serve_port, log_level="info")

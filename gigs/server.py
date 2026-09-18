@@ -10,15 +10,19 @@ digest — this is just the interactive front end.
 
 from __future__ import annotations
 
+import os
+import secrets
 import subprocess
 import threading
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
+from jobpilot.core.atomic_io import atomic_write_text
+from jobpilot.core.config import DATA_DIR
 from jobpilot.gigs.core import swipe
 from jobpilot.gigs.core.logger import get_logger
 from jobpilot.gigs.core.models import Gig
@@ -27,6 +31,44 @@ log = get_logger(__name__)
 app = FastAPI(title="GigPilot Swipe", version="1.0.0")
 
 _PAGE = Path(__file__).parent / "swipe.html"
+
+
+def _load_or_create_token() -> str:
+    """Shared bearer token (same file as the core dashboard server)."""
+    env = os.environ.get("JOBPILOT_SERVER_TOKEN")
+    if env:
+        return env
+    token_path = DATA_DIR / "server_token"
+    if token_path.exists():
+        token = token_path.read_text().strip()
+        if token:
+            return token
+    token = secrets.token_urlsafe(24)
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    atomic_write_text(token_path, token)
+    return token
+
+
+AUTH_TOKEN = _load_or_create_token()
+
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    """Require the bearer token on every route except the swipe shell.
+
+    The swipe HTML is served token-free (entry point) with the token injected
+    into its JS; /api/decision and /api/undo mutate state and must present it.
+    This blocks tailnet neighbors from driving the swiper when bound to a
+    Tailscale IP, and cross-origin CSRF from any page in a local browser.
+    """
+    path = request.url.path
+    if path == "/" or path.startswith("/favicon"):
+        return await call_next(request)
+    token = request.headers.get("x-jobpilot-token") or request.query_params.get("token")
+    if token != AUTH_TOKEN:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    return await call_next(request)
+
 
 # In-memory queue for the current session: full Gigs (to record decisions) +
 # the card payloads the phone renders. _SCAN_LOCK serializes the ~15s scan so
@@ -37,7 +79,8 @@ _SCAN_LOCK = threading.Lock()
 
 @app.get("/", include_in_schema=False)
 def index() -> HTMLResponse:
-    return HTMLResponse(_PAGE.read_text())
+    html = _PAGE.read_text().replace("__AUTH_TOKEN__", AUTH_TOKEN)
+    return HTMLResponse(html)
 
 
 @app.get("/api/meta")
@@ -65,11 +108,13 @@ def queue(refresh: int = 0) -> JSONResponse:
             {"cards": [], "count": 0, "error": "Scan failed — is the Mac online?"},
             status_code=503,
         )
-    return JSONResponse({
-        "cards": [swipe.card(g) for g in snapshot],
-        "count": len(snapshot),
-        "meta": swipe.session_meta(),
-    })
+    return JSONResponse(
+        {
+            "cards": [swipe.card(g) for g in snapshot],
+            "count": len(snapshot),
+            "meta": swipe.session_meta(),
+        }
+    )
 
 
 class Decision(BaseModel):
@@ -90,7 +135,9 @@ def decide(d: Decision) -> JSONResponse:
         status = swipe.record_decision(gig, d.action, d.reason)
     except Exception as exc:  # write refused / pipeline error — don't fake success
         log.error("decision not recorded for %s: %s", d.id, exc)
-        return JSONResponse({"ok": False, "error": "Couldn't save — try again"}, status_code=503)
+        return JSONResponse(
+            {"ok": False, "error": "Couldn't save — try again"}, status_code=503
+        )
     # Keep the gig in _GIGS so an Undo can revert it; the phone owns the deck.
     return JSONResponse({"ok": True, "status": status})
 
@@ -115,7 +162,10 @@ def undo(u: UndoReq) -> JSONResponse:
 def _tailscale_ip() -> str | None:
     try:
         out = subprocess.run(
-            ["tailscale", "ip", "-4"], capture_output=True, text=True, timeout=5,
+            ["tailscale", "ip", "-4"],
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         ip = out.stdout.strip().splitlines()
         return ip[0] if ip else None
