@@ -2,6 +2,9 @@
 
 **For careers that don't follow a straight line. Free. Open source. Yours.**
 
+For Garo's employment archive and private customer-work pipeline, start with
+[the business workspace guide](BUSINESS.md).
+
 ## The JobPilot app — macOS preview
 
 A local app for the repetitive parts of looking for work: import your resume,
