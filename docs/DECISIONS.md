@@ -1,3 +1,16 @@
+# 2026-09-25 — One core, the owner's search first
+
+Rebuild JobPilot as one core instead of three apps sharing a folder. Serve the
+owner's own search first; the public app continues later on the same core, and
+`product/` is parked meanwhile. Keep a Python engine with plain web screens; a
+TypeScript UI can follow on the same service layer.
+
+Use ports and adapters: clients call one service layer, the domain core is pure
+Python, and sources, the fit agent, storage, and rendering are plug-ins. Reuse
+the design, not the merge, of the unmerged opportunity-ledger branch. Phase 0
+makes the test suite hermetic and fixes two data-loss bugs before any
+restructuring. Plan: [plans/2026-09-25-one-core.md](plans/2026-09-25-one-core.md).
+
 # 2026-09-07 — A product for unconventional career changes
 
 Ship a standalone local app with ordinary controls, persistent personal state,

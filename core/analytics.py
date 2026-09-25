@@ -14,13 +14,14 @@ from rich.panel import Panel
 from rich.table import Table
 
 from jobpilot.core.application_tracker import get_application_tracker
+from jobpilot.core.config import DATA_DIR as _DATA_ROOT
 from jobpilot.core.logger import get_logger
 from jobpilot.learning.action_recorder import get_action_recorder
 
 log = get_logger(__name__)
 console = Console()
 
-DATA_DIR = Path(__file__).parent.parent / "data" / "reports"
+DATA_DIR = _DATA_ROOT / "reports"
 
 
 def export_csv(days: int = 30, output_path: Path | None = None) -> Path:

@@ -28,6 +28,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
 from jobpilot.core.application_tracker import get_application_tracker
+from jobpilot.core.config import DATA_DIR
 from jobpilot.core.logger import get_logger
 from jobpilot.core.profile_store import get_profile_store
 from jobpilot.core.queue_builder import (
@@ -357,7 +358,7 @@ async def api_profile() -> JSONResponse:
 
 @app.get("/api/latest-draft")
 async def api_latest_draft() -> JSONResponse:
-    path = PROJECT_ROOT / "data" / "resumes" / "latest_draft.json"
+    path = DATA_DIR / "resumes" / "latest_draft.json"
     if not path.exists():
         return JSONResponse({})
     try:

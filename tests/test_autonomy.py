@@ -2,6 +2,9 @@
 Tests for autonomy.py — mode switching, thresholds, and configuration.
 """
 
+import json
+
+from jobpilot.core import autonomy
 from jobpilot.core.autonomy import (
     AutonomyConfig,
     AutonomyMode,
@@ -74,3 +77,32 @@ class TestAutonomyModeEnum:
         assert AutonomyMode.SUGGEST.value == "suggest"
         assert AutonomyMode.SEMI_AUTO.value == "semi-auto"
         assert AutonomyMode.FULL_AUTO.value == "full-auto"
+
+
+class TestSaveKeepsSettings:
+    """settings.json is shared, so saving autonomy keys must not wipe the rest."""
+
+    def test_save_keeps_other_settings(self, tmp_path, monkeypatch):
+        settings = tmp_path / "settings.json"
+        settings.write_text(
+            json.dumps({"mode": "semi-auto", "resume_lanes": {"default": "my_resume"}})
+        )
+        monkeypatch.setattr(autonomy, "SETTINGS_FILE", settings)
+        monkeypatch.setattr(autonomy, "DATA_DIR", tmp_path)
+
+        AutonomyConfig(mode=AutonomyMode.SUGGEST).save()
+
+        data = json.loads(settings.read_text())
+        assert data["resume_lanes"] == {"default": "my_resume"}
+        assert data["mode"] == "suggest"
+
+    def test_save_backs_up_unreadable_settings(self, tmp_path, monkeypatch):
+        settings = tmp_path / "settings.json"
+        settings.write_text("{not json")
+        monkeypatch.setattr(autonomy, "SETTINGS_FILE", settings)
+        monkeypatch.setattr(autonomy, "DATA_DIR", tmp_path)
+
+        AutonomyConfig().save()
+
+        assert (tmp_path / "settings.json.bak").read_text() == "{not json"
+        assert json.loads(settings.read_text())["mode"] == "semi-auto"
