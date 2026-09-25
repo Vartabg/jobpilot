@@ -14,11 +14,12 @@ import hashlib
 from datetime import datetime
 from pathlib import Path
 
+from jobpilot.core.config import DATA_DIR as _DATA_ROOT
 from jobpilot.core.logger import get_logger
 
 log = get_logger(__name__)
 
-DATA_DIR = Path(__file__).parent.parent / "data" / "cover_letters"
+DATA_DIR = _DATA_ROOT / "cover_letters"
 
 
 def _jd_hash(jd_text: str) -> str:

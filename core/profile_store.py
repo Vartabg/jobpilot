@@ -8,7 +8,7 @@ All data stays on your machine - nothing is sent externally.
 import json
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from rich.console import Console
 from rich.table import Table
 
@@ -22,6 +22,11 @@ log = get_logger(__name__)
 
 class UserProfile(BaseModel):
     """User profile data for job applications"""
+
+    # profile.json is the user's own file: keys this model does not declare
+    # (e.g. skills, target_titles, domain_experience) must survive a save
+    # instead of being silently dropped.
+    model_config = ConfigDict(extra="allow")
 
     # Basic Info
     first_name: str = ""
@@ -80,6 +85,9 @@ class ProfileStore:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.profile_path = self.data_dir / "profile.json"
         self._profile: UserProfile | None = None
+        # True when profile.json exists but could not be parsed: the in-memory
+        # profile is then a blank default, so save() must not destroy the file.
+        self._load_failed = False
 
     def load(self) -> UserProfile:
         """Load profile from disk, or create empty one"""
@@ -92,6 +100,7 @@ class ProfileStore:
                 self._profile = UserProfile(**data)
             except Exception as e:
                 log.warning("Could not load profile: %s", e)
+                self._load_failed = True
                 self._profile = UserProfile()
         else:
             self._profile = UserProfile()
@@ -103,6 +112,14 @@ class ProfileStore:
         if profile:
             self._profile = profile
         if self._profile:
+            if self._load_failed and self.profile_path.exists():
+                # Keep the unreadable original instead of overwriting it with
+                # the blank default that load() fell back to.
+                atomic_write_text(
+                    self.profile_path.with_name("profile.json.bak"),
+                    self.profile_path.read_text(),
+                )
+                self._load_failed = False
             atomic_write_text(
                 self.profile_path, self._profile.model_dump_json(indent=2)
             )
