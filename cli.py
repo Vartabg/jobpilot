@@ -1807,6 +1807,16 @@ app.add_typer(
     help="Freelance-gig radar: scan sources, score, digest, push",
 )
 
+# The one opportunity ledger (engine/), reached through the legacy bridge until
+# the service layer replaces these commands (docs/plans/2026-09-25-one-core.md).
+from jobpilot.bridge.cli import app as ledger_app
+
+app.add_typer(
+    ledger_app,
+    name="ledger",
+    help="The one opportunity ledger: import legacy data and inspect it",
+)
+
 
 def _answers_dir() -> Path:
     """Root for stored answers: projects/jobpilot/data/answers/."""
