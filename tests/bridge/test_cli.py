@@ -99,3 +99,153 @@ def test_unreadable_source_is_reported_and_fails(stores):
     result = CliRunner().invoke(app, args(stores, "--dry-run"))
     assert result.exit_code == 1
     assert "could not read" in result.output
+
+
+# ----- refresh and screened ---------------------------------------------------------
+
+from rich.console import Console  # noqa: E402
+
+from jobpilot.bridge import cli as ledger_cli  # noqa: E402
+from jobpilot.engine.domain import (  # noqa: E402
+    BoardResult,
+    Listing,
+    Posting,
+    Workplace,
+)
+
+SETTINGS_TOML = """
+[profile]
+languages = ["English", "Spanish"]
+[rules.location]
+home = ["Austin, TX"]
+remote = "us"
+[rules.level]
+exclude_titles = ["senior"]
+max_years_required = 4
+"""
+
+
+def board_posting(job_id, title, locations, workplace, description=""):
+    listing = Listing(
+        "Gamma",
+        title,
+        url=f"https://jobs.ashbyhq.com/gamma/{job_id}",
+        provider="ashby",
+        tenant="gamma",
+        provider_job_id=job_id,
+    )
+    return Posting(listing, description, workplace, locations)
+
+
+class FakeBoards:
+    def fetch(self, target):
+        return BoardResult(
+            target,
+            (
+                board_posting(
+                    "1",
+                    "Forward Deployed Engineer",
+                    ("United States",),
+                    Workplace.REMOTE,
+                ),
+                board_posting(
+                    "2", "Senior Engineer", ("United States",), Workplace.REMOTE
+                ),
+                board_posting(
+                    "3",
+                    "Deployment Engineer",
+                    ("San Francisco",),
+                    Workplace.ONSITE,
+                    "- 5+ years of experience",
+                ),
+            ),
+        )
+
+
+@pytest.fixture
+def board_setup(tmp_path, monkeypatch):
+    monkeypatch.setattr(ledger_cli, "_make_boards", FakeBoards)
+    # A wide console keeps Rich from folding long reasons across table rows.
+    monkeypatch.setattr(ledger_cli, "console", Console(width=200))
+    portals = tmp_path / "portals.json"
+    portals.write_text(
+        json.dumps(
+            [
+                {
+                    "portal": "ashby",
+                    "value": "gamma",
+                    "label": "Gamma",
+                    "enabled": True,
+                },
+                {"portal": "ashby", "value": "off", "enabled": False},
+                {"portal": "indeed", "value": "q", "enabled": True},
+            ]
+        )
+    )
+    settings = tmp_path / "jobpilot.toml"
+    settings.write_text(SETTINGS_TOML)
+    ledger = tmp_path / "opportunities.db"
+    return [
+        "--portals",
+        str(portals),
+        "--settings",
+        str(settings),
+        "--ledger",
+        str(ledger),
+    ], ledger
+
+
+def test_board_targets_keep_enabled_supported_boards(tmp_path):
+    portals = tmp_path / "portals.json"
+    portals.write_text(
+        json.dumps(
+            [
+                {"portal": "greenhouse", "value": "acme", "label": "Acme"},
+                {"portal": "lever", "value": "beta", "enabled": False},
+                {"portal": "adzuna", "value": "x"},
+            ]
+        )
+    )
+    targets = ledger_cli.board_targets(portals)
+    assert [(t.provider, t.token, t.company) for t in targets] == [
+        ("greenhouse", "acme", "Acme")
+    ]
+    assert ledger_cli.board_targets(portals, only="greenhouse:acme") == targets
+    assert ledger_cli.board_targets(portals, only="nobody") == []
+
+
+def test_refresh_dry_run_writes_nothing(board_setup):
+    options, ledger = board_setup
+    result = CliRunner().invoke(ledger_cli.app, ["refresh", "--dry-run", *options])
+    assert result.exit_code == 0, result.output
+    assert "Dry run" in result.output
+    assert not ledger.exists()
+
+
+def test_refresh_then_screened(board_setup):
+    options, ledger = board_setup
+    runner = CliRunner()
+    result = runner.invoke(ledger_cli.app, ["refresh", *options])
+    assert result.exit_code == 0, result.output
+    assert "Failed by rule:" in result.output
+
+    passed = runner.invoke(ledger_cli.app, ["screened", "--ledger", str(ledger)])
+    assert passed.exit_code == 0, passed.output
+    assert "Forward Deployed Engineer" in passed.output
+    assert "Senior Engineer" not in passed.output
+
+    failed = runner.invoke(
+        ledger_cli.app, ["screened", "--failed", "--ledger", str(ledger)]
+    )
+    assert "Senior Engineer" in failed.output and "Title includes" in failed.output
+    assert "your home is Austin, TX" in failed.output
+
+
+def test_refresh_stops_on_broken_settings(board_setup, tmp_path):
+    options, _ = board_setup
+    bad = tmp_path / "bad.toml"
+    bad.write_text('[rules.location]\nremote = "mars"\n')
+    options[options.index("--settings") + 1] = str(bad)
+    result = CliRunner().invoke(ledger_cli.app, ["refresh", *options])
+    assert result.exit_code == 1
+    assert "rules.location.remote" in result.output

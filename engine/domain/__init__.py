@@ -20,6 +20,17 @@ from jobpilot.engine.domain.opportunity import (
     Opportunity,
     opportunity_id,
 )
+from jobpilot.engine.domain.posting import BoardResult, BoardTarget, Posting, Workplace
+from jobpilot.engine.domain.screening import (
+    SCREEN,
+    SCREEN_VERSION,
+    Assessment,
+    Check,
+    Outcome,
+    Screening,
+    rules_fingerprint,
+    screen,
+)
 from jobpilot.engine.domain.settings import (
     CompanyRules,
     LevelRules,
@@ -34,6 +45,12 @@ from jobpilot.engine.domain.settings import (
 )
 
 __all__ = [
+    "SCREEN",
+    "SCREEN_VERSION",
+    "Assessment",
+    "BoardResult",
+    "BoardTarget",
+    "Check",
     "CompanyRules",
     "Event",
     "EventKind",
@@ -42,20 +59,26 @@ __all__ = [
     "Listing",
     "LocationRules",
     "Opportunity",
+    "Outcome",
+    "Posting",
     "Profile",
     "Remote",
     "RoleIdentity",
     "Rules",
+    "Screening",
     "Settings",
     "SettingsError",
     "Status",
     "Targets",
+    "Workplace",
     "canonicalize_role_url",
     "identify_role",
     "infer_provider",
     "normalize_timestamp",
     "opportunity_id",
     "parse_settings",
+    "rules_fingerprint",
+    "screen",
     "status_of",
     "utc_now",
 ]

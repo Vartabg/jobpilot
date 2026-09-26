@@ -14,11 +14,14 @@ from pathlib import Path
 from types import TracebackType
 
 from jobpilot.engine.domain import (
+    Assessment,
     Event,
     Lane,
     Listing,
     Opportunity,
+    Posting,
     Status,
+    Workplace,
     identify_role,
     normalize_timestamp,
     opportunity_id,
@@ -59,6 +62,35 @@ _MIGRATIONS: tuple[str, ...] = (
     BEGIN SELECT RAISE(ABORT, 'events are append-only'); END;
     CREATE TRIGGER events_never_delete BEFORE DELETE ON events
     BEGIN SELECT RAISE(ABORT, 'events are append-only'); END;
+    """,
+    # v2: the latest full text of each role, and append-only assessments.
+    """
+    CREATE TABLE postings (
+        opportunity_id TEXT PRIMARY KEY REFERENCES opportunities(id),
+        fetched_at TEXT NOT NULL,
+        content_hash TEXT NOT NULL,
+        description TEXT NOT NULL,
+        workplace TEXT NOT NULL,
+        locations_json TEXT NOT NULL,
+        compensation TEXT NOT NULL DEFAULT '',
+        employment_type TEXT NOT NULL DEFAULT '',
+        posted_at TEXT NOT NULL DEFAULT ''
+    );
+    CREATE TABLE assessments (
+        seq INTEGER PRIMARY KEY AUTOINCREMENT,
+        id TEXT NOT NULL UNIQUE,
+        opportunity_id TEXT NOT NULL REFERENCES opportunities(id),
+        kind TEXT NOT NULL,
+        version TEXT NOT NULL,
+        basis TEXT NOT NULL,
+        assessed_at TEXT NOT NULL,
+        result_json TEXT NOT NULL
+    );
+    CREATE INDEX assessments_by_opportunity ON assessments (opportunity_id, kind, seq);
+    CREATE TRIGGER assessments_never_update BEFORE UPDATE ON assessments
+    BEGIN SELECT RAISE(ABORT, 'assessments are append-only'); END;
+    CREATE TRIGGER assessments_never_delete BEFORE DELETE ON assessments
+    BEGIN SELECT RAISE(ABORT, 'assessments are append-only'); END;
     """,
 )
 SCHEMA_VERSION = len(_MIGRATIONS)
@@ -110,7 +142,7 @@ class SQLiteLedger:
         seen_at = normalize_timestamp(seen_at)
         key = listing.identity_key()
         identity = identify_role(
-            listing.url, listing.provider, provider_job_id=listing.provider_job_id
+            listing.url, listing.provider, listing.tenant, listing.provider_job_id
         )
         with self._db:
             self._db.execute(
@@ -207,6 +239,113 @@ class SQLiteLedger:
                 (lane.value,),
             ).fetchall()
         return [_opportunity(row) for row in rows]
+
+    def save_posting(
+        self, opportunity_id: str, posting: Posting, *, fetched_at: str
+    ) -> bool:
+        fetched_at = normalize_timestamp(fetched_at)
+        previous = self._db.execute(
+            "SELECT content_hash FROM postings WHERE opportunity_id = ?",
+            (opportunity_id,),
+        ).fetchone()
+        with self._db:
+            self._db.execute(
+                """
+                INSERT INTO postings (
+                    opportunity_id, fetched_at, content_hash, description, workplace,
+                    locations_json, compensation, employment_type, posted_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (opportunity_id) DO UPDATE SET
+                    fetched_at = excluded.fetched_at,
+                    content_hash = excluded.content_hash,
+                    description = excluded.description,
+                    workplace = excluded.workplace,
+                    locations_json = excluded.locations_json,
+                    compensation = excluded.compensation,
+                    employment_type = excluded.employment_type,
+                    posted_at = excluded.posted_at
+                """,
+                (
+                    opportunity_id,
+                    fetched_at,
+                    posting.content_hash,
+                    posting.description,
+                    posting.workplace.value,
+                    json.dumps(list(posting.all_locations), ensure_ascii=False),
+                    posting.compensation,
+                    posting.employment_type,
+                    posting.posted_at,
+                ),
+            )
+        return previous is None or previous["content_hash"] != posting.content_hash
+
+    def posting(self, opportunity_id: str) -> Posting | None:
+        opportunity = self.get(opportunity_id)
+        row = self._db.execute(
+            "SELECT * FROM postings WHERE opportunity_id = ?", (opportunity_id,)
+        ).fetchone()
+        if opportunity is None or row is None:
+            return None
+        listing = Listing(
+            company=opportunity.company,
+            title=opportunity.title,
+            url=opportunity.url,
+            location=opportunity.location,
+            lane=opportunity.lane,
+            provider=opportunity.provider,
+            tenant=opportunity.tenant,
+            provider_job_id=opportunity.provider_job_id,
+        )
+        return Posting(
+            listing=listing,
+            description=row["description"],
+            workplace=Workplace(row["workplace"]),
+            locations=tuple(json.loads(row["locations_json"])),
+            compensation=row["compensation"],
+            employment_type=row["employment_type"],
+            posted_at=row["posted_at"],
+        )
+
+    def record_assessment(self, assessment: Assessment) -> bool:
+        if self.get(assessment.opportunity_id) is None:
+            raise KeyError(f"unknown opportunity {assessment.opportunity_id}")
+        with self._db:
+            cursor = self._db.execute(
+                """
+                INSERT INTO assessments (id, opportunity_id, kind, version, basis, assessed_at, result_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (id) DO NOTHING
+                """,
+                (
+                    assessment.id,
+                    assessment.opportunity_id,
+                    assessment.kind,
+                    assessment.version,
+                    assessment.basis,
+                    assessment.assessed_at,
+                    json.dumps(
+                        dict(assessment.result), sort_keys=True, separators=(",", ":")
+                    ),
+                ),
+            )
+        return cursor.rowcount == 1
+
+    def latest_assessment(self, opportunity_id: str, kind: str) -> Assessment | None:
+        row = self._db.execute(
+            "SELECT * FROM assessments WHERE opportunity_id = ? AND kind = ? ORDER BY seq DESC LIMIT 1",
+            (opportunity_id, kind),
+        ).fetchone()
+        if row is None:
+            return None
+        return Assessment(
+            opportunity_id=row["opportunity_id"],
+            kind=row["kind"],
+            version=row["version"],
+            assessed_at=row["assessed_at"],
+            result=json.loads(row["result_json"]),
+            basis=row["basis"],
+            id=row["id"],
+        )
 
     def close(self) -> None:
         self._db.close()

@@ -105,3 +105,69 @@ def test_a_newer_schema_is_refused(tmp_path):
         db.execute(f"PRAGMA user_version = {SCHEMA_VERSION + 1}")
     with pytest.raises(RuntimeError, match="schema"):
         SQLiteLedger(path)
+
+
+# ----- schema v2: postings and assessments ----------------------------------------
+
+
+def test_a_v1_ledger_upgrades_in_place_keeping_history(tmp_path, monkeypatch):
+    import jobpilot.engine.adapters.sqlite_ledger as module
+
+    path = tmp_path / "opportunities.db"
+    monkeypatch.setattr(module, "_MIGRATIONS", module._MIGRATIONS[:1])
+    monkeypatch.setattr(module, "SCHEMA_VERSION", 1)
+    with SQLiteLedger(path) as old:
+        opportunity = old.upsert(Listing("Acme", "Engineer", url=URL), seen_at=T1)
+        old.append(Event(opportunity.id, EventKind.APPLIED, T2, "user"))
+    monkeypatch.undo()
+
+    with SQLiteLedger(path) as upgraded:
+        assert (
+            upgraded._db.execute("PRAGMA user_version").fetchone()[0]
+            == SCHEMA_VERSION
+            == 2
+        )
+        assert upgraded.status(opportunity.id) is Status.APPLIED
+
+
+def test_postings_keep_the_latest_text_and_report_changes(ledger):
+    from jobpilot.engine.domain import Posting, Workplace
+
+    opportunity = ledger.upsert(Listing("Acme", "Engineer", url=URL), seen_at=T1)
+    first = Posting(
+        Listing("Acme", "Engineer", url=URL),
+        "v1 text",
+        Workplace.REMOTE,
+        ("United States",),
+    )
+    assert ledger.save_posting(opportunity.id, first, fetched_at=T1) is True
+    assert (
+        ledger.save_posting(opportunity.id, first, fetched_at=T2) is False
+    )  # unchanged
+    second = Posting(first.listing, "v2 text", Workplace.REMOTE, ("United States",))
+    assert ledger.save_posting(opportunity.id, second, fetched_at=T3) is True
+    stored = ledger.posting(opportunity.id)
+    assert stored.description == "v2 text"
+    assert stored.workplace is Workplace.REMOTE
+    assert stored.locations == ("United States",)
+
+
+def test_assessments_are_idempotent_append_only_and_latest_wins(ledger):
+    from jobpilot.engine.domain import Assessment
+
+    opportunity = ledger.upsert(Listing("Acme", "Engineer", url=URL), seen_at=T1)
+    first = Assessment(
+        opportunity.id, "screen", "screen/1", T1, {"passed": True}, basis="hash-a"
+    )
+    assert ledger.record_assessment(first) is True
+    assert ledger.record_assessment(first) is False
+    second = Assessment(
+        opportunity.id, "screen", "screen/1", T2, {"passed": False}, basis="hash-b"
+    )
+    ledger.record_assessment(second)
+    assert ledger.latest_assessment(opportunity.id, "screen").result == {
+        "passed": False
+    }
+    assert ledger.latest_assessment(opportunity.id, "fit") is None
+    with pytest.raises(sqlite3.IntegrityError, match="append-only"):
+        ledger._db.execute("DELETE FROM assessments")

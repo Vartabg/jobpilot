@@ -44,7 +44,7 @@ def modules(folder: str = "") -> list[Path]:
 
 
 def test_engine_has_modules_to_check():
-    assert modules("domain") and modules("adapters")
+    assert modules("domain") and modules("adapters") and modules("service")
 
 
 @pytest.mark.parametrize("path", modules("domain"), ids=lambda p: p.name)
@@ -62,6 +62,15 @@ def test_domain_is_pure(path):
         assert name not in IO_MODULES and top not in IO_MODULES, (
             f"{path.name} imports {name}, which does I/O"
         )
+
+
+@pytest.mark.parametrize("path", modules("service"), ids=lambda p: p.name)
+def test_services_depend_only_on_domain_and_ports(path):
+    for name in imports(path):
+        if name.startswith("jobpilot."):
+            assert name.startswith(
+                ("jobpilot.engine.domain", "jobpilot.engine.ports")
+            ), f"service {path.name} imports {name}"
 
 
 def test_ports_depend_only_on_the_domain():
