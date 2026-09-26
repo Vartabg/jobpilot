@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 ENGINE = Path(__file__).resolve().parents[2] / "engine"
-LEGACY = ("core", "gigs", "ui", "product", "learning", "cli", "scripts")
+LEGACY = ("core", "gigs", "ui", "product", "learning", "cli", "scripts", "bridge")
 IO_MODULES = {
     "http",
     "io",

@@ -64,6 +64,7 @@ include = [
     "*.py",
     "core/*.py",
     "engine/**/*.py",
+    "bridge/*.py",
     "gigs/**/*.py",
     "gigs/**/*.html",
     "ui/*.py",
