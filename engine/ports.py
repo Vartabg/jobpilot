@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from jobpilot.engine.domain import Event, Lane, Listing, Opportunity, Status
+from jobpilot.engine.domain import Event, Lane, Listing, Opportunity, Settings, Status
 
 
 class Ledger(Protocol):
@@ -32,4 +32,12 @@ class Ledger(Protocol):
 
     def opportunities(self, lane: Lane | None = None) -> list[Opportunity]:
         """All opportunities, most recently seen first."""
+        ...
+
+
+class SettingsSource(Protocol):
+    """Where the user's settings come from. The engine reads them, never writes them."""
+
+    def load(self) -> tuple[Settings, list[str]]:
+        """The settings plus warnings. Raises SettingsError when they can't be used."""
         ...

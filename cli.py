@@ -1817,6 +1817,14 @@ app.add_typer(
     help="The one opportunity ledger: import legacy data and inspect it",
 )
 
+from jobpilot.bridge.settings_cli import app as settings_app
+
+app.add_typer(
+    settings_app,
+    name="settings",
+    help="Your settings file (rules, targets, profile): create it once, then check it",
+)
+
 
 def _answers_dir() -> Path:
     """Root for stored answers: projects/jobpilot/data/answers/."""
