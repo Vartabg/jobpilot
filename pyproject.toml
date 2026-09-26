@@ -63,6 +63,7 @@ packages = ["."]
 include = [
     "*.py",
     "core/*.py",
+    "engine/**/*.py",
     "gigs/**/*.py",
     "gigs/**/*.html",
     "ui/*.py",
