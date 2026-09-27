@@ -31,6 +31,7 @@ class Listing:
     location: str = ""
     lane: Lane = Lane.JOB
     provider: str = ""
+    tenant: str = ""
     provider_job_id: str = ""
 
     def identity_key(self) -> str:
@@ -42,7 +43,7 @@ class Listing:
         """
         if self.url or self.provider_job_id:
             key = identify_role(
-                self.url, self.provider, provider_job_id=self.provider_job_id
+                self.url, self.provider, self.tenant, self.provider_job_id
             ).key
             if key:
                 return key

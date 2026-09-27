@@ -8,7 +8,18 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from jobpilot.engine.domain import Event, Lane, Listing, Opportunity, Settings, Status
+from jobpilot.engine.domain import (
+    Assessment,
+    BoardResult,
+    BoardTarget,
+    Event,
+    Lane,
+    Listing,
+    Opportunity,
+    Posting,
+    Settings,
+    Status,
+)
 
 
 class Ledger(Protocol):
@@ -32,6 +43,30 @@ class Ledger(Protocol):
 
     def opportunities(self, lane: Lane | None = None) -> list[Opportunity]:
         """All opportunities, most recently seen first."""
+        ...
+
+    def save_posting(
+        self, opportunity_id: str, posting: Posting, *, fetched_at: str
+    ) -> bool:
+        """Store the latest full text of a role. Returns True when the text changed."""
+        ...
+
+    def posting(self, opportunity_id: str) -> Posting | None: ...
+
+    def record_assessment(self, assessment: Assessment) -> bool:
+        """Record a judgment. Returns False when the same inputs were already assessed."""
+        ...
+
+    def latest_assessment(
+        self, opportunity_id: str, kind: str
+    ) -> Assessment | None: ...
+
+
+class Boards(Protocol):
+    """Public job boards: one fetch returns every posting on one board."""
+
+    def fetch(self, target: BoardTarget) -> BoardResult:
+        """Never raises for board problems; they come back as ``BoardResult.error``."""
         ...
 
 
