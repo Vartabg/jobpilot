@@ -249,3 +249,89 @@ def test_refresh_stops_on_broken_settings(board_setup, tmp_path):
     result = CliRunner().invoke(ledger_cli.app, ["refresh", *options])
     assert result.exit_code == 1
     assert "rules.location.remote" in result.output
+
+
+# ----- fit and fits -----------------------------------------------------------------
+
+from jobpilot.engine.adapters.rules_fit import RulesFit  # noqa: E402
+from jobpilot.engine.domain.settings import FitEngine  # noqa: E402
+
+FIT_SETTINGS = (
+    SETTINGS_TOML
+    + """
+[targets]
+titles = ["Forward Deployed Engineer", "Deployment Engineer"]
+skills = ["Python"]
+"""
+)
+
+
+@pytest.fixture
+def fitted(board_setup, tmp_path, monkeypatch):
+    options, ledger = board_setup
+    settings = tmp_path / "fit.toml"
+    settings.write_text(FIT_SETTINGS)
+    options[options.index("--settings") + 1] = str(settings)
+    chosen = []
+
+    def make_checker(engine, model):
+        chosen.append((engine, model))
+        return RulesFit()
+
+    monkeypatch.setattr(ledger_cli, "_make_checker", make_checker)
+    runner = CliRunner()
+    assert runner.invoke(ledger_cli.app, ["refresh", *options]).exit_code == 0
+    return runner, options, ledger, settings, chosen
+
+
+def test_fit_then_fits(fitted):
+    runner, _, ledger, settings, chosen = fitted
+    result = runner.invoke(
+        ledger_cli.app, ["fit", "--ledger", str(ledger), "--settings", str(settings)]
+    )
+    assert result.exit_code == 0, result.output
+    assert chosen == [(FitEngine.RULES, "")]
+    assert "By tier:" in result.output
+
+    shown = runner.invoke(ledger_cli.app, ["fits", "--ledger", str(ledger)])
+    assert shown.exit_code == 0, shown.output
+    assert "Forward Deployed Engineer" in shown.output
+
+
+def test_cloud_models_need_explicit_permission(fitted):
+    runner, _, ledger, settings, chosen = fitted
+    result = runner.invoke(
+        ledger_cli.app,
+        [
+            "fit",
+            "--engine",
+            "ollama",
+            "--model",
+            "kimi-k3:cloud",
+            "--ledger",
+            str(ledger),
+            "--settings",
+            str(settings),
+        ],
+    )
+    assert result.exit_code == 1
+    assert "--allow-cloud" in result.output
+    assert chosen == []
+
+
+def test_ollama_without_a_model_is_refused(fitted):
+    runner, _, ledger, settings, _ = fitted
+    result = runner.invoke(
+        ledger_cli.app,
+        [
+            "fit",
+            "--engine",
+            "ollama",
+            "--ledger",
+            str(ledger),
+            "--settings",
+            str(settings),
+        ],
+    )
+    assert result.exit_code == 1
+    assert "--model" in result.output

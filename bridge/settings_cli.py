@@ -79,6 +79,9 @@ def describe(settings: Settings) -> list[str]:
         if profile.languages
         else "Languages: (not set)",
         f"Targets: {len(targets.titles)} titles, {len(targets.skills)} skills",
+        "Fit check: rules only (no AI)"
+        if settings.fit.engine.value == "rules"
+        else f"Fit check: {settings.fit.model} through Ollama",
     ]
 
 

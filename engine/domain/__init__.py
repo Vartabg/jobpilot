@@ -33,6 +33,8 @@ from jobpilot.engine.domain.screening import (
 )
 from jobpilot.engine.domain.settings import (
     CompanyRules,
+    FitEngine,
+    FitSettings,
     LevelRules,
     LocationRules,
     Profile,
@@ -54,6 +56,8 @@ __all__ = [
     "CompanyRules",
     "Event",
     "EventKind",
+    "FitEngine",
+    "FitSettings",
     "Lane",
     "LevelRules",
     "Listing",

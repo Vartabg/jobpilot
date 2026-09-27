@@ -3,6 +3,8 @@ import pytest
 from jobpilot.engine.adapters.toml_settings import TomlSettings, render_settings
 from jobpilot.engine.domain import (
     CompanyRules,
+    FitEngine,
+    FitSettings,
     LevelRules,
     LocationRules,
     Profile,
@@ -39,6 +41,7 @@ RICH = Settings(
         pay_floor=90_000,
         max_travel_percent=40,
     ),
+    fit=FitSettings(engine=FitEngine.OLLAMA, model="qwen3:14b"),
 )
 
 

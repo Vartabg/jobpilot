@@ -29,7 +29,10 @@ from jobpilot.engine.domain import (
     Status,
     utc_now,
 )
-from jobpilot.engine.ports import Boards
+from jobpilot.engine.domain.fit import FIT, Fit
+from jobpilot.engine.domain.settings import FitEngine
+from jobpilot.engine.ports import Boards, FitChecker
+from jobpilot.engine.service.fit import ACTIONABLE, FitReport, assess_fits
 from jobpilot.engine.service.refresh import RefreshReport, refresh
 
 app = typer.Typer(
@@ -394,4 +397,172 @@ def screened(
         table.add_column(column, overflow="fold")
     for row in rows[:limit]:
         table.add_row(*row)
+    console.print(table)
+
+
+# ----- fit ------------------------------------------------------------------------
+
+_TIER_ORDER = {"strong": 0, "possible": 1, "stretch": 2, "off_target": 3}
+
+
+def _make_checker(engine: FitEngine, model: str) -> FitChecker:
+    """The fit checker for an engine. Tests replace this."""
+    if engine is FitEngine.RULES:
+        from jobpilot.engine.adapters.rules_fit import RulesFit
+
+        return RulesFit()
+    from jobpilot.engine.adapters.fit_graph import GraphFit
+    from jobpilot.engine.adapters.ollama_model import OllamaModel
+
+    return GraphFit(OllamaModel(model))
+
+
+def _print_fit_report(report: FitReport) -> None:
+    table = Table(title="Fit check")
+    for column in (
+        "Open roles that passed",
+        "Judged now",
+        "Already current",
+        "Waiting",
+        "Failed",
+    ):
+        table.add_column(column, justify="right")
+    table.add_row(
+        *map(
+            str,
+            (
+                report.candidates,
+                report.assessed,
+                report.up_to_date,
+                report.deferred,
+                len(report.failed),
+            ),
+        )
+    )
+    console.print(table)
+    if report.by_tier:
+        tiers = ", ".join(
+            f"{tier.replace('_', ' ')} {report.by_tier[tier]}"
+            for tier in sorted(
+                report.by_tier, key=lambda name: _TIER_ORDER.get(name, 9)
+            )
+        )
+        console.print(f"By tier: {tiers}", markup=False)
+    for failure in report.failed:
+        console.print(f"[yellow]not judged[/yellow] {failure}")
+
+
+@app.command("fit")
+def fit_roles(
+    engine: Annotated[
+        str | None, typer.Option(help='"rules" or "ollama" (default: from settings).')
+    ] = None,
+    model: Annotated[
+        str | None, typer.Option(help="Ollama model (default: from settings).")
+    ] = None,
+    limit: Annotated[
+        int | None,
+        typer.Option(help="Judge at most this many roles now, most relevant first."),
+    ] = None,
+    allow_cloud: Annotated[
+        bool,
+        typer.Option(
+            "--allow-cloud", help="Allow an Ollama model that runs on remote servers."
+        ),
+    ] = False,
+    ledger: Annotated[
+        Path | None, typer.Option(help="Ledger file (default: data/opportunities.db).")
+    ] = None,
+    settings: Annotated[
+        Path | None, typer.Option(help="Settings file (default: data/jobpilot.toml).")
+    ] = None,
+) -> None:
+    """Judge how well each open role that passed your rules fits you."""
+    try:
+        loaded, warnings = TomlSettings(settings or DATA_DIR / SETTINGS_FILENAME).load()
+    except SettingsError as exc:
+        for problem in exc.problems:
+            console.print(f"[red]✗[/red] {problem}")
+        raise typer.Exit(1) from None
+    for warning in warnings:
+        console.print(f"[yellow]![/yellow] {warning}")
+    try:
+        chosen = FitEngine(engine.lower()) if engine else loaded.fit.engine
+    except ValueError:
+        console.print('--engine must be "rules" or "ollama".')
+        raise typer.Exit(1) from None
+    chosen_model = model or loaded.fit.model
+    if chosen is FitEngine.OLLAMA and not chosen_model:
+        console.print("Name a model with --model, or set [fit] model in your settings.")
+        raise typer.Exit(1)
+    if (
+        chosen is FitEngine.OLLAMA
+        and chosen_model.endswith(":cloud")
+        and not allow_cloud
+    ):
+        console.print(
+            f"{chosen_model} runs on remote servers, so posting text and your skills list would leave "
+            "this computer. Re-run with --allow-cloud to allow that."
+        )
+        raise typer.Exit(1)
+    path = ledger or DATA_DIR / LEDGER_FILENAME
+    if not path.exists():
+        console.print("No ledger yet. Run `jobpilot ledger refresh` first.")
+        raise typer.Exit(1)
+    with SQLiteLedger(path) as store:
+        report = assess_fits(
+            store,
+            _make_checker(chosen, chosen_model),
+            loaded,
+            now=utc_now(),
+            limit=limit,
+        )
+    _print_fit_report(report)
+
+
+@app.command("fits")
+def show_fits(
+    tier: Annotated[
+        str | None,
+        typer.Option(help="Only this tier: strong, possible, stretch, or off_target."),
+    ] = None,
+    limit: Annotated[int, typer.Option(help="Most rows to show.")] = 30,
+    ledger: Annotated[
+        Path | None, typer.Option(help="Ledger file (default: data/opportunities.db).")
+    ] = None,
+) -> None:
+    """Judged open roles, best fits first, with the biggest gap for each."""
+    path = ledger or DATA_DIR / LEDGER_FILENAME
+    if not path.exists():
+        console.print("No ledger yet. Run `jobpilot ledger refresh` first.")
+        raise typer.Exit(1)
+    rows: list[tuple[Fit, str, str]] = []
+    with SQLiteLedger(path) as store:
+        for opportunity in store.opportunities(Lane.JOB):
+            assessment = store.latest_assessment(opportunity.id, FIT)
+            if assessment is None or store.status(opportunity.id) not in ACTIONABLE:
+                continue
+            fit = Fit.from_dict(assessment.result)
+            if tier and fit.tier.value != tier.lower():
+                continue
+            rows.append((fit, opportunity.company, opportunity.title))
+    rows.sort(
+        key=lambda row: (
+            _TIER_ORDER[row[0].tier.value],
+            -row[0].coverage,
+            -row[0].title_relevance,
+            row[1].lower(),
+        )
+    )
+    table = Table(title=f"Fit ({len(rows)} judged)")
+    for column in ("Fit", "Company", "Role", "Covered", "Biggest gap"):
+        table.add_column(column, overflow="fold")
+    for fit, company, title in rows[:limit]:
+        table.add_row(
+            fit.tier.value.replace("_", " "),
+            company,
+            title,
+            f"{round(fit.coverage * 100)}%",
+            fit.biggest_gap,
+        )
     console.print(table)

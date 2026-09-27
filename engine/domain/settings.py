@@ -11,7 +11,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from types import MappingProxyType
-from typing import Any
+from typing import Any, TypeVar
 
 
 class Remote(StrEnum):
@@ -20,6 +20,13 @@ class Remote(StrEnum):
     US = "us"
     ANYWHERE = "anywhere"
     NONE = "none"
+
+
+class FitEngine(StrEnum):
+    """How fit is judged: fixed rules only, or a local model through Ollama."""
+
+    RULES = "rules"
+    OLLAMA = "ollama"
 
 
 @dataclass(frozen=True)
@@ -32,6 +39,7 @@ class Profile:
     work_authorized: bool = True
     needs_sponsorship: bool = False
     languages: tuple[str, ...] = ()
+    education: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -70,10 +78,17 @@ class Rules:
 
 
 @dataclass(frozen=True)
+class FitSettings:
+    engine: FitEngine = FitEngine.RULES
+    model: str = ""
+
+
+@dataclass(frozen=True)
 class Settings:
     profile: Profile = field(default_factory=Profile)
     targets: Targets = field(default_factory=Targets)
     rules: Rules = field(default_factory=Rules)
+    fit: FitSettings = field(default_factory=FitSettings)
     # Keys this version doesn't understand, by dotted path, kept verbatim.
     extras: Mapping[str, Any] = field(default_factory=dict)
 
@@ -84,6 +99,9 @@ class SettingsError(ValueError):
     def __init__(self, problems: list[str]) -> None:
         super().__init__("; ".join(problems))
         self.problems = problems
+
+
+_Choice = TypeVar("_Choice", bound=StrEnum)
 
 
 class _Table:
@@ -176,7 +194,7 @@ class _Table:
                 found[name] = value
         return MappingProxyType(found)
 
-    def choice(self, key: str, options: type[Remote], default: Remote) -> Remote:
+    def choice(self, key: str, options: type[_Choice], default: _Choice) -> _Choice:
         value = self.text(key, default.value).lower()
         try:
             return options(value)
@@ -219,6 +237,7 @@ def parse_settings(data: Mapping[str, Any]) -> tuple[Settings, list[str]]:
         work_authorized=profile_table.flag("work_authorized", True),
         needs_sponsorship=profile_table.flag("needs_sponsorship", False),
         languages=profile_table.texts("languages"),
+        education=profile_table.texts("education"),
     )
 
     targets_table = table(root, "targets")
@@ -252,6 +271,14 @@ def parse_settings(data: Mapping[str, Any]) -> tuple[Settings, list[str]]:
         max_travel_percent=travel.whole("max_percent", 100, 0, 100),
     )
 
+    fit_table = table(root, "fit")
+    fit = FitSettings(
+        engine=fit_table.choice("engine", FitEngine, FitEngine.RULES),
+        model=fit_table.text("model"),
+    )
+    if fit.engine is FitEngine.OLLAMA and not fit.model:
+        problems.append('fit.model is required when fit.engine is "ollama"')
+
     for reader in finish:
         reader.finish()
     if problems:
@@ -259,5 +286,11 @@ def parse_settings(data: Mapping[str, Any]) -> tuple[Settings, list[str]]:
     warnings = [
         f"unknown setting {path} (kept, but not used)" for path in sorted(extras)
     ]
-    settings = Settings(profile, targets, rules, MappingProxyType(dict(extras)))
+    settings = Settings(
+        profile=profile,
+        targets=targets,
+        rules=rules,
+        fit=fit,
+        extras=MappingProxyType(dict(extras)),
+    )
     return settings, warnings
