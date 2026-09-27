@@ -183,3 +183,13 @@ def test_oversized_responses_stop_early(monkeypatch):
 def test_unsupported_providers_are_reported():
     result, session = fetch(target=BoardTarget("indeed", "x"))
     assert "aren't supported" in result.error and session.calls == []
+
+
+def test_tokens_stored_url_encoded_are_not_encoded_twice():
+    result, session = fetch(
+        FakeResponse(body=json.dumps({"jobs": []}).encode()),
+        target=BoardTarget("ashby", "P-1%20AI"),
+    )
+    ((url, _),) = session.calls
+    assert url.endswith("/job-board/P-1%20AI?includeCompensation=true")
+    assert not result.error
