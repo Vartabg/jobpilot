@@ -44,39 +44,20 @@
     { key: "github",        value: profile.github_url,    tokens: [["github"]] },
     { key: "website_or_github", value: profile.github_url || profile.portfolio_url, tokens: [["website", "or", "github"], ["github", "or", "website"]] },
     { key: "portfolio",     value: profile.portfolio_url, tokens: [["portfolio"], ["website"], ["personal", "site"], ["personal", "website"]] },
-    { key: "sponsorship_na", value: "Not applicable — authorized to work in the U.S.", tokens: [["what", "sponsorship"], ["sponsorship", "would", "you", "require"], ["type", "of", "sponsorship"]] },
+    { key: "sponsorship_na", value: profile.work_authorized && profile.requires_sponsorship === false ? "Not applicable — authorized to work in the U.S." : "", tokens: [["what", "sponsorship"], ["sponsorship", "would", "you", "require"], ["type", "of", "sponsorship"]] },
     { key: "current_title", value: profile.current_title, tokens: [["current", "title"], ["current", "role"], ["job", "title"]] },
   ];
 
   // ---- Select rules (applies to native <select> AND react-select) ----
-  // Demographic/EEO answers come from profile.json when the user sets them; otherwise they
-  // default to the decline-to-answer family. Keep these defaults in sync with the bookmarklet
-  // rules in core/server.py (BOOKMARKLET_TEMPLATE -> yesNoFor) until both surfaces are
-  // generated from a single source.
-  // phone_country MUST come before country so bare "country" label (phone widget) hits it first.
+  // Fill only answers that follow directly from the verified profile. Leave
+  // consent, EEO, referral source, relocation, and job-specific claims to the applicant.
   const locationAnswer = profile.location || [profile.city, profile.state, profile.country].filter(Boolean).join(", ");
   const SELECT_RULES = [
-    { id: "work_auth",          re: /authori[sz]ed to work|legally authori[sz]ed|eligible to work|right to work/i,                answer: "Yes" },
-    { id: "sponsorship",        re: /require sponsorship|sponsorship.*required|visa sponsorship|need sponsorship|future sponsorship/i, answer: "No" },
-    { id: "phone_country",      re: /country code|dialing code|phone.*country|country.*phone|^country$/i,                         answer: "+1", searchTerm: "" },
-    { id: "country",            re: /country.*(based|residence|located)|what country/i,                                            answer: profile.country || "USA", searchTerm: "" },
+    { id: "work_auth",          re: /authori[sz]ed to work|legally authori[sz]ed|eligible to work|right to work/i,                answer: profile.work_authorized === true ? "Yes" : profile.work_authorized === false ? "No" : "" },
+    { id: "sponsorship",        re: /require sponsorship|sponsorship.*required|visa sponsorship|need sponsorship|future sponsorship/i, answer: profile.requires_sponsorship === true ? "Yes" : profile.requires_sponsorship === false ? "No" : "" },
+    { id: "phone_country",      re: /country code|dialing code|phone.*country|country.*phone/i,                                    answer: profile.phone_country_code || "", searchTerm: "" },
+    { id: "country",            re: /^country$|country.*(based|residence|located)|what country/i,                                  answer: profile.country || "", searchTerm: "" },
     { id: "candidate_location", re: /^location$|^location city$|location.*city|current city|candidate location|city.*location|locate me/i, answer: locationAnswer, searchTerm: location || locationAnswer },
-    { id: "relocate",           re: /currently live|currently located|relocate to|planning to relocate|plan to relocate|in-office requirement|meet this in-office/i,
-                                  answer: "Yes, I'm currently located here",
-                                  answerIfRelocating: "Yes, I'd relocate prior to the start of the role",
-                                  contextDependent: true },
-    { id: "hybrid_ack",          re: /acknowledge.*in-office|agree.*in-office|willing to work.*(office|on-site|onsite)|commute to.*office|three days per week/i,
-                                  answer: "Yes, I'm currently located here",
-                                  answerIfRelocating: "Yes, I'd relocate prior to the start of the role",
-                                  contextDependent: true },
-    { id: "privacy_consent",    re: /consent.*process|consent to.*privacy|applicant privacy|data.*consent/i,                       answer: "Consent", searchTerm: "" },
-    { id: "capital_one",        re: /(currently|previously|ever).*worked.*(at|for) capital one|capital one.*(employee|contractor)/i, answer: "No" },
-    { id: "veteran",            re: /veteran status|protected veteran/i,                                                           answer: profile.veteran_status || "I don't wish to answer", searchTerm: "" },
-    { id: "gender",             re: /^gender$|gender identity|what is your gender/i,                                               answer: profile.gender || "Decline To Self Identify", searchTerm: "" },
-    { id: "hispanic_latino",    re: /hispanic.*latin|^hispanic$|are you hispanic|hispanic\/latino/i,                               answer: profile.hispanic_latino || "Decline To Self Identify", searchTerm: "" },
-    { id: "race",               re: /^race$|^ethnicity$|race.*ethnicity|racial/i,                                                  answer: profile.race || "Decline To Self Identify", searchTerm: "" },
-    { id: "disability",         re: /disability status|do you have a disability/i,                                                 answer: profile.disability_status || "I do not want to answer", searchTerm: "" },
-    { id: "how_heard",          re: /how did you hear|how.*heard about|referral source/i,                                          answer: "LinkedIn", searchTerm: "" },
   ];
 
   // ---- Resume upload (drag-drop simulation, embedded PDF) ----
@@ -87,6 +68,7 @@
   const loadResumeFile = async () => {
     const url = chrome.runtime.getURL("resume.pdf");
     const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`resume.pdf could not be loaded (${resp.status})`);
     const blob = await resp.blob();
     return new File([blob], RESUME_FILENAME, { type: "application/pdf" });
   };
@@ -160,19 +142,6 @@
       await sleep(60);
     }
     return { ok: true, method: "drag-drop", target: target.kind };
-  };
-
-  // ---- Location context (for contextDependent rules) ----
-  // Resolves once per page session. Cached on window so multiple runs don't re-prompt.
-  const resolveLocationContext = () => {
-    if (window.__jobpilotLocationContext) return window.__jobpilotLocationContext;
-    const isLocal = window.confirm(
-      "JobPilot: Is this job in your current city (" + (profile.city || "your city") + ")?\n\n" +
-      "• OK = Yes — fill location questions with \"I'm currently located here\"\n" +
-      "• Cancel = No — fill with \"I'd relocate prior to the start of the role\""
-    );
-    window.__jobpilotLocationContext = isLocal ? "local" : "relocating";
-    return window.__jobpilotLocationContext;
   };
 
   // ---- Helpers ----
@@ -563,35 +532,17 @@
   const rsControls = findReactSelectControls();
   console.log(`[JobPilot v0.6.0] react-select controls found: ${rsControls.length}`);
 
-  // Pre-resolve location context if any context-dependent rule will fire (prompts ONCE, upfront,
-  // before any menus open — avoids the confirm() blocking in the middle of an async menu interaction).
-  const needsLocationContext = rsControls.some((ctrl) => {
-    const labels = getRsLabel(ctrl);
-    const r = SELECT_RULES.find((rr) => labels.some((lbl) => rr.re.test(lbl)));
-    return r?.contextDependent;
-  });
-  if (needsLocationContext) resolveLocationContext();
-
   for (const ctrl of rsControls) {
     // Check if already has a selected value
     const hasValue = ctrl.querySelector("[class*='single-value']:not([class*='placeholder']), [class*='multi-value']:not([class*='placeholder'])");
     const labels = getRsLabel(ctrl);
     // Per-label matching: rule fires if ANY single label matches the regex (avoids anchor-regex failures on joined strings)
-    let rule = SELECT_RULES.find((r) => labels.some((lbl) => r.re.test(lbl)));
-
-    // If rule is context-dependent, swap in the relocate-variant answer when user confirmed "not local"
-    if (rule?.contextDependent) {
-      const ctx = resolveLocationContext();
-      if (ctx === "relocating" && rule.answerIfRelocating) {
-        rule = { ...rule, answer: rule.answerIfRelocating };
-      }
-    }
+    const rule = SELECT_RULES.find((r) => labels.some((lbl) => r.re.test(lbl)));
 
     console.log(`[JobPilot v0.6.0] rs-control:`, {
       label_primary: labels[0] || "(none)",
       all_labels: labels,
       matched_rule: rule?.id || "(no match)",
-      context_dependent: !!rule?.contextDependent,
       effective_answer: rule?.answer || "(no rule)",
       already_selected: !!hasValue,
     });

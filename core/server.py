@@ -110,6 +110,8 @@ def _bookmarklet_profile() -> dict:
         "github": p.github_url,
         "current_title": p.current_title,
         "years_experience": str(p.years_of_experience),
+        "authorized_to_work": p.authorized_to_work,
+        "requires_sponsorship": p.requires_sponsorship,
         "custom_answers": p.custom_answers or {},
     }
 
@@ -193,7 +195,9 @@ async def install_page() -> HTMLResponse:
 </div>
 
 <h2>What it fills automatically</h2>
-<p>Name, email, phone, LinkedIn, portfolio, location, current title, years of experience, work authorization questions ("Yes"), sponsorship questions ("No"), EEOC and veteran/disability questions ("Prefer not to say" unless you've saved a custom answer), relocation questions ("Yes"), common "how did you hear" ("LinkedIn"), and required acknowledgment checkboxes.</p>
+<p>Name, email, phone, LinkedIn, portfolio, location, current title, and work authorization and sponsorship answers from your saved profile. Review all answers before submitting.</p>
+
+<p>Answer referral source, relocation, privacy and acknowledgment, employment-history, and voluntary demographic questions yourself on each form.</p>
 
 <p style="margin-top:24px; color:#8b949e; font-size:13px">
   <b>What it can't do:</b> Upload your resume file (iOS blocks programmatic file selection), solve CAPTCHAs (designed to require humans), answer essay questions (that's your voice — do those manually).
@@ -385,9 +389,8 @@ async def api_bookmarklet() -> JSONResponse:
     )
 
 
-# Self-contained form-fill bookmarklet. Demographic/EEO answer defaults below
-# (yesNoFor) must stay aligned with the SELECT_RULES defaults in
-# extension/content.js until both surfaces are generated from a single source.
+# Self-contained form-fill bookmarklet. Form-specific and voluntary answers
+# stay blank for manual review, as they do in extension/content.js.
 # NOTE: this template is minified by collapsing all whitespace to single
 # spaces, so comments inside it MUST use /* */ form — a // comment would
 # swallow the rest of the script.
@@ -414,6 +417,10 @@ BOOKMARKLET_TEMPLATE = r"""
     } catch(e){ return ''; }
   }
 
+  function shouldReview(label){
+    return /how did you hear|hear about|referral|privacy|consent|terms|agreement|acknowledg|signature|certify|gender|race|ethnic|hispanic|latino|veteran|disability|relocat|in.office|on.site|onsite|hybrid|commut|current employer|last employer|previously worked|ever worked|family member|conflict of interest/i.test(label || '');
+  }
+
   function valueFor(label){
     var l = (label || '').toLowerCase();
     if (/first\s*name|firstname|given name/.test(l)) return P.first_name;
@@ -430,8 +437,6 @@ BOOKMARKLET_TEMPLATE = r"""
     if (/github/.test(l)) return P.github;
     if (/portfolio|website|personal site/.test(l)) return P.portfolio;
     if (/current title|current role|job title|headline/.test(l)) return P.current_title;
-    if (/years of experience|years experience/.test(l)) return P.years_experience;
-    if (/how did you hear|hear about/.test(l)) return 'LinkedIn';
     /* Custom answers fuzzy match */
     for (var q in P.custom_answers) {
       if (q.toLowerCase().indexOf(l) >= 0 || l.indexOf(q.toLowerCase()) >= 0) return P.custom_answers[q];
@@ -441,22 +446,8 @@ BOOKMARKLET_TEMPLATE = r"""
 
   function yesNoFor(label){
     var l = (label || '').toLowerCase();
-    if (/authorized to work|legally authorized|us citizen|u\.s\. citizen|citizenship|eligible to work/.test(l)) return 'Yes';
-    if (/sponsorship|visa sponsor|require sponsorship/.test(l)) return 'No';
-    // Relocation generic fallback → 'No' (Austin/remote-only, pinned 2026-09-03).
-    // User-said custom_answers (valueFor) are checked BEFORE this and win.
-    if (/willing to relocate|open to relocation|able to relocate/.test(l)) return 'No';
-    if (/willing to work|open to work|open to hybrid|on-site|in-office|hub location|days per week|days a week/.test(l)) return 'Yes';
-    if (/family member|close personal relationship|outside business|worked for.*past|live within|conflict of interest/.test(l)) return 'No';
-    /* Demographic/EEO defaults: decline-to-answer family. Per-user answers come
-       from profile custom_answers (checked first via valueFor). Keep these in
-       sync with the SELECT_RULES defaults in extension/content.js. */
-    if (/gender identity/.test(l)) return 'Decline to self identify||Decline to self-identify||Prefer not to say||I don\'t wish to answer||Decline to answer';
-    if (/^gender/.test(l) || /\sgender\s/.test(l)) return 'Decline to self identify||Decline to self-identify||Prefer not to say||I don\'t wish to answer||Decline to answer';
-    if (/race|ethnicity/.test(l)) return 'Decline to self identify||Decline to self-identify||Decline to answer||I don\'t wish to answer||Prefer not to say';
-    if (/hispanic|latino/.test(l)) return 'Decline to self identify||Decline to self-identify||Decline to answer||I don\'t wish to answer||Prefer not to say';
-    if (/veteran/.test(l)) return 'I don\'t wish to answer||Prefer not to say||Decline to answer';
-    if (/disability/.test(l)) return 'I do not want to answer||I don\'t wish to answer||Prefer not to say||Decline to answer';
+    if (/authorized to work|legally authorized|eligible to work/.test(l)) return P.authorized_to_work === true ? 'Yes' : P.authorized_to_work === false ? 'No' : null;
+    if (/sponsorship|visa sponsor|require sponsorship/.test(l)) return P.requires_sponsorship === true ? 'Yes' : P.requires_sponsorship === false ? 'No' : null;
     return null;
   }
 
@@ -467,6 +458,7 @@ BOOKMARKLET_TEMPLATE = r"""
       if (el.value && el.value.trim()) return;
       if (el.offsetParent === null) return;
       var label = labelOf(el);
+      if (shouldReview(label)) { skipped++; return; }
       var v = valueFor(label);
       if (v) {
         var proto = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value') || Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value');
@@ -483,6 +475,7 @@ BOOKMARKLET_TEMPLATE = r"""
     try {
       if (sel.value && sel.value.trim() && sel.value.toLowerCase() !== 'select') return;
       var label = labelOf(sel);
+      if (shouldReview(label)) { skipped++; return; }
       var target = valueFor(label) || yesNoFor(label);
       if (!target) { skipped++; return; }
       var targets = target.split('||').map(function(s){return s.trim().toLowerCase();});
@@ -507,6 +500,7 @@ BOOKMARKLET_TEMPLATE = r"""
   document.querySelectorAll('fieldset, div[role="radiogroup"], ul.application-question').forEach(function(group){
     try {
       var q = (group.querySelector('legend, label, .application-label') || group).innerText.slice(0,200);
+      if (shouldReview(q)) { skipped++; return; }
       var target = valueFor(q) || yesNoFor(q);
       if (!target) return;
       var targets = target.split('||').map(function(s){return s.trim().toLowerCase();});
@@ -529,24 +523,7 @@ BOOKMARKLET_TEMPLATE = r"""
     } catch(e){}
   });
 
-  /* Auto-check required acknowledgment checkboxes */
-  document.querySelectorAll('input[type="checkbox"]:not([disabled])').forEach(function(cb){
-    try {
-      if (cb.checked) return;
-      if (cb.offsetParent === null) return;
-      var label = labelOf(cb).toLowerCase();
-      var required = cb.required || cb.getAttribute('aria-required') === 'true';
-      var isAck = /acknowledge|i agree|agree to|accept|confirm|privacy policy|terms|consent to/.test(label);
-      var isMarketing = /marketing|newsletter|promotional|updates about|notifications/.test(label);
-      if ((required || isAck) && !isMarketing) {
-        cb.checked = true;
-        cb.dispatchEvent(new Event('change', { bubbles: true }));
-        filled++;
-      }
-    } catch(e){}
-  });
-
-  var msg = '✓ Filled ' + filled + ' fields. Upload resume + solve CAPTCHA manually.';
+  var msg = '✓ Filled ' + filled + ' fields. Review unanswered questions, upload resume, and submit manually.';
   var t = document.createElement('div');
   t.style.cssText = 'position:fixed;top:20px;right:20px;background:#238636;color:#fff;padding:12px 18px;border-radius:10px;z-index:999999;font:14px -apple-system;box-shadow:0 4px 12px rgba(0,0,0,0.3);';
   t.textContent = msg;
