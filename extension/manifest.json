@@ -1,12 +1,16 @@
 {
   "manifest_version": 3,
-  "name": "JobPilot Autofill",
-  "version": "0.6.0",
-  "description": "One-click form fill for Greenhouse/Lever/Ashby from your JobPilot profile. Strict matching, native <select> + react-select support, required-field reporting. Never submits, never touches CAPTCHA.",
+  "name": "JobPilot",
+  "version": "0.8.0",
+  "minimum_chrome_version": "116",
+  "description": "Your local job workspace: profile, résumé library, reviewed autofill, and application tracking in a side panel.",
   "action": {
-    "default_title": "JobPilot: fill visible fields on this form"
+    "default_title": "Open JobPilot"
   },
-  "permissions": ["scripting", "activeTab"],
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "permissions": ["storage", "sidePanel", "scripting", "activeTab"],
   "host_permissions": [
     "https://boards.greenhouse.io/*",
     "https://job-boards.greenhouse.io/*",
@@ -17,21 +21,7 @@
     "https://jobs.ashbyhq.com/*"
   ],
   "background": {
-    "service_worker": "background.js"
-  },
-  "web_accessible_resources": [
-    {
-      "resources": ["profile.json", "resume.pdf"],
-      "matches": [
-        "https://boards.greenhouse.io/*",
-        "https://job-boards.greenhouse.io/*",
-        "https://boards-eu.greenhouse.io/*",
-        "https://job-boards.eu.greenhouse.io/*",
-        "https://jobs.lever.co/*",
-        "https://jobs.eu.lever.co/*",
-        "https://jobs.ashbyhq.com/*"
-      ],
-      "use_dynamic_url": true
-    }
-  ]
+    "service_worker": "background.js",
+    "type": "module"
+  }
 }

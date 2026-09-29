@@ -1,623 +1,205 @@
-(async () => {
-  const PROFILE_URL = chrome.runtime.getURL("profile.json");
-  let profile;
-  try {
-    profile = await (await fetch(PROFILE_URL)).json();
-  } catch (err) {
-    console.error("[JobPilot] failed to load profile.json", err);
-    toast("JobPilot: couldn't load profile.json");
-    return;
-  }
-
-  const fullName = [profile.first_name, profile.last_name].filter(Boolean).join(" ");
-  const location = [profile.city, profile.state].filter(Boolean).join(", ");
-
-  // ---- Deny patterns: fields we should never auto-fill ----
-  const DENY_PATTERNS = [
-    /referral.*(name|employee)/i,
-    /referred by|who referred/i,
-    /brex employee.?s? name/i,
-    /pronouns/i,
-    /employee id|employee number/i,
-    /what.*interest|why.*(interest|position|role|apply|want)/i,
-    /describe|tell us about|tell me about|explain/i,
-    /cover letter|additional information/i,
-    /salary|compensation|expected (pay|salary)|desired salary/i,
-    /reason for leaving/i,
-    /current employer|present employer|last employer/i,
-    /how many years/i,
-    /if you.?re not authorized/i,
-    /employee.?s name/i,
-  ];
-
-  // ---- Text-input rules ----
-  const TEXT_RULES = [
-    { key: "first_name",    value: profile.first_name,    tokens: [["first", "name"], ["given", "name"], ["firstname"]] },
-    { key: "last_name",     value: profile.last_name,     tokens: [["last", "name"], ["family", "name"], ["surname"], ["lastname"]] },
-    { key: "full_name",     value: fullName,              tokens: [["full", "name"], ["your", "name"], ["applicant", "name"]] },
-    { key: "full_name",     value: fullName,              tokens: [["name"]], strict: true },
-    { key: "email",         value: profile.email,         tokens: [["email"], ["e", "mail"], ["email", "address"]] },
-    { key: "phone",         value: profile.phone,         tokens: [["phone"], ["mobile", "number"], ["cell", "phone"], ["telephone"]] },
-    { key: "city",          value: profile.city,          tokens: [["city"], ["current", "city"], ["location", "city"]] },
-    { key: "location",      value: location,              tokens: [["current", "location"], ["your", "location"]] },
-    { key: "linkedin",      value: profile.linkedin_url,  tokens: [["linkedin"]] },
-    { key: "github",        value: profile.github_url,    tokens: [["github"]] },
-    { key: "website_or_github", value: profile.github_url || profile.portfolio_url, tokens: [["website", "or", "github"], ["github", "or", "website"]] },
-    { key: "portfolio",     value: profile.portfolio_url, tokens: [["portfolio"], ["website"], ["personal", "site"], ["personal", "website"]] },
-    { key: "sponsorship_na", value: profile.work_authorized && profile.requires_sponsorship === false ? "Not applicable — authorized to work in the U.S." : "", tokens: [["what", "sponsorship"], ["sponsorship", "would", "you", "require"], ["type", "of", "sponsorship"]] },
-    { key: "current_title", value: profile.current_title, tokens: [["current", "title"], ["current", "role"], ["job", "title"]] },
-  ];
-
-  // ---- Select rules (applies to native <select> AND react-select) ----
-  // Fill only answers that follow directly from the verified profile. Leave
-  // consent, EEO, referral source, relocation, and job-specific claims to the applicant.
-  const locationAnswer = profile.location || [profile.city, profile.state, profile.country].filter(Boolean).join(", ");
-  const SELECT_RULES = [
-    { id: "work_auth",          re: /authori[sz]ed to work|legally authori[sz]ed|eligible to work|right to work/i,                answer: profile.work_authorized === true ? "Yes" : profile.work_authorized === false ? "No" : "" },
-    { id: "sponsorship",        re: /require sponsorship|sponsorship.*required|visa sponsorship|need sponsorship|future sponsorship/i, answer: profile.requires_sponsorship === true ? "Yes" : profile.requires_sponsorship === false ? "No" : "" },
-    { id: "phone_country",      re: /country code|dialing code|phone.*country|country.*phone/i,                                    answer: profile.phone_country_code || "", searchTerm: "" },
-    { id: "country",            re: /^country$|country.*(based|residence|located)|what country/i,                                  answer: profile.country || "", searchTerm: "" },
-    { id: "candidate_location", re: /^location$|^location city$|location.*city|current city|candidate location|city.*location|locate me/i, answer: locationAnswer, searchTerm: location || locationAnswer },
-  ];
-
-  // ---- Resume upload (drag-drop simulation, embedded PDF) ----
-  // Display name the employer sees — set profile.resume_filename to control it;
-  // falls back to the bundled web-accessible resource name.
-  const RESUME_FILENAME = profile.resume_filename || "resume.pdf";
-
-  const loadResumeFile = async () => {
-    const url = chrome.runtime.getURL("resume.pdf");
-    const resp = await fetch(url);
-    if (!resp.ok) throw new Error(`resume.pdf could not be loaded (${resp.status})`);
-    const blob = await resp.blob();
-    return new File([blob], RESUME_FILENAME, { type: "application/pdf" });
-  };
-
-  const findResumeTarget = () => {
-    // Strategy 1: look for <input type="file"> whose identifiers mention resume/cv
-    const fileInputs = Array.from(document.querySelectorAll('input[type="file"]'));
-    const labeled = fileInputs.find((el) => {
-      const ids = getIdentifiers(el);
-      return ids.some((id) => /resume|\bcv\b/i.test(id));
-    });
-    if (labeled) return { kind: "input", el: labeled };
-
-    // Strategy 2: look for a wrapper containing "Resume" text with a file input inside it
-    const headings = Array.from(document.querySelectorAll("label, h1, h2, h3, h4, legend, [class*='label']"));
-    const resumeHeader = headings.find((h) => /\bresume\b|\bcv\b/i.test((h.textContent || "").trim()));
-    if (resumeHeader) {
-      const wrapper = resumeHeader.closest(
-        ".field, .field-wrapper, [class*='field'], [class*='FieldWrapper'], [class*='FileUpload'], fieldset, section, div"
-      );
-      if (wrapper) {
-        const inp = wrapper.querySelector('input[type="file"]');
-        if (inp) return { kind: "input", el: inp, wrapper };
-        // Drop zone within wrapper
-        const drop = wrapper.querySelector("[class*='dropzone'], [class*='drop-zone'], [class*='DropZone'], [class*='upload']");
-        if (drop) return { kind: "dropzone", el: drop, wrapper };
-      }
-    }
-
-    // Strategy 3: any single visible file input as a last resort
-    if (fileInputs.length === 1) return { kind: "input", el: fileInputs[0] };
-
-    return null;
-  };
-
-  const uploadResume = async () => {
-    let file;
-    try {
-      file = await loadResumeFile();
-    } catch (err) {
-      return { ok: false, reason: "load-failed", err: String(err) };
-    }
-
-    const target = findResumeTarget();
-    if (!target) return { ok: false, reason: "no-target" };
-
-    const dt = new DataTransfer();
-    dt.items.add(file);
-
-    if (target.kind === "input") {
-      // Direct file-input assignment via DataTransfer — works in modern Chrome when initiated from user gesture
-      try {
-        target.el.files = dt.files;
-        target.el.dispatchEvent(new Event("input", { bubbles: true }));
-        target.el.dispatchEvent(new Event("change", { bubbles: true }));
-        return { ok: true, method: "files-assignment", target: "input" };
-      } catch (err) {
-        console.warn("[JobPilot] files-assignment failed, trying drop simulation", err);
-      }
-    }
-
-    // Drag-drop simulation on the dropzone (or the input's parent if that's all we have)
-    const dropTarget = target.kind === "dropzone" ? target.el : (target.el.closest("[class*='drop']") || target.wrapper || target.el.parentElement);
-    if (!dropTarget) return { ok: false, reason: "no-drop-target" };
-
-    const events = ["dragenter", "dragover", "drop"];
-    for (const type of events) {
-      const ev = new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt });
-      // Some sites block drag events by default — need to prevent the default stopping it
-      try { dropTarget.dispatchEvent(ev); } catch (_) {}
-      await sleep(60);
-    }
-    return { ok: true, method: "drag-drop", target: target.kind };
-  };
-
-  // ---- Helpers ----
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-  const normalize = (s) => (s || "").toString().toLowerCase().replace(/[^a-z0-9+]+/g, " ").trim();
-  const wordsOf = (s) => normalize(s).split(" ").filter(Boolean);
-
-  const isVisible = (el) => {
+// Injected into Chrome's isolated world only after the applicant clicks a panel action.
+(() => {
+  const hosts = new Set(['boards.greenhouse.io','job-boards.greenhouse.io','boards-eu.greenhouse.io','job-boards.eu.greenhouse.io','jobs.lever.co','jobs.eu.lever.co','jobs.ashbyhq.com']);
+  const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const norm = value => String(value || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9+]+/g, ' ').trim();
+  const visible = el => {
     if (!el) return false;
-    const rect = el.getBoundingClientRect();
-    if (rect.width === 0 && rect.height === 0) return false;
-    const cs = getComputedStyle(el);
-    return cs.display !== "none" && cs.visibility !== "hidden" && cs.opacity !== "0";
+    const style = getComputedStyle(el);
+    return !!el.getClientRects().length && style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
   };
-
-  const findLabelTexts = (el) => {
-    const out = [];
-    const aria = el.getAttribute?.("aria-label");
-    if (aria) out.push(aria);
-    const ariaBy = el.getAttribute?.("aria-labelledby");
-    if (ariaBy) {
-      for (const id of ariaBy.split(/\s+/)) {
-        const lab = document.getElementById(id);
-        if (lab?.textContent) out.push(lab.textContent);
+  const wrapper = el => el.closest(".field, .field-wrapper, .form-field, [data-field], [class*='FieldWrapper'], [class*='FileUpload'], fieldset") || el.parentElement;
+  function labelText(node) {
+    if (!node) return '';
+    const copy = node.cloneNode(true);
+    for (const control of copy.querySelectorAll('input, textarea, select, button, [role="combobox"], [role="listbox"]')) control.remove();
+    return copy.textContent;
+  }
+  function labels(el) {
+    const items = [el.getAttribute('aria-label')];
+    for (const id of (el.getAttribute('aria-labelledby') || '').split(/\s+/)) if (id) items.push(labelText(document.getElementById(id)));
+    for (const label of el.labels || []) items.push(labelText(label));
+    if (!items.some(Boolean)) items.push(labelText(wrapper(el)?.querySelector("label, legend, [class*='Label'], [class*='label']")));
+    return items.filter(Boolean).map(s => s.trim()).filter(Boolean);
+  }
+  const identifiers = el => [...labels(el), el.name, el.id, el.placeholder, el.getAttribute('autocomplete')].filter(Boolean).map(norm);
+  const labelOf = el => (labels(el)[0] || el.name || el.id || el.type || 'Unlabeled field').trim().slice(0,180);
+  const required = el => el.required || el.getAttribute('aria-required') === 'true' || labels(el).some(t => /\*|\brequired\b/i.test(t));
+  const reactControl = el => el.closest("[class*='select__control'], [class*='Select__control'], [class*='react-select__control']");
+  const selectedReact = el => reactControl(el)?.querySelector("[class*='single-value'], [class*='multi-value'], [class*='singleValue'], [class*='multiValue']")?.textContent?.trim() || '';
+  const combo = el => el.getAttribute('role') === 'combobox' || !!reactControl(el);
+  const placeholderOption = o => !o || o.disabled || !o.value || /^(select|choose|please select|please choose)(\b|$)/i.test(o.text.trim());
+  const attachedText = container => /\.(pdf|docx?|rtf)\b|remove (file|resume)|replace (file|resume)|resume.*uploaded/i.test(container?.innerText || '');
+  function answered(el) {
+    if (['checkbox','radio'].includes(el.type)) return el.checked;
+    if (el.type === 'file') return !!el.files?.length || attachedText(wrapper(el));
+    if (el.tagName === 'SELECT') return !placeholderOption(el.selectedOptions[0]);
+    if (combo(el)) return !!selectedReact(el) || (!reactControl(el) && !!el.value && el.getAttribute('aria-expanded') !== 'true');
+    return !!String(el.value || '').trim();
+  }
+  function inventory() {
+    const controls = [...document.querySelectorAll("input, textarea, select, [role='combobox']:not(input), [role='checkbox']:not(input), [role='radiogroup']")];
+    const seenRadio = new Set();
+    return controls.filter(el => !el.disabled && !el.readOnly && !['hidden','submit','button','reset'].includes(el.type) && (visible(el) || (el.type === 'file' && visible(wrapper(el))))).flatMap(el => {
+      if (el.type === 'radio') {
+        const key = (el.form?.id || '') + ':' + el.name;
+        if (el.name && seenRadio.has(key)) return [];
+        if (el.name) seenRadio.add(key);
+        const group = el.name ? controls.filter(other => other.type === 'radio' && other.name === el.name && other.form === el.form) : [el];
+        const legend = el.closest('fieldset')?.querySelector('legend')?.textContent;
+        return [{el,label:(legend || labelOf(el)).slice(0,180),type:'radio',required:group.some(required),answered:group.some(r => r.checked)}];
       }
-    }
-    if (el.id) {
-      try {
-        const label = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
-        if (label?.textContent) out.push(label.textContent);
-      } catch (_) {}
-    }
-    const parentLabel = el.closest?.("label");
-    if (parentLabel?.textContent) out.push(parentLabel.textContent);
-    const wrapper = el.closest?.(".field, .form-field, [class*='field'], [class*='FormField'], fieldset, [class*='question'], [class*='Question']");
-    if (wrapper) {
-      const labelEl = wrapper.querySelector("label, legend, [class*='label'], [class*='Label'], [class*='question']:not(input):not(select):not(textarea)");
-      if (labelEl?.textContent) out.push(labelEl.textContent);
-    }
-    return out;
-  };
-
-  const getIdentifiers = (el) => {
-    const out = [];
-    if (el.name) out.push(el.name);
-    if (el.id) out.push(el.id);
-    if (el.placeholder) out.push(el.placeholder);
-    out.push(...findLabelTexts(el));
-    const ac = el.getAttribute?.("autocomplete");
-    if (ac) out.push(ac);
-    return out.map(normalize).filter(Boolean);
-  };
-
-  const isRequired = (el) => {
-    if (el.required || el.getAttribute?.("aria-required") === "true") return true;
-    const labels = findLabelTexts(el);
-    return labels.some((t) => /\*/.test(t) || /\brequired\b/i.test(t));
-  };
-
-  const isDenied = (ids) => ids.some((id) => DENY_PATTERNS.some((pat) => pat.test(id)));
-
-  const isReactSelectLike = (el) => {
-    if (el.getAttribute?.("role") === "combobox") return true;
-    if (el.getAttribute?.("aria-autocomplete") === "list") return true;
-    if (el.getAttribute?.("aria-haspopup") === "listbox") return true;
-    const container = el.closest?.(
-      "[class*='react-select']:not(select), [class*='Select__']:not(select), [class*='dropdown']:not(select), [class*='Dropdown']:not(select)"
-    );
-    return !!container;
-  };
-
-  const matchTextRule = (ids) => {
-    for (const rule of TEXT_RULES) {
-      for (const tokenSet of rule.tokens) {
-        if (rule.strict) {
-          if (ids.some((id) => id === tokenSet.join(" "))) return rule;
-        } else {
-          const ok = ids.some((id) => {
-            const idw = wordsOf(id);
-            return tokenSet.every((tok) => idw.includes(tok));
-          });
-          if (ok) return rule;
-        }
+      if (el.getAttribute('role') === 'radiogroup') {
+        if (el.querySelector("input[type='radio']")) return [];
+        return [{el,label:labelOf(el),type:'radio',required:required(el),answered:!!el.querySelector("[aria-checked='true']")}];
       }
-    }
-    return null;
-  };
-
-  const setReactValue = (el, value) => {
-    const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-    const descriptor = Object.getOwnPropertyDescriptor(proto, "value");
-    if (descriptor?.set) descriptor.set.call(el, value);
-    else el.value = value;
-    el.dispatchEvent(new Event("input", { bubbles: true }));
-    el.dispatchEvent(new Event("change", { bubbles: true }));
-  };
-
-  const fillNativeSelect = (selectEl, answer) => {
-    const options = Array.from(selectEl.options).filter((o) => !o.disabled && o.value !== "");
-    if (!options.length) return false;
-    const ans = normalize(answer);
-    const match =
-      options.find((o) => normalize(o.text) === ans) ||
-      options.find((o) => normalize(o.text).startsWith(ans)) ||
-      options.find((o) => normalize(o.text).includes(ans)) ||
-      (ans === "yes" ? options.find((o) => /^yes\b/i.test(o.text)) : null) ||
-      (ans === "no"  ? options.find((o) => /^no\b/i.test(o.text))  : null) ||
-      (ans === "united states" ? options.find((o) => /united states|^us\b|\(\+1\)/i.test(o.text)) : null) ||
-      (ans === "other" ? options.find((o) => /^other\b/i.test(o.text)) : null) ||
-      (/decline|prefer not|do(n'?t| not) (want|wish)/i.test(answer)
-        ? options.find((o) => /decline|prefer not|choose not|do(n.?t| not) (want|wish)/i.test(o.text)) : null);
-    if (!match) return false;
-    selectEl.value = match.value;
-    selectEl.dispatchEvent(new Event("change", { bubbles: true }));
-    return true;
-  };
-
-  // ---- react-select handling ----
-  // Find all top-level react-select control containers on the page (not the hidden inputs).
-  const findReactSelectControls = () => {
-    const set = new Set();
-    document.querySelectorAll("[class*='react-select__control'], [class*='select__control'], [class*='Select__control']").forEach((n) => {
-      if (isVisible(n)) set.add(n);
+      if (el.getAttribute('role') === 'checkbox' && el.tagName !== 'INPUT') return [{el,label:labelOf(el),type:'checkbox',required:required(el),answered:el.getAttribute('aria-checked') === 'true'}];
+      if (el.getAttribute('role') === 'combobox' && el.tagName !== 'INPUT' && el.querySelector("input[role='combobox']")) return [];
+      return [{el,label:labelOf(el),type:combo(el) ? 'combobox' : el.type || el.tagName.toLowerCase(),required:required(el),answered:answered(el)}];
     });
-    return [...set];
-  };
-
-  // For a given react-select control, walk up to get the question label text.
-  // Strategy (in priority order):
-  //   1. <label for="ID"> where ID matches an <input id> inside the control (canonical Greenhouse pattern)
-  //   2. aria-label / aria-labelledby on the inner input
-  //   3. aria-labelledby on the control itself
-  //   4. Nearest visible (non-.visually-hidden) <label>/<legend> in an ancestor wrapper
-  const getRsLabel = (controlEl) => {
-    const texts = [];
-    const innerInputs = controlEl.querySelectorAll("input");
-    for (const inp of innerInputs) {
-      if (inp.id) {
-        try {
-          const lbl = document.querySelector(`label[for="${CSS.escape(inp.id)}"]`);
-          if (lbl?.textContent && !lbl.classList.contains("visually-hidden")) {
-            texts.push(lbl.textContent);
-          }
-        } catch (_) {}
-      }
-      const ariaLbl = inp.getAttribute?.("aria-label");
-      if (ariaLbl) texts.push(ariaLbl);
-      const ariaBy = inp.getAttribute?.("aria-labelledby");
-      if (ariaBy) {
-        for (const id of ariaBy.split(/\s+/)) {
-          const lab = document.getElementById(id);
-          if (lab?.textContent && !lab.classList.contains("visually-hidden")) texts.push(lab.textContent);
-        }
-      }
-    }
-    const ariaBy = controlEl.getAttribute?.("aria-labelledby");
-    if (ariaBy) {
-      for (const id of ariaBy.split(/\s+/)) {
-        const lab = document.getElementById(id);
-        if (lab?.textContent && !lab.classList.contains("visually-hidden")) texts.push(lab.textContent);
-      }
-    }
-    // Walk up ancestors for a visible label/legend
-    const wrappers = [
-      controlEl.closest(".select__container"),
-      controlEl.closest(".field-wrapper"),
-      controlEl.closest(".field, .form-field, [class*='field'], [class*='FormField'], [class*='question'], [class*='Question']"),
-      controlEl.closest("fieldset"),
-    ].filter(Boolean);
-    for (const w of wrappers) {
-      const candidates = w.querySelectorAll("label, legend, [class*='label']:not([class*='select__label']):not([class*='react-select']), [class*='Label']:not([class*='react-select'])");
-      for (const c of candidates) {
-        if (c.classList.contains("visually-hidden")) continue;
-        if (!c.textContent) continue;
-        texts.push(c.textContent);
-        break;
-      }
-      if (texts.length) break;
-    }
-    return texts.map(normalize).filter(Boolean);
-  };
-
-  const fillReactSelect = async (controlEl, rule) => {
-    const answer = rule.answer;
-    // Use explicit-undefined check so an empty-string searchTerm ("") means "don't type anything"
-    const searchTerm = rule.searchTerm !== undefined ? rule.searchTerm : answer.split(" ")[0];
-
-    // 1. Open the menu via mousedown/mouseup only (react-select v5 opens on mousedown;
-    //    a following .click() can re-trigger and close it)
-    const innerInput = controlEl.querySelector("input");
-    if (innerInput) innerInput.focus();
-    controlEl.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
-    await sleep(40);
-    controlEl.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, button: 0 }));
-    await sleep(200);
-
-    // 2. Type the search term into the control's input (skip if searchTerm is empty string — "")
-    const input = controlEl.querySelector("input");
-    if (input && searchTerm && searchTerm.length > 0) {
-      input.focus();
-      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
-      setter.call(input, "");
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-      await sleep(60);
-      setter.call(input, searchTerm);
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-    }
-
-    // 3. Poll for options to render (handles async autocomplete like Brex's geocoding location field)
-    const menuOptionsSel =
-      "[class*='react-select__option']:not([class*='is-disabled'])," +
-      "[class*='select__option']:not([class*='is-disabled'])," +
-      "[role='option']";
-    // Location-specific: longer timeout for geocoding API roundtrip
-    const isLocationLookup = rule?.id === "candidate_location";
-    const maxWaitMs = isLocationLookup ? 3000 : 1200;
-    const pollMs = 100;
-    const startedAt = Date.now();
-    let options = [];
-    while (Date.now() - startedAt < maxWaitMs) {
-      options = Array.from(document.querySelectorAll(menuOptionsSel)).filter(isVisible);
-      // For async location lookups, also ensure results are "settled" — wait for options that look like places
-      if (isLocationLookup) {
-        const placeLike = options.filter((o) => /,/.test(o.textContent));
-        if (placeLike.length > 0) { options = placeLike; break; }
-      } else {
-        if (options.length > 0) break;
-      }
-      await sleep(pollMs);
-    }
-    const pickOption = () => {
-      const ans = normalize(answer);
-      // 1) Exact normalized match (best — profile-specified answers should hit this)
-      const exact = options.find((o) => normalize(o.textContent) === ans);
-      if (exact) return exact;
-
-      // 2) Case-specific fallbacks for common Greenhouse option-text variants
-      if (ans === "yes") {
-        const y = options.find((o) => /^yes\b/i.test(o.textContent.trim()));
-        if (y) return y;
-      }
-      if (ans === "no") {
-        const n = options.find((o) => /^no\b/i.test(o.textContent.trim()));
-        if (n) return n;
-      }
-      if (ans === "+1" || /^\+1\b/.test(ans)) {
-        // Phone country code dropdown — options are typically "🇺🇸 United States (+1)" or "+1 US"
-        const p = options.find((o) => /\+1\b|\(\+1\)|united states/i.test(o.textContent));
-        if (p) return p;
-      }
-      if (ans === "usa" || ans === "us" || ans === "united states") {
-        const us = options.find((o) => /^usa\b|^u\.?s\.?a\.?\b|^united states\b|united states of america|\(\+1\)/i.test(o.textContent.trim()));
-        if (us) return us;
-      }
-      if (ans === "consent") {
-        const c = options.find((o) => /^consent\b|^i consent\b|^i agree\b|^agree\b|^yes,? i consent/i.test(o.textContent.trim()));
-        if (c) return c;
-      }
-      // Decline-to-answer family: any decline-style answer matches any decline-style option
-      if (/decline|prefer not|do(n'?t| not) (want|wish)/i.test(answer)) {
-        const d = options.find((o) => /decline|prefer not|choose not|do(n.?t| not) (want|wish) to answer/i.test(o.textContent));
-        if (d) return d;
-      }
-      if (/identify.*protected veteran/i.test(answer)) {
-        // Avoid matching "I am NOT a protected veteran" — require "identify" keyword
-        const v = options.find((o) => /identify.*protected veteran/i.test(o.textContent));
-        if (v) return v;
-      }
-      if (ans === "linkedin") {
-        const l = options.find((o) => /\blinkedin\b/i.test(o.textContent));
-        if (l) return l;
-      }
-      if (/currently located|currently here|i live here|based here/i.test(answer)) {
-        const c = options.find((o) => /currently (located|here)|already here|i live (here|near)|based (here|near)|yes,? i.?m (currently|here|local)/i.test(o.textContent));
-        if (c) return c;
-      }
-      if (/i.?d relocate|would relocate|willing to relocate|relocate prior/i.test(answer)) {
-        const r = options.find((o) => /i.?d relocate|would relocate|willing to relocate|yes,? i.?d relocate|relocate prior|planning to relocate/i.test(o.textContent));
-        if (r) return r;
-      }
-
-      // 3) Location autocomplete — rank by prefix specificity to avoid "South San Francisco, California" outranking "San Francisco, CA"
-      if (isLocationLookup) {
-        // Build progressive prefixes: longest first
-        const parts = ans.split(",").map((s) => s.trim()).filter(Boolean);
-        const prefixes = [];
-        for (let i = parts.length; i > 0; i--) {
-          prefixes.push(parts.slice(0, i).join(", "));
-        }
-        // e.g. ans="san francisco, ca, usa" -> prefixes = ["san francisco, ca, usa", "san francisco, ca", "san francisco"]
-        for (const pre of prefixes) {
-          const opt = options.find((o) => normalize(o.textContent).startsWith(pre));
-          if (opt) return opt;
-        }
-        // Word-anchored fallback for location
-        const rxFirst = new RegExp("^" + ans.split(",")[0].replace(/\s+/g, "\\s+") + "\\b", "i");
-        const opt = options.find((o) => rxFirst.test(o.textContent.trim()));
-        if (opt) return opt;
-      }
-
-      // 4) Generic starts-with (non-location)
-      const starts = options.find((o) => normalize(o.textContent).startsWith(ans));
-      if (starts) return starts;
-
-      // 5) Looser substring match (last resort — can pick a near-miss suburb when ans is just a city name)
-      const inc = options.find((o) => normalize(o.textContent).includes(ans));
-      return inc || null;
+  }
+  const DENY = /referr|referred|pronoun|citizen|nationality|ethnic|race\b|racial|gender|sex\b|disabil|veteran|consent|agree|certif|signature|privacy|salary|compensation|desired pay|relocat|how.*hear|years.*experience|how many years|why\b|describe|explain|tell (us|me)|cover letter|reason for leaving|emergency|spouse|recruiter|employee (id|number|name)|sponsorship.*type|type.*sponsorship|not authorized/;
+  function historyContext(el, profile) {
+    const groups = [...document.querySelectorAll('fieldset, [data-jobpilot-section]')];
+    const classify = group => {
+      const title = norm(group.getAttribute('data-jobpilot-section') || group.querySelector(':scope > legend, :scope > h2, :scope > h3')?.textContent);
+      return /^(work experience|employment history|work history|professional experience)(\s+\d+)?$/.test(title) ? 'work_history' : /^(education|education history)(\s+\d+)?$/.test(title) ? 'education' : null;
     };
-    const opt = pickOption();
-
-    if (!opt) {
-      // Close menu explicitly (Escape + blur + click outside) and bail
-      controlEl.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-      if (innerInput) innerInput.blur();
-      document.body.click();
-      await sleep(80);
-      return false;
-    }
-
-    // 4. Click the option. react-select uses mousedown, not click.
-    opt.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
-    opt.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, button: 0 }));
-    opt.dispatchEvent(new MouseEvent("click", { bubbles: true, button: 0 }));
-    await sleep(120);
-    // Defensive close in case option click didn't dismiss
-    document.body.click();
-    await sleep(60);
-    return true;
-  };
-
-  // ---- Main pass ----
-  const filled = [];
-  const skipped = [];
-  const failed = [];
-  const requiredAll = [];
-
-  // Pass A: native <select>
-  const selects = Array.from(document.querySelectorAll("select")).filter(isVisible);
-  for (const el of selects) {
-    if (el.disabled) continue;
-    const ids = getIdentifiers(el);
-    if (isRequired(el)) requiredAll.push(el);
-    if (isDenied(ids)) { skipped.push({ reason: "denied", ids }); continue; }
-    if (el.selectedIndex > 0 && el.value) { skipped.push({ reason: "already-selected", ids }); continue; }
-
-    // Per-label matching: rule fires if ANY individual identifier matches the regex
-    const rule = SELECT_RULES.find((r) => ids.some((id) => r.re.test(id)));
-    if (!rule) { failed.push({ reason: "no-select-rule", ids }); continue; }
-    if (!rule.answer) { skipped.push({ reason: "no-profile-answer", rule: rule.id, ids }); continue; }
-
-    if (fillNativeSelect(el, rule.answer)) {
-      filled.push(`native:${rule.id}`);
-    } else {
-      failed.push({ reason: "native-option-not-found", ids, answer: rule.answer });
-    }
+    const group = el.closest('fieldset, [data-jobpilot-section]');
+    const type = group && classify(group);
+    if (!type) return null;
+    const explicitNumber = norm(group.getAttribute('data-jobpilot-section') || group.querySelector(':scope > legend, :scope > h2, :scope > h3')?.textContent).match(/\s(\d+)$/);
+    const index = explicitNumber ? Number(explicitNumber[1]) - 1 : groups.filter(g => classify(g) === type).indexOf(group);
+    return {type,index,row:profile[type]?.[index]};
   }
-
-  // Pass B: text inputs + textareas (run BEFORE react-select, so phone gets filled before we open/close menus)
-  const inputs = Array.from(document.querySelectorAll("input, textarea")).filter((el) => {
-    const t = (el.type || "text").toLowerCase();
-    if (["hidden", "file", "submit", "button", "reset", "checkbox", "radio", "password"].includes(t)) return false;
-    if (el.readOnly || el.disabled) return false;
-    if (!isVisible(el)) return false;
-    return true;
-  });
-
-  for (const el of inputs) {
-    const ids = getIdentifiers(el);
-    if (isRequired(el)) requiredAll.push(el);
-    if (!ids.length) { skipped.push({ reason: "no-identifiers" }); continue; }
-    if (isDenied(ids)) { skipped.push({ reason: "denied", ids }); continue; }
-
-    const elType = (el.type || "text").toLowerCase();
-    const intrinsicText = ["tel", "email", "url", "number"].includes(elType);
-
-    // Skip react-select-nested inputs UNLESS intrinsic text type (tel/email/url/number)
-    if (!intrinsicText && isReactSelectLike(el)) { skipped.push({ reason: "react-select-input", ids }); continue; }
-    if (el.value && el.value.trim() !== "") { skipped.push({ reason: "already-filled", ids }); continue; }
-
-    const rule = matchTextRule(ids);
-    if (!rule) { failed.push({ reason: "no-text-rule", ids }); continue; }
-    if (!rule.value) { failed.push({ reason: "no-profile-value", key: rule.key, ids }); continue; }
-    setReactValue(el, rule.value);
-    filled.push(`text:${rule.key}`);
+  function ruleFor(el, profile) {
+    const ids = identifiers(el);
+    if (ids.some(id => DENY.test(id))) return {reason:'Answer this question yourself'};
+    const exact = re => ids.some(id => re.test(id.replace(/\s+required$/, '')));
+    const history = historyContext(el, profile);
+    if (history) {
+      if (!history.row) return {reason:'No saved history for this row'};
+      const rules = history.type === 'work_history'
+        ? [['company',/^(company|company name|employer|employer name)$/],['title',/^(title|job title|position)$/],['start_date',/^start date$/],['end_date',/^end date$/]]
+        : [['school',/^(school|school name|university|institution|institution name)$/],['degree',/^(degree|degree type)$/],['field',/^(field|field of study|major)$/],['start_date',/^start date$/],['end_date',/^(end date|graduation date)$/]];
+      const match = rules.find(([,re]) => exact(re));
+      if (!match) return {reason:'History field needs review'};
+      const key = match[0], value = history.row[key] || '';
+      if (key === 'end_date' && history.row.current) return {reason:'Current job: leave end date to you'};
+      if (/date$/.test(key) && ((el.type === 'date' && !/^\d{4}-\d{2}-\d{2}$/.test(value)) || (el.type === 'month' && !/^\d{4}-\d{2}$/.test(value)))) return {reason:'Saved date does not match this field format'};
+      return {key:`${history.type}.${history.index}.${key}`,value};
+    }
+    if (ids.some(id => /company|employer|school|university|institution|education|start date|end date|graduation/.test(id))) return {reason:'History context is not clear'};
+    const usProfile = /^(us|u s|usa|united states|united states of america)$/.test(norm(profile.country));
+    if (exact(/^(are you )?(legally )?(authorized|authorised|eligible) to work in (the )?(united states|us|u s|usa)( of america)?$/) || exact(/^(do you have( the)? )?(legal )?(right|authorization|authorisation) to work in (the )?(united states|us|u s|usa)$/)) return usProfile ? {key:'work_authorized',value:typeof profile.work_authorized === 'boolean' ? (profile.work_authorized ? 'Yes' : 'No') : ''} : {reason:'Authorization country does not match your saved profile'};
+    if (exact(/^(do|will|would) you (now or in the future )?(require|need)( visa)? sponsorship( (now|in the future|for employment|to work|now or in the future))* in (the )?(united states|us|u s|usa)$/)) return usProfile ? {key:'requires_sponsorship',value:typeof profile.requires_sponsorship === 'boolean' ? (profile.requires_sponsorship ? 'Yes' : 'No') : ''} : {reason:'Sponsorship country does not match your saved profile'};
+    const full = [profile.first_name,profile.last_name].filter(Boolean).join(' ');
+    const rules = [
+      ['first_name',/^(first name|given name|firstname|givenname)$/,profile.first_name],['last_name',/^(last name|family name|surname|lastname|familyname)$/,profile.last_name],['full_name',/^(full name|your name|applicant name|name|name full)$/,full],
+      ['email',/^(email|e mail|email address)$/,profile.email],['phone',/^(phone|phone number|mobile|mobile number|cell phone|telephone|tel)$/,profile.phone],
+      ['city',/^(city|current city|address level2)$/,profile.city],['state',/^(state|state province|province|address level1)$/,profile.state],['postal_code',/^(zip|zip code|postal code|zipcode)$/,profile.postal_code],
+      ['country',/^(country|country of residence|residence country|country name)$/,profile.country],['location',/^(current location|location|your location)$/,[profile.city,profile.state].filter(Boolean).join(', ')],
+      ['linkedin_url',/^(linkedin|linkedin profile|linkedin url|linkedin profile url)$/,profile.linkedin_url],['github_url',/^(github|github profile|github url)$/,profile.github_url],['portfolio_url',/^(portfolio|portfolio url|website|personal website|personal site)$/,profile.portfolio_url],['current_title',/^(current title|current job title|current role)$/,profile.current_title],
+    ];
+    const found = rules.find(([,re]) => exact(re));
+    return found ? {key:found[0],value:found[2] || ''} : {reason:'No verified mapping for this question'};
   }
-
-  // Pass C: react-select controls
-  const rsControls = findReactSelectControls();
-  console.log(`[JobPilot v0.6.0] react-select controls found: ${rsControls.length}`);
-
-  for (const ctrl of rsControls) {
-    // Check if already has a selected value
-    const hasValue = ctrl.querySelector("[class*='single-value']:not([class*='placeholder']), [class*='multi-value']:not([class*='placeholder'])");
-    const labels = getRsLabel(ctrl);
-    // Per-label matching: rule fires if ANY single label matches the regex (avoids anchor-regex failures on joined strings)
-    const rule = SELECT_RULES.find((r) => labels.some((lbl) => r.re.test(lbl)));
-
-    console.log(`[JobPilot v0.6.0] rs-control:`, {
-      label_primary: labels[0] || "(none)",
-      all_labels: labels,
-      matched_rule: rule?.id || "(no match)",
-      effective_answer: rule?.answer || "(no rule)",
-      already_selected: !!hasValue,
-    });
-
-    if (hasValue) { skipped.push({ reason: "rs-already-selected", labels }); continue; }
-    if (!rule) { failed.push({ reason: "no-rs-rule", labels }); continue; }
-    if (!rule.answer) { skipped.push({ reason: "no-profile-answer", rule: rule.id, labels }); continue; }
-
+  function exactOption(options, value) {
+    const n = norm(value);
+    const aliases = /^(us|usa|united states|united states of america)$/.test(n) ? new Set(['us','usa','united states','united states of america']) : new Set([n]);
+    const matches = options.filter(o => !o.disabled && o.getAttribute('aria-disabled') !== 'true' && aliases.has(norm(o.textContent)));
+    return matches.length === 1 ? matches[0] : null;
+  }
+  function setText(el, value) {
+    const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    const setter = Object.getOwnPropertyDescriptor(proto,'value')?.set;
+    if (!setter) return false;
+    setter.call(el,value);
+    el.dispatchEvent(new Event('input',{bubbles:true}));
+    el.dispatchEvent(new Event('change',{bubbles:true}));
+    return true;
+  }
+  async function fillCombo(el, value) {
+    const ctrl = reactControl(el) || el, input = el.tagName === 'INPUT' ? el : ctrl.querySelector('input');
+    const before = input?.value || '';
+    input?.focus();
+    ctrl.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,button:0}));
+    ctrl.dispatchEvent(new MouseEvent('mouseup',{bubbles:true,button:0}));
+    if (input && !/^(Yes|No)$/.test(value)) setText(input,value);
+    let options = [];
+    for (let attempt=0; attempt<10; attempt++) {
+      await pause(100);
+      const listId = el.getAttribute('aria-controls') || el.getAttribute('aria-owns') || input?.getAttribute('aria-controls');
+      const menu = listId ? document.getElementById(listId) : document;
+      options = [...(menu || document).querySelectorAll("[role='option'], [class*='select__option']")].filter(visible);
+      if (options.length) break;
+    }
+    const option = exactOption(options,value);
+    if (option) {
+      option.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,button:0}));
+      option.dispatchEvent(new MouseEvent('mouseup',{bubbles:true,button:0}));
+      option.click();
+      await pause(100);
+    }
+    ctrl.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+    input?.blur();
+    const ok = !!option && (norm(selectedReact(el)) === norm(value) || (!reactControl(el) && norm(el.value || el.textContent) === norm(value)));
+    if (!ok && input) setText(input,before);
+    return ok;
+  }
+  function resumeTarget() {
+    const matches = [...document.querySelectorAll("input[type='file']")].filter(el => identifiers(el).some(id => /\b(resume|cv|curriculum vitae)\b/.test(id)) && !identifiers(el).some(id => /cover letter/.test(id)));
+    return matches.length === 1 ? {el:matches[0],wrapper:wrapper(matches[0])} : null;
+  }
+  async function attachResume(resume) {
+    const target = resumeTarget();
+    if (!target) return {status:'no-target',message:'No unique résumé upload field found. Attach the file manually.'};
+    if (target.el.files?.length || target.el.value || attachedText(target.wrapper)) return {status:'already-attached',message:'An existing attachment was preserved.'};
+    if (!resume?.dataUrl || !resume?.metadata?.name) return {status:'failed',message:'Choose a résumé with a local file first.'};
+    const filename = resume.metadata.name;
     try {
-      const ok = await fillReactSelect(ctrl, rule);
-      if (ok) filled.push(`rs:${rule.id}`);
-      else failed.push({ reason: "rs-option-not-found", rule: rule.id, labels });
-    } catch (err) {
-      failed.push({ reason: "rs-error", err: String(err), rule: rule.id });
-    }
-    await sleep(250);
+      if (!/^data:application\/pdf;base64,/.test(resume.dataUrl)) throw new Error('A PDF résumé is required');
+      const raw = atob(resume.dataUrl.split(',')[1]), bytes = Uint8Array.from(raw,char => char.charCodeAt(0));
+      const transfer = new DataTransfer();
+      transfer.items.add(new File([bytes],filename,{type:'application/pdf'}));
+      target.el.files = transfer.files;
+      target.el.dispatchEvent(new Event('input',{bubbles:true}));
+      target.el.dispatchEvent(new Event('change',{bubbles:true}));
+      for (let attempt=0; attempt<16; attempt++) {
+        await pause(150);
+        const scope = target.el.isConnected ? wrapper(target.el) : target.wrapper, text = scope?.innerText || '';
+        const alerts = [...(scope?.querySelectorAll("[role='alert'], .error, [class*='Error'], [class*='error']") || [])].filter(visible).map(el => el.textContent).join(' ');
+        if (/failed|invalid|too large|unsupported|not (allowed|accepted)|error|unable/i.test(alerts)) return {status:'failed',filename,message:'The form reported an upload error. Review the page.'};
+        if (text.includes(filename) && !/uploading|processing|please wait/i.test(text)) return {status:'accepted',filename,message:'The form displays this résumé attachment. Review it before submitting.'};
+      }
+      return {status:'prepared',filename,message:'File selected; the form has not confirmed acceptance. Check the attachment on the page.'};
+    } catch (error) { return {status:'failed',filename,message:error.message || 'The file could not be attached. Upload it manually.'}; }
   }
-
-  // Pass D: resume upload (drag-drop simulation, embedded PDF)
-  try {
-    const uploadResult = await uploadResume();
-    console.log("[JobPilot v0.6.0] resume-upload:", uploadResult);
-    if (uploadResult.ok) {
-      filled.push(`file:resume (${uploadResult.method})`);
-    } else {
-      failed.push({ reason: `resume-upload-${uploadResult.reason}`, err: uploadResult.err });
-    }
-  } catch (err) {
-    console.error("[JobPilot v0.6.0] resume-upload error:", err);
-    failed.push({ reason: "resume-upload-exception", err: String(err) });
-  }
-
-  // Required-field coverage check
-  const requiredUnfilled = requiredAll.filter((el) => {
-    if (el.tagName === "SELECT") return !el.value;
-    return !(el.value && el.value.toString().trim());
-  });
-
-  console.log("[JobPilot v0.6.0] filled:", [...new Set(filled)]);
-  console.log("[JobPilot v0.6.0] failed:", failed);
-  console.log("[JobPilot v0.6.0] skipped:", skipped);
-  console.log("[JobPilot v0.6.0] required fields still empty:", requiredUnfilled.length, requiredUnfilled);
-
-  // Highlight unfilled required fields
-  for (const el of requiredUnfilled) {
-    el.style.outline = "2px solid #ff6b6b";
-    el.style.outlineOffset = "2px";
-  }
-
-  const uniqueFilled = [...new Set(filled)];
-  const summary = [
-    `JobPilot v0.6.0: filled ${filled.length}`,
-    uniqueFilled.length ? `(${uniqueFilled.slice(0, 8).join(", ")}${uniqueFilled.length > 8 ? "…" : ""})` : "",
-    requiredUnfilled.length ? `\n⚠ ${requiredUnfilled.length} required field${requiredUnfilled.length === 1 ? "" : "s"} still need you (outlined red)` : "",
-    `\nConsole → [JobPilot v0.6.0] for details`,
-  ].filter(Boolean).join(" ");
-  toast(summary);
-
-  function toast(msg) {
-    const existing = document.getElementById("jobpilot-toast");
-    if (existing) existing.remove();
-    const t = document.createElement("div");
-    t.id = "jobpilot-toast";
-    t.textContent = msg;
-    t.style.cssText =
-      "position:fixed;right:16px;bottom:16px;z-index:2147483647;" +
-      "background:#0a0a0a;color:#fff;padding:12px 16px;border-radius:8px;" +
-      "font:13px/1.45 -apple-system,BlinkMacSystemFont,sans-serif;max-width:440px;" +
-      "box-shadow:0 4px 16px rgba(0,0,0,0.25);opacity:0;transition:opacity .2s;" +
-      "white-space:pre-line;";
-    document.body.appendChild(t);
-    requestAnimationFrame(() => (t.style.opacity = "1"));
-    setTimeout(() => {
-      t.style.opacity = "0";
-      setTimeout(() => t.remove(), 300);
-    }, 8000);
-  }
+  globalThis.__jobpilotRun = async ({action='inspect',profile={},resume=null}={}) => {
+    if (!['inspect','details','resume'].includes(action)) throw new Error('Unknown JobPilot action');
+    const report = {action,filled:[],skipped:[],failed:[],required:[],resume:{status:'not-requested',message:''},provider:location.hostname.includes('greenhouse') ? 'Greenhouse' : location.hostname.includes('lever') ? 'Lever' : location.hostname.includes('ashby') ? 'Ashby' : 'Unsupported',pageUrl:location.href};
+    if (!hosts.has(location.hostname) || location.protocol !== 'https:') { report.skipped.push({label:'Page',reason:'This frame is outside the supported application hosts'}); return report; }
+    if (action === 'details') {
+      for (const entry of inventory()) {
+        const {el,label,type} = entry;
+        if (['radio','checkbox','file','password'].includes(type)) { report.skipped.push({label,reason:type === 'file' ? 'Use Attach résumé separately' : 'Answer this question yourself'}); continue; }
+        if (entry.answered) { report.skipped.push({label,reason:'Your existing answer was preserved'}); continue; }
+        const rule = ruleFor(el,profile);
+        if (rule.reason) { report.skipped.push({label,reason:rule.reason}); continue; }
+        if (!rule.value) { report.skipped.push({label,reason:'No saved profile value'}); continue; }
+        try {
+          let ok = false;
+          if (el.tagName === 'SELECT') {
+            const option = exactOption([...el.options].filter(o => !placeholderOption(o)),rule.value);
+            if (option) { el.value=option.value; el.dispatchEvent(new Event('input',{bubbles:true})); el.dispatchEvent(new Event('change',{bubbles:true})); await pause(75); ok=el.value === option.value; }
+          } else if (type === 'combobox') ok = await fillCombo(el,rule.value);
+          else { setText(el,rule.value); await pause(75); ok=el.value === String(rule.value); }
+          if (ok) report.filled.push({label,key:rule.key});
+          else report.failed.push({label,reason:'The form did not accept an exact match. Review this field.'});
+        } catch (_) { report.failed.push({label,reason:'This control needs manual entry'}); }
+      }
+    } else if (action === 'resume') report.resume = await attachResume(resume);
+    report.required = inventory().filter(item => item.required && !item.answered).map(({label,type}) => ({label,type}));
+    return report;
+  };
 })();

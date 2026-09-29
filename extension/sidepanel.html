@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>JobPilot</title>
+    <link rel="stylesheet" href="sidepanel.css">
+    <script type="module" src="sidepanel.js"></script>
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="brand"><span class="brand-mark" aria-hidden="true">J</span><div><h1>JobPilot</h1><p>Your application workspace</p></div></div>
+      <span class="local-badge">Saved locally</span>
+    </header>
+    <nav class="tabs" aria-label="Workspace" role="tablist">
+      <button id="tab-apply" type="button" role="tab" aria-selected="true" aria-controls="panel-apply" tabindex="0" data-tab="apply">Apply</button>
+      <button id="tab-profile" type="button" role="tab" aria-selected="false" aria-controls="panel-profile" tabindex="-1" data-tab="profile">Profile</button>
+      <button id="tab-applications" type="button" role="tab" aria-selected="false" aria-controls="panel-applications" tabindex="-1" data-tab="applications">Applications <span id="application-count" class="tab-count">0</span></button>
+    </nav>
+    <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+    <main>
+      <section id="panel-apply" class="tab-panel" role="tabpanel" aria-labelledby="tab-apply">
+        <section class="card current-job">
+          <div class="section-heading"><div><h2>Current job</h2><p>Capture a listing, then review its details.</p></div><button id="capture-job" class="button small" type="button">Capture tab</button></div>
+          <form id="job-form">
+            <label>Role<input id="job-title" name="title" autocomplete="off" placeholder="Software Engineer"></label>
+            <label>Company<input id="job-company" name="company" autocomplete="off" placeholder="Company name"></label>
+            <label>Job URL<input id="job-url" name="url" type="url" autocomplete="off" placeholder="https://…"></label>
+          </form>
+          <div id="portal-status" class="portal-status"><span class="status-dot neutral" aria-hidden="true"></span><span>Capture the tab to identify this page.</span></div>
+          <div id="duplicate-notice" class="inline-note" hidden></div>
+        </section>
+        <section class="card">
+          <div class="section-heading"><div><h2>Prepare the form</h2><p>Each action runs only when you choose it.</p></div></div>
+          <div id="profile-summary" class="profile-summary">Add your profile to fill application fields.</div>
+          <label>Résumé to attach<select id="apply-resume"><option value="">Choose a résumé</option></select></label>
+          <div class="action-grid"><button id="inspect-form" class="button" type="button">Inspect fields</button><button id="fill-details" class="button primary" type="button">Fill details</button></div>
+          <button id="attach-resume" class="button full" type="button">Attach selected résumé</button>
+          <p class="fine-print">Review your answers on the application page. JobPilot leaves submission, consent, and personal disclosures to you.</p>
+        </section>
+        <section id="report-card" class="card report-card" hidden>
+          <div class="section-heading"><div><h2 id="report-heading">Form results</h2><p id="report-context"></p></div><button id="clear-report" type="button" class="text-button">Clear</button></div>
+          <p id="report-summary" class="report-summary" role="status"></p>
+          <div id="report-upload" class="inline-note" hidden></div>
+          <div id="report-details"></div>
+        </section>
+        <section class="card">
+          <div class="section-heading"><div><h2>Keep a record</h2><p>Save progress, or record a submission you completed.</p></div></div>
+          <label>Notes<textarea id="job-notes" rows="2" placeholder="Recruiter, follow-up, or anything to remember"></textarea></label>
+          <div class="action-grid"><button id="save-started" type="button" class="button">Save as started</button><button id="save-submitted" type="button" class="button primary">I submitted this</button></div>
+          <p class="fine-print">“I submitted this” records your confirmation. It does not submit the employer’s form.</p>
+        </section>
+      </section>
+      <section id="panel-profile" class="tab-panel" role="tabpanel" aria-labelledby="tab-profile" hidden>
+        <form id="profile-form">
+          <section class="card">
+            <div class="section-heading"><div><h2>Your details</h2><p>Save the facts you want to reuse.</p></div></div>
+            <div class="field-grid"><label>First name<input name="first_name" autocomplete="given-name"></label><label>Last name<input name="last_name" autocomplete="family-name"></label></div>
+            <label>Email<input name="email" type="email" autocomplete="email"></label>
+            <label>Phone<input name="phone" type="tel" autocomplete="tel"></label>
+            <div class="field-grid"><label>City<input name="city" autocomplete="address-level2"></label><label>State / region<input name="state" autocomplete="address-level1"></label></div>
+            <div class="field-grid"><label>ZIP / postal code<input name="postal_code" autocomplete="postal-code"></label><label>Country<input name="country" autocomplete="country-name"></label></div>
+            <label>LinkedIn URL<input name="linkedin_url" type="url" autocomplete="url"></label>
+            <label>GitHub URL<input name="github_url" type="url" autocomplete="url"></label>
+            <label>Portfolio URL<input name="portfolio_url" type="url" autocomplete="url"></label>
+            <label>Current title<input name="current_title" autocomplete="organization-title"></label>
+            <label>Authorized to work in the United States<select name="work_authorized"><option value="">Choose for your situation</option><option value="yes">Yes</option><option value="no">No</option></select></label>
+            <label>Require U.S. employment sponsorship<select name="requires_sponsorship"><option value="">Choose for your situation</option><option value="yes">Yes</option><option value="no">No</option></select></label>
+            <p class="fine-print">Unanswered questions stay blank. These saved answers apply to explicitly U.S. questions when your profile country is the United States.</p>
+          </section>
+          <section class="card">
+            <div class="section-heading"><div><h2>Work history</h2><p>Use accurate titles and dates.</p></div><button id="add-work" class="button small" type="button">Add</button></div>
+            <div id="work-history" class="repeater"></div>
+          </section>
+          <section class="card">
+            <div class="section-heading"><div><h2>Education</h2><p>Include completed or ongoing study.</p></div><button id="add-education" class="button small" type="button">Add</button></div>
+            <div id="education-history" class="repeater"></div>
+          </section>
+          <div class="save-profile-row"><span id="profile-save-state" class="subtle">Changes save when you choose Save profile.</span><button id="save-profile" class="button primary" type="submit">Save profile</button></div>
+        </form>
+        <section class="card">
+          <div class="section-heading"><div><h2>Résumé library</h2><p>PDF files are stored in this browser.</p></div></div>
+          <label>Label for the new résumé<input id="resume-label" placeholder="Software engineering"></label>
+          <label class="file-field">Add a PDF<input id="resume-upload" type="file" accept="application/pdf,.pdf"></label>
+          <div id="resume-library" class="resume-library"></div>
+          <p class="fine-print">Choose a résumé in Apply before attaching it. Existing application attachments are preserved.</p>
+        </section>
+        <section class="card">
+          <div class="section-heading"><div><h2>Backup and restore</h2><p>Export your profile and application records.</p></div></div>
+          <button id="export-data" class="button full" type="button">Export local data</button>
+          <label class="file-field">Import a JobPilot backup<input id="import-data" type="file" accept="application/json,.json"></label>
+          <p class="fine-print">Backups include résumé names, but not PDF files. Reattach PDFs after restoring in another browser.</p>
+          <div id="import-preview" class="import-preview" hidden>
+            <h3>Review this import</h3><p id="import-summary"></p>
+            <label class="check-label"><input id="import-replace-profile" type="checkbox"><span>Replace my saved profile with the imported profile</span></label>
+            <p class="fine-print">Application records are merged. Existing résumé files stay in your library.</p>
+            <div class="action-grid"><button id="cancel-import" class="button" type="button">Cancel</button><button id="confirm-import" class="button primary" type="button">Import records</button></div>
+          </div>
+        </section>
+      </section>
+      <section id="panel-applications" class="tab-panel" role="tabpanel" aria-labelledby="tab-applications" hidden>
+        <div class="section-heading applications-heading"><div><h2>Your applications</h2><p>Track progress and outcomes in one place.</p></div><button id="refresh-applications" class="text-button" type="button">Refresh</button></div>
+        <div id="application-stats" class="stats-grid"></div>
+        <label>Filter by status<select id="application-filter"><option value="">All applications</option><option value="started">Started</option><option value="submitted">Submitted</option><option value="interview">Interview</option><option value="rejected">Rejected</option><option value="offer">Offer</option><option value="withdrawn">Withdrawn</option></select></label>
+        <div id="application-list" class="application-list"></div>
+      </section>
+    </main>
+    <footer>JobPilot 0.8 · Profile and records saved in this browser.</footer>
+  </body>
+</html>
