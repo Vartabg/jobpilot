@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { before, after, test } from "node:test";
 import { chromium } from "@playwright/test";
-import { captureCurrentJob } from "../actions.js";
+import { captureCurrentJob, runCurrentAction } from "../actions.js";
 
 const script = await readFile(new URL("../content.js", import.meta.url), "utf8");
 let browser;
@@ -193,5 +193,49 @@ test("job capture reads JSON-LD as data and does not execute description HTML", 
       assert.ok(result.description.includes("Build useful software."));
       assert.equal(await page.evaluate(() => globalThis.executed), undefined);
     } finally { globalThis.chrome = previous; }
+  });
+});
+
+test("the real action callbacks fill a modern Greenhouse form and independently confirm its nested resume", async () => {
+  await fixture(`<form id="application-form">
+    <label>First Name *<input id="first_name" value="Applicant correction" required></label>
+    <label>Last Name *<input id="last_name" required></label>
+    <label>Email *<input id="email" type="email" required></label>
+    <label>Country *<select id="country" required><option value="">Select...</option><option>USA</option></select></label>
+    <div class="field-wrapper"><label id="candidate-location-label" for="candidate-location">Location (City)*</label>
+      <div class="select__control"><input id="candidate-location" role="combobox" aria-labelledby="candidate-location-label" aria-controls="places" aria-required="true"><span class="select__single-value"></span></div>
+      <div id="places" role="listbox"></div></div>
+    <label>Are you currently located in the United States? *<select id="located" required><option value="">Select...</option><option>Yes</option><option>No</option></select></label>
+    <label>What is your current location: City, State *<input id="current-location" required></label>
+    <label>Will you now or in the future require sponsorship (i.e. H1b, OPT, H4, F1, etc.) to legally work in the United States *<select id="sponsorship" required><option value="">Select...</option><option>Yes</option><option>No</option></select></label>
+    <div class="file-upload"><div id="upload-label-resume">Resume/CV *</div><div class="file-upload__wrapper"><div class="button-container"><div class="secondary-button"><label for="resume">Attach</label><div><input id="resume" type="file"></div></div></div><p>Accepted file types: pdf, doc, docx, txt, rtf</p><div id="attachment"></div></div></div>
+    <script>
+      document.querySelector('#country').addEventListener('change', () => { const input=document.querySelector('#last_name'); input.replaceWith(input.cloneNode(true)); });
+      document.querySelector('#candidate-location').addEventListener('input', () => setTimeout(() => { document.querySelector('#places').innerHTML='<div role="option">Austin Gardens Colonia, Texas, United States</div><div role="option">Austin, Texas, United States</div>'; },200));
+      document.querySelector('#places').addEventListener('click', event => { document.querySelector('.select__single-value').textContent=event.target.textContent; document.querySelector('#candidate-location').value=''; });
+      document.querySelector('#resume').addEventListener('change', event => { document.querySelector('#attachment').textContent=event.target.files[0].name; });
+    </script></form>`, async page => {
+    const previous=globalThis.chrome;
+    const payloads=[];
+    globalThis.chrome={tabs:{query:async()=>[{id:1,url:page.url()}]},scripting:{executeScript:async request=>{
+      if(request.files) { await page.addScriptTag({content:script}); return [{frameId:0,documentId:'fixture-document'}]; }
+      payloads.push(request.args?.[0]);
+      return [{frameId:0,documentId:'fixture-document',result:await page.evaluate(({source,args})=>(0,eval)('('+source+')')(...(args||[])),{source:request.func.toString(),args:request.args})}];
+    }}};
+    try {
+      const details=await runCurrentAction('details',profile,null,{expectedUrl:page.url()});
+      assert.equal(details.status,'complete');
+      assert.equal(await page.locator('#first_name').inputValue(),'Applicant correction');
+      assert.equal(await page.locator('#last_name').inputValue(),'Example');
+      assert.equal(await page.locator('.select__single-value').textContent(),'Austin, Texas, United States');
+      assert.equal(await page.locator('#current-location').inputValue(),'Austin, TX');
+      assert.equal(await page.locator('#located').inputValue(),'Yes');
+      assert.equal(await page.locator('#sponsorship').inputValue(),'No');
+      assert.ok(details.frames[0].required.some(item=>/resume/i.test(item.label)));
+      const upload=await runCurrentAction('resume',profile,resume,{expectedUrl:page.url()});
+      assert.equal(upload.frames[0].resume.status,'accepted');
+      assert.equal(upload.frames[0].required.length,0);
+      assert.ok(payloads.filter(p=>p?.action==='resume').every(p=>Object.keys(p.profile).length===0));
+    } finally {globalThis.chrome=previous;}
   });
 });

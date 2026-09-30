@@ -414,22 +414,31 @@ function renderReport() {
   const report = state.report;
   const frames = safeReportFrames(report);
   const groups = { filled: [], skipped: [], failed: [], required: [] };
+  const warnings = Array.isArray(report.warnings) ? [...report.warnings] : [];
   for (const frame of frames) {
     for (const key of Object.keys(groups)) {
       if (Array.isArray(frame[key])) groups[key].push(...frame[key].map(row => ({ ...row, frameId: frame.frameId })));
     }
     if (frame.error) groups.failed.push({ label: `Frame ${frame.frameId ?? 'unknown'}`, reason: String(frame.error) });
+    if (Array.isArray(frame.warnings)) warnings.push(...frame.warnings);
   }
+  if (report.error) groups.failed.push({label: 'Action interrupted', reason: String(report.error)});
+  const interrupted = report.status === 'interrupted';
+  const incomplete = interrupted || report.status === 'partial' || groups.failed.length > 0
+    || frames.some(frame => ['partial', 'interrupted'].includes(frame.status));
   const action = report.uiAction || frames[0]?.action || 'inspect';
   $('#report-heading').textContent = action === 'resume' ? 'Résumé result' : action === 'details' ? 'Autofill results' : 'Field inspection';
   $('#report-context').textContent = [hostOf(report.pageUrl || frames[0]?.pageUrl), readableTime(report.checkedAt)].filter(Boolean).join(' · ');
   let summary;
-  if (action === 'inspect') {
+  if (report.status === 'running') {
+    summary = 'Action in progress. Results appear as each form finishes.';
+  } else if (action === 'inspect') {
     summary = groups.required.length
       ? `${groups.required.length} visible required ${groups.required.length === 1 ? 'field needs' : 'fields need'} attention.`
-      : frames.length ? 'No empty visible required fields were detected.' : 'No form results were returned.';
+      : incomplete ? 'Inspection was incomplete. The remaining required fields could not be verified.'
+        : frames.length ? 'No empty visible required fields were detected.' : 'No form results were returned.';
   } else if (action === 'details') {
-    summary = `${groups.filled.length} ${groups.filled.length === 1 ? 'field' : 'fields'} filled · ${groups.skipped.length} skipped · ${groups.failed.length} failed.`;
+    summary = `${incomplete ? interrupted ? 'Autofill interrupted. ' : 'Autofill needs attention. ' : ''}${groups.filled.length} ${groups.filled.length === 1 ? 'field' : 'fields'} confirmed filled · ${groups.skipped.length} skipped · ${groups.failed.length} failed.`;
   } else {
     summary = 'Review the résumé result below and the attachment shown on the application page.';
   }
@@ -455,6 +464,8 @@ function renderReport() {
   }
   const container = $('#report-details');
   container.replaceChildren();
+  if (incomplete) container.append(element('p', 'inline-note', 'Some fields may already be filled. Inspect the current page, then retry the same action to continue. Existing answers are preserved.'));
+  reportGroup(container, 'Needs review', [...new Set(warnings.filter(item => typeof item === 'string' && item.trim()))], row => row, true);
   reportGroup(container, 'Filled', groups.filled, row => row.label || row.key || 'Unlabeled field');
   reportGroup(container, 'Still required', groups.required, row => `${row.label || 'Unlabeled field'}${row.type ? ` · ${row.type}` : ''}`, true);
   reportGroup(container, 'Skipped', groups.skipped, row => `${row.label || 'Unlabeled field'} · ${row.reason || 'Not filled'}`);
@@ -473,10 +484,34 @@ async function runAction(action) {
     if (action === 'resume' && (!resume?.dataUrl || resume.metadata?.missingFile)) {
       throw new Error('Choose an available résumé PDF in Profile first.');
     }
-    const report = await runCurrentAction(action, state.profile, resume, { expectedUrl: state.job.url });
+    const checkedAt = new Date().toISOString();
+    state.report = {pageUrl: state.job.url, frames: [], status: 'running', checkedAt, uiAction: action};
+    renderReport();
+    // Save the operation before sending profile data. If the panel closes, its
+    // next opening must explain that the result is unknown rather than show an
+    // older, successful action as the current result.
+    await persistUi();
+    let report;
+    try {
+      report = await runCurrentAction(action, state.profile, resume, {
+        expectedUrl: state.job.url,
+        onProgress: async progress => {
+          state.report = {...progress, checkedAt, uiAction: action};
+          renderReport();
+          await persistUi();
+        },
+      });
+    } catch (error) {
+      state.report = {...state.report, status: 'interrupted', error: friendlyError(error)};
+      renderReport(); await persistUi();
+      showNotice(friendlyError(error), 'error');
+      return;
+    }
     state.report = { ...report, checkedAt: new Date().toISOString(), uiAction: action };
     renderReport(); await persistUi();
-    showNotice(action === 'inspect' ? 'Inspection finished. Review the fields listed below.'
+    const incomplete = ['partial', 'interrupted'].includes(report.status);
+    showNotice(incomplete ? 'The action needs attention. Review the results, inspect the current page, and retry to continue.'
+      : action === 'inspect' ? 'Inspection finished. Review the fields listed below.'
       : action === 'resume' ? 'Attachment action finished. Review its result and the application page.'
         : 'Autofill finished. Review the exact results below.', 'info');
     $('#report-card').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -727,6 +762,11 @@ async function init() {
     if (ui && typeof ui === 'object') {
       if (ui.job && typeof ui.job === 'object') state.job = { ...state.job, ...ui.job };
       state.report = ui.report && typeof ui.report === 'object' ? ui.report : null;
+      if (state.report?.status === 'running') {
+        state.report = {...state.report, status: 'interrupted',
+          warnings: [...(Array.isArray(state.report.warnings) ? state.report.warnings : []),
+            'The panel closed before this action finished. Its final result is unknown. Inspect the current page before retrying.']};
+      }
       state.selectedResumeId = typeof ui.selectedResumeId === 'string' ? ui.selectedResumeId : '';
       if (['apply', 'profile', 'applications'].includes(ui.tab)) state.tab = ui.tab;
     }

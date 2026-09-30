@@ -83,6 +83,8 @@ async function workspace(run, { width = 400, seed = null } = {}) {
         executeScript: async request => {
           globalThis.__extensionCalls.push({ files: request.files, args: request.args });
           if (request.files) return [{ frameId: 0 }];
+          if (request.args?.[0]?.probe) return [{frameId: 0, result: {pageUrl: 'https://boards.greenhouse.io/example/jobs/123',
+            hasForm: true, isTop: true, visibleEmbeds: []}}];
           if (request.args?.[0]?.action) return [{ frameId: 0, result: {
             action: request.args[0].action, provider: "Greenhouse", pageUrl: "https://boards.greenhouse.io/example/jobs/123",
             filled: [], skipped: [], failed: [], required: [{ label: "Salary expectations", type: "text" }],
@@ -193,6 +195,84 @@ test("autofill results show zero fills and the required answers that still need 
     const calls = await page.evaluate(() => __extensionCalls);
     assert.equal(calls.filter(call => call.args?.[0]?.action === "details").length, 1);
     assert.equal(calls.find(call => call.args?.[0]?.action === "details").args[0].resume, null);
+  });
+});
+
+test("partial autofill exposes warnings and confirmed results without reporting that the action finished", async () => {
+  await workspace(async page => {
+    await page.locator('#capture-job').click();
+    await page.evaluate(() => {
+      const execute = chrome.scripting.executeScript;
+      chrome.scripting.executeScript = async request => {
+        if (!request.args?.[0]?.action) return execute(request);
+        __extensionCalls.push({files: request.files, args: request.args});
+        return [{frameId: 0, result: {action: 'details', status: 'partial', filled: [{label: 'Email'}], skipped: [],
+          failed: [{label: 'Location', reason: 'The form replaced this field'}], required: [{label: 'Location'}],
+          warnings: ['Location selection still needs review']}}];
+      };
+    });
+    await page.locator('#fill-details').click();
+    await expect(page.locator('#report-summary')).toContainText('Autofill needs attention');
+    await expect(page.locator('#report-summary')).toContainText('1 field confirmed filled');
+    await expect(page.locator('#report-details')).toContainText('Location selection still needs review');
+    await expect(page.locator('#notice')).not.toContainText('Autofill finished');
+    await expect(page.locator('#fill-details')).toBeEnabled();
+    assert.equal(await page.evaluate(() => __extensionCalls.filter(call => call.args?.[0]?.action === 'details').length), 1);
+  });
+});
+
+test("a disconnected new action replaces an older successful report and leaves profile data intact", async () => {
+  await workspace(async page => {
+    await page.locator('#capture-job').click();
+    await page.evaluate(async () => {
+      await chrome.storage.local.set({jobpilot_ui_v1: {job: {title: 'Software Engineer', company: 'Example Co',
+        url: 'https://boards.greenhouse.io/example/jobs/123'}, report: {uiAction: 'details', status: 'complete',
+        frames: [{frameId: 0, filled: [{label: 'Old result'}, {label: 'Second old result'}]}]}}});
+    });
+    await page.reload();
+    await expect(page.locator('#report-summary')).toContainText('2 fields confirmed filled');
+    await page.evaluate(() => {
+      chrome.scripting.executeScript = async () => { throw new Error('The document was removed'); };
+    });
+    await page.locator('#fill-details').click();
+    await expect(page.locator('#report-summary')).toContainText('Autofill interrupted');
+    await expect(page.locator('#report-summary')).toContainText('0 fields confirmed filled');
+    await expect(page.locator('#report-details')).not.toContainText('Old result');
+    await expect(page.locator('#report-details')).toContainText('Inspect the current page');
+    await expect(page.locator('#fill-details')).toBeEnabled();
+    await page.locator('[data-tab="profile"]').click();
+    await expect(page.locator('[name="email"]')).toHaveValue('seeded@example.org');
+    await expect(page.locator('#resume-library')).toContainText('Seeded-Resume.pdf');
+  }, {seed: {profile: {first_name: 'Seeded', last_name: 'Example', email: 'seeded@example.org'},
+    resumes: [{path: 'initial-resume.pdf', name: 'Seeded-Resume.pdf'}]}});
+});
+
+test("closing the panel during a pending action restores an interrupted result without automatic replay", async () => {
+  await workspace(async page => {
+    await page.locator('#capture-job').click();
+    await page.evaluate(() => {
+      chrome.scripting.executeScript = () => new Promise(() => {});
+    });
+    await page.locator('#fill-details').click();
+    await expect(page.locator('#report-summary')).toContainText('Action in progress');
+    await expect.poll(() => page.evaluate(() => __storageData.jobpilot_ui_v1?.report?.status)).toBe('running');
+    await page.reload();
+    await expect(page.locator('#report-summary')).toContainText('Autofill interrupted');
+    await expect(page.locator('#report-details')).toContainText('Its final result is unknown');
+    await expect(page.locator('#fill-details')).toBeEnabled();
+    assert.equal(await page.evaluate(() => __extensionCalls.length), 0, 'opening the panel must not replay an uncertain action');
+  });
+});
+
+test("an interrupted inspection cannot claim that no required fields remain", async () => {
+  await workspace(async page => {
+    await page.locator('#capture-job').click();
+    await page.evaluate(() => {
+      chrome.scripting.executeScript = async () => { throw new Error('The document was removed'); };
+    });
+    await page.locator('#inspect-form').click();
+    await expect(page.locator('#report-summary')).toContainText('Inspection was incomplete');
+    await expect(page.locator('#report-summary')).not.toContainText('No empty visible required fields');
   });
 });
 

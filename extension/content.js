@@ -8,7 +8,7 @@
     const style = getComputedStyle(el);
     return !!el.getClientRects().length && style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
   };
-  const wrapper = el => el.closest(".field, .field-wrapper, .form-field, [data-field], [class*='FieldWrapper'], [class*='FileUpload'], fieldset") || el.parentElement;
+  const wrapper = el => el.closest(".file-upload, .field, .field-wrapper, .form-field, [data-field], [class*='FieldWrapper'], [class*='FileUpload'], fieldset") || el.parentElement;
   function labelText(node) {
     if (!node) return '';
     const copy = node.cloneNode(true);
@@ -19,6 +19,7 @@
     const items = [el.getAttribute('aria-label')];
     for (const id of (el.getAttribute('aria-labelledby') || '').split(/\s+/)) if (id) items.push(labelText(document.getElementById(id)));
     for (const label of el.labels || []) items.push(labelText(label));
+    if (el.type === 'file') items.unshift(labelText(wrapper(el)?.querySelector(".upload-label, [id^='upload-label'], label, legend")));
     if (!items.some(Boolean)) items.push(labelText(wrapper(el)?.querySelector("label, legend, [class*='Label'], [class*='label']")));
     return items.filter(Boolean).map(s => s.trim()).filter(Boolean);
   }
@@ -29,7 +30,7 @@
   const selectedReact = el => reactControl(el)?.querySelector("[class*='single-value'], [class*='multi-value'], [class*='singleValue'], [class*='multiValue']")?.textContent?.trim() || '';
   const combo = el => el.getAttribute('role') === 'combobox' || !!reactControl(el);
   const placeholderOption = o => !o || o.disabled || !o.value || /^(select|choose|please select|please choose)(\b|$)/i.test(o.text.trim());
-  const attachedText = container => /\.(pdf|docx?|rtf)\b|remove (file|resume)|replace (file|resume)|resume.*uploaded/i.test(container?.innerText || '');
+  const attachedText = container => /\b[^\s]+\.(pdf|docx?|rtf)\b|remove (file|resume)|replace (file|resume)|resume.*uploaded/i.test((container?.innerText || '').replace(/Accepted file types:[^\n]*/gi, ''));
   function answered(el) {
     if (['checkbox','radio'].includes(el.type)) return el.checked;
     if (el.type === 'file') return !!el.files?.length || attachedText(wrapper(el));
@@ -37,10 +38,11 @@
     if (combo(el)) return !!selectedReact(el) || (!reactControl(el) && !!el.value && el.getAttribute('aria-expanded') !== 'true');
     return !!String(el.value || '').trim();
   }
-  function inventory() {
+  function inventory(onError = () => {}) {
     const controls = [...document.querySelectorAll("input, textarea, select, [role='combobox']:not(input), [role='checkbox']:not(input), [role='radiogroup']")];
     const seenRadio = new Set();
-    return controls.filter(el => !el.disabled && !el.readOnly && !['hidden','submit','button','reset'].includes(el.type) && (visible(el) || (el.type === 'file' && visible(wrapper(el))))).flatMap(el => {
+    return controls.flatMap(el => { try {
+      if (el.disabled || el.readOnly || ['hidden','submit','button','reset'].includes(el.type) || !(visible(el) || (el.type === 'file' && visible(wrapper(el))))) return [];
       if (el.type === 'radio') {
         const key = (el.form?.id || '') + ':' + el.name;
         if (el.name && seenRadio.has(key)) return [];
@@ -56,7 +58,7 @@
       if (el.getAttribute('role') === 'checkbox' && el.tagName !== 'INPUT') return [{el,label:labelOf(el),type:'checkbox',required:required(el),answered:el.getAttribute('aria-checked') === 'true'}];
       if (el.getAttribute('role') === 'combobox' && el.tagName !== 'INPUT' && el.querySelector("input[role='combobox']")) return [];
       return [{el,label:labelOf(el),type:combo(el) ? 'combobox' : el.type || el.tagName.toLowerCase(),required:required(el),answered:answered(el)}];
-    });
+    } catch (_) { onError('A form control could not be inspected. Review the page.'); return []; } });
   }
   const DENY = /referr|referred|pronoun|citizen|nationality|ethnic|race\b|racial|gender|sex\b|disabil|veteran|consent|agree|certif|signature|privacy|salary|compensation|desired pay|relocat|how.*hear|years.*experience|how many years|why\b|describe|explain|tell (us|me)|cover letter|reason for leaving|emergency|spouse|recruiter|employee (id|number|name)|sponsorship.*type|type.*sponsorship|not authorized/;
   function historyContext(el, profile) {
@@ -91,23 +93,39 @@
     }
     if (ids.some(id => /company|employer|school|university|institution|education|start date|end date|graduation/.test(id))) return {reason:'History context is not clear'};
     const usProfile = /^(us|u s|usa|united states|united states of america)$/.test(norm(profile.country));
+    if (exact(/^are you (currently )?located in (the )?(united states|us|u s|usa)$/)) return {key:'located_in_us',value:profile.country ? (usProfile ? 'Yes' : 'No') : ''};
     if (exact(/^(are you )?(legally )?(authorized|authorised|eligible) to work in (the )?(united states|us|u s|usa)( of america)?$/) || exact(/^(do you have( the)? )?(legal )?(right|authorization|authorisation) to work in (the )?(united states|us|u s|usa)$/)) return usProfile ? {key:'work_authorized',value:typeof profile.work_authorized === 'boolean' ? (profile.work_authorized ? 'Yes' : 'No') : ''} : {reason:'Authorization country does not match your saved profile'};
-    if (exact(/^(do|will|would) you (now or in the future )?(require|need)( visa)? sponsorship( (now|in the future|for employment|to work|now or in the future))* in (the )?(united states|us|u s|usa)$/)) return usProfile ? {key:'requires_sponsorship',value:typeof profile.requires_sponsorship === 'boolean' ? (profile.requires_sponsorship ? 'Yes' : 'No') : ''} : {reason:'Sponsorship country does not match your saved profile'};
+    const sponsorshipLabels = labels(el).map(label => norm(label.replace(/\([^)]*\)/g, '')));
+    if (sponsorshipLabels.some(id => /^(do|will|would) you (now or in the future )?(require|need)( visa)? sponsorship( (now|in the future|for employment|to work|now or in the future))* (to legally work |to work )?in (the )?(united states|us|u s|usa)$/.test(id)) || exact(/^(do|will|would) you (now or in the future )?(require|need)( visa)? sponsorship( (now|in the future|for employment|to work|now or in the future))* in (the )?(united states|us|u s|usa)$/)) return usProfile ? {key:'requires_sponsorship',value:typeof profile.requires_sponsorship === 'boolean' ? (profile.requires_sponsorship ? 'Yes' : 'No') : ''} : {reason:'Sponsorship country does not match your saved profile'};
     const full = [profile.first_name,profile.last_name].filter(Boolean).join(' ');
     const rules = [
       ['first_name',/^(first name|given name|firstname|givenname)$/,profile.first_name],['last_name',/^(last name|family name|surname|lastname|familyname)$/,profile.last_name],['full_name',/^(full name|your name|applicant name|name|name full)$/,full],
       ['email',/^(email|e mail|email address)$/,profile.email],['phone',/^(phone|phone number|mobile|mobile number|cell phone|telephone|tel)$/,profile.phone],
       ['city',/^(city|current city|address level2)$/,profile.city],['state',/^(state|state province|province|address level1)$/,profile.state],['postal_code',/^(zip|zip code|postal code|zipcode)$/,profile.postal_code],
-      ['country',/^(country|country of residence|residence country|country name)$/,profile.country],['location',/^(current location|location|your location)$/,[profile.city,profile.state].filter(Boolean).join(', ')],
+      ['country',/^(country|country of residence|residence country|country name)$/,profile.country],['location',/^(current location|location|location city|your location|what is your current location city state)$/,[profile.city,profile.state].filter(Boolean).join(', ')],
       ['linkedin_url',/^(linkedin|linkedin profile|linkedin url|linkedin profile url)$/,profile.linkedin_url],['github_url',/^(github|github profile|github url)$/,profile.github_url],['portfolio_url',/^(portfolio|portfolio url|website|personal website|personal site)$/,profile.portfolio_url],['current_title',/^(current title|current job title|current role)$/,profile.current_title],
     ];
     const found = rules.find(([,re]) => exact(re));
     return found ? {key:found[0],value:found[2] || ''} : {reason:'No verified mapping for this question'};
   }
-  function exactOption(options, value) {
-    const n = norm(value);
-    const aliases = /^(us|usa|united states|united states of america)$/.test(n) ? new Set(['us','usa','united states','united states of america']) : new Set([n]);
-    const matches = options.filter(o => !o.disabled && o.getAttribute('aria-disabled') !== 'true' && aliases.has(norm(o.textContent)));
+  const stateNames = {AL:'Alabama',AK:'Alaska',AZ:'Arizona',AR:'Arkansas',CA:'California',CO:'Colorado',CT:'Connecticut',DE:'Delaware',FL:'Florida',GA:'Georgia',HI:'Hawaii',ID:'Idaho',IL:'Illinois',IN:'Indiana',IA:'Iowa',KS:'Kansas',KY:'Kentucky',LA:'Louisiana',ME:'Maine',MD:'Maryland',MA:'Massachusetts',MI:'Michigan',MN:'Minnesota',MS:'Mississippi',MO:'Missouri',MT:'Montana',NE:'Nebraska',NV:'Nevada',NH:'New Hampshire',NJ:'New Jersey',NM:'New Mexico',NY:'New York',NC:'North Carolina',ND:'North Dakota',OH:'Ohio',OK:'Oklahoma',OR:'Oregon',PA:'Pennsylvania',RI:'Rhode Island',SC:'South Carolina',SD:'South Dakota',TN:'Tennessee',TX:'Texas',UT:'Utah',VT:'Vermont',VA:'Virginia',WA:'Washington',WV:'West Virginia',WI:'Wisconsin',WY:'Wyoming',DC:'District of Columbia'};
+  const usCountry = value => /^(us|u s|usa|united states|united states of america)$/.test(norm(value));
+  const sameCountry = (a,b) => norm(a) === norm(b) || (usCountry(a) && usCountry(b));
+  const stateValue = value => norm(stateNames[String(value || '').toUpperCase()] || value);
+  function optionMatches(text, rule, profile) {
+    if (rule.key === 'country') return sameCountry(text.replace(/\s*\+\s*\d+\s*$/, ''),rule.value);
+    if (rule.key === 'state') return stateValue(text) === stateValue(rule.value);
+    if (rule.key === 'location') {
+      const parts = text.split(',').map(s => s.trim());
+      if (norm(parts[0]) !== norm(profile.city)) return false;
+      if (parts.length === 1) return !profile.state && !profile.country;
+      if (!profile.state || stateValue(parts[1]) !== stateValue(profile.state)) return false;
+      return parts.length === 2 || (parts.length === 3 && !!profile.country && sameCountry(parts[2],profile.country));
+    }
+    return norm(text) === norm(rule.value);
+  }
+  function exactOption(options, rule, profile) {
+    const matches = options.filter(o => !o.disabled && o.getAttribute('aria-disabled') !== 'true' && optionMatches(o.textContent,rule,profile));
     return matches.length === 1 ? matches[0] : null;
   }
   function setText(el, value) {
@@ -119,32 +137,47 @@
     el.dispatchEvent(new Event('change',{bubbles:true}));
     return true;
   }
-  async function fillCombo(el, value) {
+  function menuFor(el) {
+    const ctrl = reactControl(el) || el, input = el.tagName === 'INPUT' ? el : ctrl.querySelector('input');
+    const listId = el.getAttribute('aria-controls') || el.getAttribute('aria-owns') || input?.getAttribute('aria-controls') || input?.getAttribute('aria-owns');
+    if (listId) return document.getElementById(listId);
+    // An unassociated portal menu is deliberately not searched globally.
+    const scope = ctrl.closest('.select-shell, .field, .field-wrapper, .form-field, [data-field]') || ctrl.parentElement;
+    const menus = [...scope.querySelectorAll("[role='listbox']")].filter(visible);
+    return menus.length === 1 ? menus[0] : null;
+  }
+  async function fillCombo(el, rule, profile) {
+    const value = rule.value;
     const ctrl = reactControl(el) || el, input = el.tagName === 'INPUT' ? el : ctrl.querySelector('input');
     const before = input?.value || '';
     input?.focus();
     ctrl.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,button:0}));
     ctrl.dispatchEvent(new MouseEvent('mouseup',{bubbles:true,button:0}));
-    if (input && !/^(Yes|No)$/.test(value)) setText(input,value);
-    let options = [];
-    for (let attempt=0; attempt<10; attempt++) {
+    if (input && !/^(Yes|No)$/.test(value)) setText(input,rule.key === 'location' ? profile.city : value);
+    const query = input?.value || '';
+    const applicantChanged = () => !!selectedReact(el) || (input && input.value !== query);
+    let option = null;
+    for (let attempt=0; attempt<35; attempt++) {
       await pause(100);
-      const listId = el.getAttribute('aria-controls') || el.getAttribute('aria-owns') || input?.getAttribute('aria-controls');
-      const menu = listId ? document.getElementById(listId) : document;
-      options = [...(menu || document).querySelectorAll("[role='option'], [class*='select__option']")].filter(visible);
-      if (options.length) break;
+      if (!el.isConnected) break;
+      if (applicantChanged()) return 'preserved';
+      const menu = menuFor(el);
+      const options = [...(menu?.querySelectorAll("[role='option'], [class*='select__option']") || [])].filter(visible);
+      option = exactOption(options,rule,profile);
+      if (option) break;
     }
-    const option = exactOption(options,value);
     if (option) {
+      if (applicantChanged()) return 'preserved';
       option.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,button:0}));
       option.dispatchEvent(new MouseEvent('mouseup',{bubbles:true,button:0}));
       option.click();
       await pause(100);
     }
-    ctrl.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+    const ok = !!option && (optionMatches(selectedReact(el),rule,profile) || (!reactControl(el) && optionMatches(el.value || el.textContent,rule,profile)));
+    if (!ok && applicantChanged()) return 'preserved';
+    (input || ctrl).dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',code:'Escape',bubbles:true}));
     input?.blur();
-    const ok = !!option && (norm(selectedReact(el)) === norm(value) || (!reactControl(el) && norm(el.value || el.textContent) === norm(value)));
-    if (!ok && input) setText(input,before);
+    if (!ok && input?.isConnected && !selectedReact(el) && input.value === query) setText(input,before);
     return ok;
   }
   function resumeTarget() {
@@ -167,7 +200,7 @@
       target.el.dispatchEvent(new Event('change',{bubbles:true}));
       for (let attempt=0; attempt<16; attempt++) {
         await pause(150);
-        const scope = target.el.isConnected ? wrapper(target.el) : target.wrapper, text = scope?.innerText || '';
+        const scope = target.wrapper?.isConnected ? target.wrapper : resumeTarget()?.wrapper, text = scope?.innerText || '';
         const alerts = [...(scope?.querySelectorAll("[role='alert'], .error, [class*='Error'], [class*='error']") || [])].filter(visible).map(el => el.textContent).join(' ');
         if (/failed|invalid|too large|unsupported|not (allowed|accepted)|error|unable/i.test(alerts)) return {status:'failed',filename,message:'The form reported an upload error. Review the page.'};
         if (text.includes(filename) && !/uploading|processing|please wait/i.test(text)) return {status:'accepted',filename,message:'The form displays this résumé attachment. Review it before submitting.'};
@@ -175,31 +208,88 @@
       return {status:'prepared',filename,message:'File selected; the form has not confirmed acceptance. Check the attachment on the page.'};
     } catch (error) { return {status:'failed',filename,message:error.message || 'The file could not be attached. Upload it manually.'}; }
   }
+  function fieldToken({el,label,type}, profile) {
+    const history = historyContext(el,profile);
+    const section = history ? `${history.type}:${history.index}` : '';
+    return JSON.stringify([el.form?.id || '',section,el.id || '',el.name || '',norm(label),type]);
+  }
+  function acceptedValue(el, rule, profile) {
+    if (!el?.isConnected) return false;
+    if ((el.validity && !el.validity.valid) || el.getAttribute('aria-invalid') === 'true') return false;
+    if (el.tagName === 'SELECT') return !placeholderOption(el.selectedOptions[0]) && optionMatches(el.selectedOptions[0].textContent,rule,profile);
+    if (combo(el)) return optionMatches(selectedReact(el) || (!reactControl(el) ? el.value || el.textContent : ''),rule,profile);
+    return el.value === String(rule.value);
+  }
+  // Re-injecting the script must not let a second click race an existing run.
+  const runtime = globalThis.__jobpilotAutofillRuntime ||= {running:false};
   globalThis.__jobpilotRun = async ({action='inspect',profile={},resume=null}={}) => {
     if (!['inspect','details','resume'].includes(action)) throw new Error('Unknown JobPilot action');
-    const report = {action,filled:[],skipped:[],failed:[],required:[],resume:{status:'not-requested',message:''},provider:location.hostname.includes('greenhouse') ? 'Greenhouse' : location.hostname.includes('lever') ? 'Lever' : location.hostname.includes('ashby') ? 'Ashby' : 'Unsupported',pageUrl:location.href};
+    const report = {action,status:'complete',warnings:[],filled:[],skipped:[],failed:[],required:[],resume:{status:'not-requested',message:''},provider:location.hostname.includes('greenhouse') ? 'Greenhouse' : location.hostname.includes('lever') ? 'Lever' : location.hostname.includes('ashby') ? 'Ashby' : 'Unsupported',pageUrl:location.href};
     if (!hosts.has(location.hostname) || location.protocol !== 'https:') { report.skipped.push({label:'Page',reason:'This frame is outside the supported application hosts'}); return report; }
-    if (action === 'details') {
-      for (const entry of inventory()) {
-        const {el,label,type} = entry;
-        if (['radio','checkbox','file','password'].includes(type)) { report.skipped.push({label,reason:type === 'file' ? 'Use Attach résumé separately' : 'Answer this question yourself'}); continue; }
-        if (entry.answered) { report.skipped.push({label,reason:'Your existing answer was preserved'}); continue; }
-        const rule = ruleFor(el,profile);
-        if (rule.reason) { report.skipped.push({label,reason:rule.reason}); continue; }
-        if (!rule.value) { report.skipped.push({label,reason:'No saved profile value'}); continue; }
-        try {
-          let ok = false;
-          if (el.tagName === 'SELECT') {
-            const option = exactOption([...el.options].filter(o => !placeholderOption(o)),rule.value);
-            if (option) { el.value=option.value; el.dispatchEvent(new Event('input',{bubbles:true})); el.dispatchEvent(new Event('change',{bubbles:true})); await pause(75); ok=el.value === option.value; }
-          } else if (type === 'combobox') ok = await fillCombo(el,rule.value);
-          else { setText(el,rule.value); await pause(75); ok=el.value === String(rule.value); }
-          if (ok) report.filled.push({label,key:rule.key});
-          else report.failed.push({label,reason:'The form did not accept an exact match. Review this field.'});
-        } catch (_) { report.failed.push({label,reason:'This control needs manual entry'}); }
-      }
-    } else if (action === 'resume') report.resume = await attachResume(resume);
-    report.required = inventory().filter(item => item.required && !item.answered).map(({label,type}) => ({label,type}));
+    const warn = message => { if (!report.warnings.includes(message)) report.warnings.push(message); };
+    if (runtime.running) { report.status='interrupted'; warn('Autofill is already running on this page. Wait for its report before retrying.'); return report; }
+    runtime.running=true;
+    const outcomes = new Map(), attempts = new Map();
+    const record = (token,kind,item,rule=null,retryable=false) => outcomes.set(token,{kind,item,rule,retryable});
+    try {
+      if (action === 'details') {
+        const deadline = Date.now()+20000;
+        let quietSince=Date.now();
+        while (Date.now() < deadline) {
+          if (location.href !== report.pageUrl) { report.status='interrupted'; warn('The application page changed. Review the fields already filled, then inspect the new page.'); break; }
+          const entries = inventory(warn);
+          let pending;
+          for (const entry of entries) {
+            try {
+              const token=fieldToken(entry,profile), previous=outcomes.get(token);
+              if (!previous || ((previous.kind==='filled' || previous.retryable) && !entry.answered && (attempts.get(token)||0)<2)) { pending={entry,token}; break; }
+            } catch (_) { warn('A field could not be identified. Review the page.'); }
+          }
+          if (!pending) {
+            if (Date.now()-quietSince >= 1200) break;
+            await pause(100); continue;
+          }
+          quietSince=Date.now();
+          const {entry,token}=pending, {label,type}=entry;
+          attempts.set(token,(attempts.get(token)||0)+1);
+          try {
+            // Resolve immediately before writing: React can replace any input.
+            const live=inventory(warn).filter(item => fieldToken(item,profile)===token);
+            if (live.length !== 1) { record(token,'failed',{label,reason:'This field changed or is ambiguous. Review it manually.'}); continue; }
+            const {el}=live[0];
+            if (['radio','checkbox','file','password'].includes(type)) { record(token,'skipped',{label,reason:type==='file' ? 'Use Attach résumé separately' : 'Answer this question yourself'}); continue; }
+            if (answered(el)) { record(token,'skipped',{label,reason:'Your existing answer was preserved'}); continue; }
+            if (combo(el) && String(el.value || '').trim()) { record(token,'skipped',{label,reason:'An existing dropdown search was preserved. Choose its option on the page.'}); continue; }
+            const rule=ruleFor(el,profile);
+            if (rule.reason) { record(token,'skipped',{label,reason:rule.reason}); continue; }
+            if (!rule.value) { record(token,'skipped',{label,reason:'No saved profile value'}); continue; }
+            if (el.tagName==='SELECT') {
+              const option=exactOption([...el.options].filter(o => !placeholderOption(o)),rule,profile);
+              if (option) { el.value=option.value; el.dispatchEvent(new Event('input',{bubbles:true})); el.dispatchEvent(new Event('change',{bubbles:true})); await pause(100); }
+            } else if (type==='combobox') {
+              if (await fillCombo(el,rule,profile)==='preserved') { record(token,'skipped',{label,reason:'Your dropdown answer or search changed during autofill and was preserved.'}); continue; }
+            }
+            else { setText(el,rule.value); await pause(100); }
+            const after=inventory(warn).filter(item => fieldToken(item,profile)===token);
+            if (after.length===1 && acceptedValue(after[0].el,rule,profile)) record(token,'filled',{label,key:rule.key},rule);
+            else record(token,'failed',{label,reason:'The form did not retain a valid, unambiguous match. Review this field.'},rule,!el.isConnected && after.length===1 && !after[0].answered);
+          } catch (_) { record(token,'failed',{label,reason:'This control could not be filled. Other supported fields were still checked.'}); }
+        }
+        if (Date.now() >= deadline) { report.status='interrupted'; warn('The form kept changing or took too long. Review progress and retry remaining empty fields.'); }
+        const finalEntries=inventory(warn);
+        for (const [token,outcome] of outcomes) {
+          if (outcome.kind==='filled') {
+            const matches=finalEntries.filter(item => fieldToken(item,profile)===token);
+            if (matches.length!==1 || !acceptedValue(matches[0].el,outcome.rule,profile)) record(token,'failed',{label:outcome.item.label,reason:'The form changed after filling this field. Review its current value.'});
+          }
+        }
+      } else if (action==='resume') report.resume=await attachResume(resume);
+      report.required=inventory(warn).filter(item => item.required && !item.answered).map(({label,type})=>({label,type}));
+    } catch (_) {
+      report.status='interrupted'; warn('Autofill was interrupted. Review the preserved progress and inspect the form before retrying.');
+    } finally { runtime.running=false; }
+    for (const outcome of outcomes.values()) report[outcome.kind].push(outcome.item);
+    if (report.status==='complete' && (report.failed.length || report.warnings.length || report.resume.status==='failed')) report.status='partial';
     return report;
   };
 })();

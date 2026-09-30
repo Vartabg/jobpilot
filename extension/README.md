@@ -28,6 +28,12 @@ Automatic form filling supports the allowed Greenhouse, Lever, and Ashby hosts l
 
 Existing answers and attachments are preserved. Work and education fields fill only when a clearly labelled, numbered section can be matched to the same verified profile row. Ambiguous or unsupported repeaters require manual copying. The extension does not add missing work-history rows or navigate multi-step application forms.
 
+Version 0.8.1 rechecks the live form between fields, handles delayed Greenhouse location suggestions and country/state aliases, and discovers fields revealed by earlier selections. It waits up to 3.5 seconds for an associated dropdown and limits a details action to about 20 seconds. A changing, ambiguous, or rejected control appears in the review report rather than stopping every other supported field. User edits made during autofill are preserved.
+
+An interrupted action retains the frame results already returned. If the panel closes mid-action, reopening it shows that the final result is unknown. Inspect the page and retry **Fill details** to continue with empty fields. JobPilot does not automatically replay an interrupted action or switch application steps. A résumé action remains separate.
+
+To update an unpacked installation without creating a second extension identity, replace its packaged code in the same folder, then **Reload** JobPilot in Chrome's extension manager. Keep `initial-data.json` and `initial-resume.pdf` if present; runtime profile, résumé library, and tracking data are stored in Chrome, not those seed files. Keep a backup of the old package and export your workspace before removing the extension. Updating the folder does not activate new code until Reload.
+
 A résumé result of **prepared** means a file was placed in the upload control. **Accepted** means the page displayed attachment evidence without a detected upload error; the employer's final application review remains the authority. An unlabelled or unrelated upload control is never treated as a résumé field.
 
 ## Data and backups
@@ -44,4 +50,4 @@ npx playwright install chromium
 node --test extension/tests/*.test.mjs
 ```
 
-Browser tests use a separate Playwright Chromium profile and intercepted local fixtures. They do not access installed Chrome extensions, Chrome settings, or live employer applications. Tests cover conservative field matching, unanswered required controls, attachment evidence, local storage, and the side-panel workflow. Portal behavior can change; a passing fixture suite does not guarantee every live employer form behaves identically.
+Browser tests use a separate Playwright Chromium profile and intercepted local fixtures. They do not access installed Chrome extensions, Chrome settings, or live employer applications. Tests cover conservative field matching, delayed dropdowns, rerenders, edits during autofill, interruptions, unanswered required controls, attachment evidence, local storage, and the side-panel workflow. Portal behavior can change; a passing fixture suite does not guarantee every live employer form behaves identically.
