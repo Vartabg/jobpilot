@@ -5,6 +5,7 @@ import { before, after, test } from "node:test";
 import { chromium, expect } from "@playwright/test";
 
 const root = new URL("../", import.meta.url);
+const manifest=JSON.parse(await readFile(new URL('manifest.json',root),'utf8'));
 let server, browser, base;
 before(async () => {
   server = createServer(async (req, res) => {
@@ -34,7 +35,7 @@ async function workspace(run, { width = 400, seed = null } = {}) {
     if (seed && url.endsWith("/initial-resume.pdf")) return route.fulfill({ contentType: "application/pdf", body: "%PDF-1.4\nfixture seeded resume\n%%EOF" });
     return route.continue();
   });
-  await page.addInitScript(() => {
+  await page.addInitScript(installedManifest => {
     const data = JSON.parse(localStorage.getItem("__testExtensionData") || "{}");
     globalThis.__storageData = data;
     globalThis.__extensionCalls = [];
@@ -42,6 +43,7 @@ async function workspace(run, { width = 400, seed = null } = {}) {
     let modelQueue = Promise.resolve();
     globalThis.chrome = {
       runtime: {
+        getManifest: () => installedManifest,
         getURL: path => new URL(path, location.href).href,
         onMessage: event,
         sendMessage: async message => {
@@ -94,7 +96,7 @@ async function workspace(run, { width = 400, seed = null } = {}) {
         },
       },
     };
-  });
+  },manifest);
   await page.goto(base + "/sidepanel.html");
   try { await run(page); assert.deepEqual(errors, [], "side panel must not throw browser errors"); }
   finally { await context.close(); }
@@ -102,6 +104,7 @@ async function workspace(run, { width = 400, seed = null } = {}) {
 
 test("profile edits persist and an unanswered work-authorization question remains unknown", async () => {
   await workspace(async page => {
+    await expect(page.locator('#extension-version')).toHaveText(` ${manifest.version}`);
     await page.locator('[data-tab="profile"]').click();
     await page.locator('[name="first_name"]').fill("Alex");
     await page.locator('[name="last_name"]').fill("Example");
@@ -110,6 +113,7 @@ test("profile edits persist and an unanswered work-authorization question remain
     await page.locator("#save-profile").click();
     await expect(page.locator("#notice")).toContainText(/saved/i);
     await page.reload();
+    await expect(page.locator('#extension-version')).toHaveText(` ${manifest.version}`);
     await page.locator('[data-tab="profile"]').click();
     await expect(page.locator('[name="email"]')).toHaveValue("alex@example.org");
     await expect(page.locator('[name="work_authorized"]')).toHaveValue("");

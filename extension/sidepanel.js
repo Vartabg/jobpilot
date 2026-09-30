@@ -752,6 +752,8 @@ function bindEvents() {
 async function init() {
   bindEvents(); setBusy(true);
   try {
+    const version=chrome.runtime.getManifest().version;
+    $('#extension-version').textContent=version ? ` ${version}` : '';
     const [profile, resumes, applications, stored] = await Promise.all([
       getProfile(), listResumes(), listApplications(), chrome.storage.local.get(UI_KEY),
     ]);
