@@ -5,7 +5,7 @@ import { emptyProfile, normalizeJobUrl, initializeLocalData, executeModelOperati
 let data, writes;
 beforeEach(() => {
   data = {}; writes = 0;
-  globalThis.chrome = { runtime: { getURL: name => "https://extension.test/" + name }, storage: { local: {
+  globalThis.chrome = { runtime: { getURL: name => "https://extension.test/" + name, getManifest: () => ({version: '0.8.3'}) }, storage: { local: {
     get: async key => Object.fromEntries([key].flat().map(name => [name, structuredClone(data[name])])),
     set: async values => { writes++; Object.assign(data, structuredClone(values)); },
   } } };

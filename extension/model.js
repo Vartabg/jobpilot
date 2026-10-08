@@ -1,9 +1,11 @@
 // Local domain storage. UI callers use the worker broker so multiple panels
 // cannot overwrite one another's application/resume read-modify-write updates.
+import { RUN_LIMIT, sanitizeRun } from './diagnostics.js';
 export const APPLICATION_STATUSES = ["started", "submitted", "interview", "rejected", "offer", "withdrawn"];
 export const SCHEMA_VERSION = 1;
 const KEYS = { profile: "jobpilot_profile_v1", applications: "jobpilot_applications_v1", resumes: "jobpilot_resumes_v1" };
 const INITIALIZATION_MARKER = "jobpilot_initialized_v1";
+const RUNS_STORAGE = "jobpilot_runs_v1";
 const MAX_RESUME_BYTES = 10 * 1024 * 1024;
 const PROFILE_FIELDS = ["first_name", "last_name", "preferred_name", "email", "phone", "address_line1", "address_line2", "city", "state", "country", "postal_code", "linkedin_url", "github_url", "portfolio_url", "current_title", "selected_resume_id"];
 const MIME_TYPES = { pdf: "application/pdf" };
@@ -244,6 +246,27 @@ export async function initializeLocalData() {
 }
 
 const handlers = {
+  async listRuns() { return read(RUNS_STORAGE, []); },
+  async saveRun(value) {
+    object(value, 'Run');
+    const id = identifier(value.id);
+    const runs = await handlers.listRuns();
+    const previous = runs.find(run => run.id === id);
+    const run = sanitizeRun({...value, id}, previous, chrome.runtime.getManifest().version);
+    // A completed retry is a new run; checkpoints replace their own run only.
+    await write(RUNS_STORAGE, [run, ...runs.filter(item => item.id !== id)].slice(0, RUN_LIMIT));
+    return run;
+  },
+  async updateRun(id, patch) {
+    object(patch, 'Run update');
+    const runs = await handlers.listRuns();
+    const run = runs.find(item => item.id === id);
+    if (!run) throw new Error('This run is no longer in the local history.');
+    if (typeof patch.resolved === 'boolean') run.resolved = patch.resolved;
+    if (patch.reported === true) run.reported = true;
+    await write(RUNS_STORAGE, runs);
+    return run;
+  },
   async getProfile() { return profileData(await read(KEYS.profile, emptyProfile())); },
   async saveProfile(value) {
     const profile = profileData(value);
@@ -370,5 +393,8 @@ export const listApplications = () => invoke("listApplications");
 export const saveApplication = (job, status = "started") => invoke("saveApplication", job, status);
 export const updateApplication = (id, patch) => invoke("updateApplication", id, patch);
 export const findApplication = (url) => invoke("findApplication", url);
+export const listRuns = () => invoke('listRuns');
+export const saveRun = (run) => invoke('saveRun', run);
+export const updateRun = (id, patch) => invoke('updateRun', id, patch);
 export const exportData = () => invoke("exportData");
 export const importData = (data, options = {}) => invoke("importData", data, options);

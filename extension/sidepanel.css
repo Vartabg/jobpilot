@@ -19,7 +19,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .brand-mark { display:grid; place-items:center; width:36px; height:40px; border-radius:10px 10px 10px 2px; color:white; background:var(--brand); font-size:24px; font-weight:750; }
 .brand p { margin-top:5px; color:var(--muted); font-size:11px; }
 .local-badge { background:#edf5f1; border:1px solid #d6e7dd; color:#396751; border-radius:20px; padding:4px 8px; font-size:10px; white-space:nowrap; }
-.tabs { position:sticky; top:0; z-index:3; display:grid; grid-template-columns:1fr 1fr 1.6fr; gap:5px; padding:6px 12px 9px; border-bottom:1px solid var(--line); background:white; }
+.tabs { position:sticky; top:0; z-index:3; display:grid; grid-template-columns:1fr 1fr 1.6fr 1.2fr; gap:5px; padding:6px 12px 9px; border-bottom:1px solid var(--line); background:white; }
 .tabs button { border:0; background:transparent; color:var(--muted); padding:10px 4px; border-radius:8px; font-weight:600; font-size:12px; }
 .tabs button[aria-selected="true"] { color:var(--brand); background:var(--accent); }
 .tab-count { margin-left:2px; font-size:10px; padding:2px 5px; border-radius:10px; background:#dbe3e7; color:var(--ink); }

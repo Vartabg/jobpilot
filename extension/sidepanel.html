@@ -16,6 +16,7 @@
       <button id="tab-apply" type="button" role="tab" aria-selected="true" aria-controls="panel-apply" tabindex="0" data-tab="apply">Apply</button>
       <button id="tab-profile" type="button" role="tab" aria-selected="false" aria-controls="panel-profile" tabindex="-1" data-tab="profile">Profile</button>
       <button id="tab-applications" type="button" role="tab" aria-selected="false" aria-controls="panel-applications" tabindex="-1" data-tab="applications">Applications <span id="application-count" class="tab-count">0</span></button>
+      <button id="tab-history" type="button" role="tab" aria-selected="false" aria-controls="panel-history" tabindex="-1" data-tab="history">History <span id="problem-count" class="tab-count">0</span></button>
     </nav>
     <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
     <main>
@@ -43,6 +44,8 @@
           <p id="report-summary" class="report-summary" role="status"></p>
           <div id="report-upload" class="inline-note" hidden></div>
           <div id="report-details"></div>
+          <button id="report-problem" type="button" class="button full">Report a problem</button>
+          <p id="report-log-status" class="fine-print"></p>
         </section>
         <section class="card">
           <div class="section-heading"><div><h2>Keep a record</h2><p>Save progress, or record a submission you completed.</p></div></div>
@@ -106,6 +109,15 @@
         <div id="application-stats" class="stats-grid"></div>
         <label>Filter by status<select id="application-filter"><option value="">All applications</option><option value="started">Started</option><option value="submitted">Submitted</option><option value="interview">Interview</option><option value="rejected">Rejected</option><option value="offer">Offer</option><option value="withdrawn">Withdrawn</option></select></label>
         <div id="application-list" class="application-list"></div>
+      </section>
+      <section id="panel-history" class="tab-panel" role="tabpanel" aria-labelledby="tab-history" hidden>
+        <section class="card">
+          <div class="section-heading"><div><h2>Run history</h2><p>The last 50 runs are saved in this browser.</p></div><button id="refresh-history" type="button" class="text-button">Refresh</button></div>
+          <label>Show<select id="history-filter"><option value="problems">Open problems</option><option value="all">All runs</option></select></label>
+          <button id="export-problems" type="button" class="button full">Export open problems</button>
+          <p class="fine-print">Logs include job links, field labels, and reason codes. Answers, profile values, résumé names and contents, and raw errors are excluded. Nothing is sent automatically.</p>
+        </section>
+        <div id="run-history" class="application-list"></div>
       </section>
     </main>
     <footer>JobPilot<span id="extension-version"></span> · Profile and records saved in this browser.</footer>
