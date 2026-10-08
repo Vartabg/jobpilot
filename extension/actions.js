@@ -40,7 +40,8 @@ export async function captureCurrentJob() {
       const text = html => new DOMParser().parseFromString(String(html || ""), "text/html").body.textContent.trim();
       return {
         title: (job?.title || document.querySelector("h1")?.textContent?.trim() || document.title || "").slice(0, 300),
-        company: typeof job?.hiringOrganization?.name === "string" ? job.hiringOrganization.name.slice(0, 200) : "",
+        company: (typeof job?.hiringOrganization?.name === "string" ? job.hiringOrganization.name
+          : location.hostname === 'jobs.ashbyhq.com' ? document.title.split(' @ ').slice(1).join(' @ ').trim() : '').slice(0,200),
         description: (job?.description ? text(job.description) : (document.querySelector("main, article, #content")?.innerText || "")).slice(0, 40000),
         request_id: String(job?.identifier?.value || "").slice(0, 200),
       };

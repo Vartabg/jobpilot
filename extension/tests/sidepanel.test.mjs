@@ -108,6 +108,9 @@ test("profile edits persist and an unanswered work-authorization question remain
     await page.locator('[data-tab="profile"]').click();
     await page.locator('[name="first_name"]').fill("Alex");
     await page.locator('[name="last_name"]').fill("Example");
+    await page.locator('[name="preferred_name"]').fill("Lex");
+    await page.locator('[name="address_line1"]').fill("123 Example Street");
+    await page.locator('[name="address_line2"]').fill("Unit 2");
     await page.locator('[name="email"]').fill("alex@example.org");
     await page.locator('[name="city"]').fill("Austin");
     await page.locator("#save-profile").click();
@@ -116,6 +119,9 @@ test("profile edits persist and an unanswered work-authorization question remain
     await expect(page.locator('#extension-version')).toHaveText(` ${manifest.version}`);
     await page.locator('[data-tab="profile"]').click();
     await expect(page.locator('[name="email"]')).toHaveValue("alex@example.org");
+    await expect(page.locator('[name="preferred_name"]')).toHaveValue("Lex");
+    await expect(page.locator('[name="address_line1"]')).toHaveValue("123 Example Street");
+    await expect(page.locator('[name="address_line2"]')).toHaveValue("Unit 2");
     await expect(page.locator('[name="work_authorized"]')).toHaveValue("");
     await expect(page.locator('[name="requires_sponsorship"]')).toHaveValue("");
     assert.equal(await page.evaluate(() => __extensionCalls.length), 0, "opening and editing the panel cannot inject into the job page");

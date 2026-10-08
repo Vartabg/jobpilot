@@ -61,6 +61,19 @@ test("job identity dedupes tracking parameters and apply paths while preserving 
   assert.throws(() => normalizeJobUrl("https://user:password@example.org/job"));
 });
 
+test('preferred name and address survive saving and backup without inferring missing values', async () => {
+  const old=await run('saveProfile',[{first_name:'Alex',last_name:'Example'}]);
+  for(const key of ['preferred_name','address_line1','address_line2']) assert.equal(old[key],'');
+  const saved=await run('saveProfile',[{...old,preferred_name:' Lex ',address_line1:' 123 Example Street ',address_line2:' Unit 2 '}]);
+  assert.equal(saved.preferred_name,'Lex');
+  const backup=await run('exportData',[]);
+  await run('importData',[backup,{replaceProfile:true}]);
+  const restored=await run('getProfile',[]);
+  assert.equal(restored.preferred_name,'Lex');
+  assert.equal(restored.address_line1,'123 Example Street');
+  assert.equal(restored.address_line2,'Unit 2');
+});
+
 test("submission is explicit and saving another started draft cannot downgrade it", async () => {
   const job = { company: "Example Co", title: "Software Engineer", url: "https://boards.greenhouse.io/example/jobs/123", resume_id: "resume-1", resume_name: "Software.pdf" };
   const started = await run("saveApplication", [job, "started"]);

@@ -11,7 +11,7 @@ const STATUS_LABELS = {
   rejected: 'Rejected', offer: 'Offer', withdrawn: 'Withdrawn',
 };
 const PROFILE_FIELDS = [
-  'first_name', 'last_name', 'email', 'phone', 'city', 'state', 'postal_code',
+  'first_name', 'last_name', 'preferred_name', 'email', 'phone', 'address_line1', 'address_line2', 'city', 'state', 'postal_code',
   'country', 'linkedin_url', 'github_url', 'portfolio_url', 'current_title',
 ];
 const $ = (selector, scope = document) => scope.querySelector(selector);

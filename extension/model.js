@@ -5,7 +5,7 @@ export const SCHEMA_VERSION = 1;
 const KEYS = { profile: "jobpilot_profile_v1", applications: "jobpilot_applications_v1", resumes: "jobpilot_resumes_v1" };
 const INITIALIZATION_MARKER = "jobpilot_initialized_v1";
 const MAX_RESUME_BYTES = 10 * 1024 * 1024;
-const PROFILE_FIELDS = ["first_name", "last_name", "email", "phone", "city", "state", "country", "postal_code", "linkedin_url", "github_url", "portfolio_url", "current_title", "selected_resume_id"];
+const PROFILE_FIELDS = ["first_name", "last_name", "preferred_name", "email", "phone", "address_line1", "address_line2", "city", "state", "country", "postal_code", "linkedin_url", "github_url", "portfolio_url", "current_title", "selected_resume_id"];
 const MIME_TYPES = { pdf: "application/pdf" };
 
 export function emptyProfile() {

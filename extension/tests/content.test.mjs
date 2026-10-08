@@ -196,6 +196,23 @@ test("job capture reads JSON-LD as data and does not execute description HTML", 
   });
 });
 
+test('Ashby capture gets the company from its page title when application metadata is absent', async () => {
+  await fixture('<title>Platform Engineer @ Example Company</title><h1>Platform Engineer</h1>', async page => {
+    // Same DOM as an Ashby application; no JSON-LD JobPosting is present.
+    await page.route('https://jobs.ashbyhq.com/**', route=>route.fulfill({contentType:'text/html',body:'<title>Platform Engineer @ Example Company</title><h1>Platform Engineer</h1>'}));
+    await page.goto('https://jobs.ashbyhq.com/example/req-123/application');
+    const previous=globalThis.chrome;
+    globalThis.chrome={tabs:{query:async()=>[{id:1,url:page.url()}]},scripting:{executeScript:async request=>[
+      {frameId:0,result:await page.evaluate(source=>(0,eval)('('+source+')')(),request.func.toString())}
+    ]}};
+    try {
+      const captured=await captureCurrentJob();
+      assert.equal(captured.title,'Platform Engineer');
+      assert.equal(captured.company,'Example Company');
+    } finally {globalThis.chrome=previous;}
+  });
+});
+
 test("the real action callbacks fill a modern Greenhouse form and independently confirm its nested resume", async () => {
   await fixture(`<form id="application-form">
     <label>First Name *<input id="first_name" value="Applicant correction" required></label>
