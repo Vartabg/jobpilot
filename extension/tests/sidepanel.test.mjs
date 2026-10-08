@@ -266,10 +266,14 @@ test("closing the panel during a pending action restores an interrupted result w
     await page.locator('#fill-details').click();
     await expect(page.locator('#report-summary')).toContainText('Action in progress');
     await expect.poll(() => page.evaluate(() => __storageData.jobpilot_ui_v1?.report?.status)).toBe('running');
+    await expect.poll(() => page.evaluate(() => __storageData.jobpilot_runs_v1?.[0]?.status)).toBe('running');
     await page.reload();
     await expect(page.locator('#report-summary')).toContainText('Autofill interrupted');
     await expect(page.locator('#report-details')).toContainText('Its final result is unknown');
     await expect(page.locator('#fill-details')).toBeEnabled();
+    assert.equal(await page.evaluate(() => __storageData.jobpilot_runs_v1.length), 1);
+    assert.equal(await page.evaluate(() => __storageData.jobpilot_runs_v1[0].health), 'problem');
+    assert.ok(await page.evaluate(() => __storageData.jobpilot_runs_v1[0].warnings.includes('panel_closed')));
     assert.equal(await page.evaluate(() => __extensionCalls.length), 0, 'opening the panel must not replay an uncertain action');
   });
 });
@@ -283,6 +287,98 @@ test("an interrupted inspection cannot claim that no required fields remain", as
     await page.locator('#inspect-form').click();
     await expect(page.locator('#report-summary')).toContainText('Inspection was incomplete');
     await expect(page.locator('#report-summary')).not.toContainText('No empty visible required fields');
+  });
+});
+
+test('a failed autofill is automatically logged, survives another run and exports diagnostic evidence only', async () => {
+  await workspace(async page => {
+    await page.locator('#capture-job').click();
+    await page.evaluate(() => {
+      const execute = chrome.scripting.executeScript;
+      chrome.scripting.executeScript = async request => request.args?.[0]?.action === 'details'
+        ? [{frameId: 0, result: {status: 'partial', pageUrl: 'https://boards.greenhouse.io/example/jobs/123?secret=token',
+          failed: [{label: 'Location', value: 'private address', reason: 'This field changed or is ambiguous. Review it manually.'}],
+          resume: {status: 'failed', filename: 'private.pdf', dataUrl: 'private bytes', message: 'Exception for private@example.org'}}}]
+        : execute(request);
+    });
+    await page.locator('#fill-details').click();
+    await expect(page.locator('#report-log-status')).toContainText('Saved in History');
+    await expect(page.locator('#problem-count')).toHaveText('1');
+    await page.locator('#inspect-form').click();
+    await expect(page.locator('#report-summary')).toContainText('required');
+    await page.locator('#clear-report').click();
+    await page.reload();
+    await page.locator('[data-tab="history"]').click();
+    await expect(page.locator('#run-history')).toContainText('Fill details');
+    await expect(page.locator('#run-history')).toContainText('Location');
+    assert.equal(await page.evaluate(() => __storageData.jobpilot_runs_v1.length), 2);
+    const downloading = page.waitForEvent('download');
+    await page.locator('#export-problems').click();
+    const download = await downloading;
+    const text = await readFile(await download.path(), 'utf8');
+    const exported = JSON.parse(text);
+    assert.equal(exported.runs.length, 1);
+    assert.equal(exported.runs[0].frames[0].failed[0].reason, 'ambiguous_field');
+    for (const secret of ['private address', 'private.pdf', 'private bytes', 'private@example.org', '?secret', 'token']) assert.ok(!text.includes(secret));
+    const path = process.env.JOBPILOT_TEST_ARTIFACTS || '/tmp/jobpilot-extension-checks';
+    await mkdir(path, {recursive: true});
+    await page.screenshot({path: path + '/jobpilot-problem-history.png', fullPage: true});
+  });
+});
+
+test('expected manual answers stay out of open problems until reported, with reversible resolution', async () => {
+  await workspace(async page => {
+    await page.locator('#capture-job').click();
+    await page.locator('#inspect-form').click();
+    await expect(page.locator('#report-log-status')).toContainText('Saved in History');
+    await expect(page.locator('#problem-count')).toHaveText('0');
+    await page.locator('#report-problem').click();
+    await expect(page.locator('[data-tab="history"]')).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('#problem-count')).toHaveText('1');
+    await page.getByRole('button', {name: 'Mark resolved', exact: true}).click();
+    await expect(page.locator('#problem-count')).toHaveText('0');
+    await page.locator('#history-filter').selectOption('all');
+    await expect(page.locator('#run-history')).toContainText('Resolved');
+    await page.getByRole('button', {name: 'Reopen', exact: true}).click();
+    await expect(page.locator('#problem-count')).toHaveText('1');
+    await page.reload();
+    await expect(page.locator('#problem-count')).toHaveText('1');
+  });
+});
+
+test('diagnostic storage failure preserves action results without retrying autofill', async () => {
+  await workspace(async page => {
+    await page.locator('#capture-job').click();
+    await page.evaluate(() => {
+      const send = chrome.runtime.sendMessage;
+      chrome.runtime.sendMessage = message => message.operation === 'saveRun'
+        ? Promise.resolve({ok: false, error: 'Storage quota exceeded'}) : send(message);
+    });
+    await page.locator('#fill-details').click();
+    await expect(page.locator('#notice')).toContainText('history could not be saved');
+    await expect(page.locator('#report-summary')).toContainText('confirmed filled');
+    await expect(page.locator('#report-problem')).toBeDisabled();
+    assert.equal(await page.evaluate(() => __extensionCalls.filter(call => call.args?.[0]?.action === 'details').length), 1);
+  });
+});
+
+test('the last pre-history report migrates once without replaying actions or copying answers', async () => {
+  await workspace(async page => {
+    await page.evaluate(async () => chrome.storage.local.set({jobpilot_ui_v1: {
+      job: {company: 'Example', title: 'Engineer', url: 'https://jobs.ashbyhq.com/example/req/application'},
+      report: {uiAction: 'details', status: 'partial', checkedAt: '2026-10-08T10:00:00Z',
+        frames: [{failed: [{label: 'Email', value: 'private@example.org', reason: 'This field changed or is ambiguous. Review it manually.'}]}]},
+    }}));
+    await page.reload();
+    await expect(page.locator('#report-log-status')).toContainText('Saved in History');
+    await page.reload();
+    await expect(page.locator('#problem-count')).toHaveText('1');
+    const records = await page.evaluate(() => __storageData.jobpilot_runs_v1);
+    assert.equal(records.length, 1);
+    assert.equal(records[0].startedAt, '2026-10-08T10:00:00.000Z');
+    assert.equal(records[0].version, '', 'a migrated report must not claim it ran on the new version');
+    assert.ok(!JSON.stringify(records).includes('private@example.org'));
+    assert.equal(await page.evaluate(() => __extensionCalls.length), 0);
   });
 });
 

@@ -14,7 +14,7 @@ import zipfile
 from pathlib import Path
 
 SOURCE = Path(__file__).resolve().parents[1] / 'extension'
-FILES = ('manifest.json', 'background.js', 'model.js', 'actions.js', 'content.js',
+FILES = ('manifest.json', 'background.js', 'model.js', 'diagnostics.js', 'actions.js', 'content.js',
          'sidepanel.html', 'sidepanel.js', 'sidepanel.css', 'README.md')
 
 

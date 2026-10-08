@@ -38,6 +38,16 @@ To update an unpacked installation without creating a second extension identity,
 
 A résumé result of **prepared** means a file was placed in the upload control. **Accepted** means the page displayed attachment evidence without a detected upload error; the employer's final application review remains the authority. An unlabelled or unrelated upload control is never treated as a résumé field.
 
+## Run history and problem reports
+
+Version 0.8.3 adds **History**. Inspect fields, Fill details, and Attach résumé automatically save a local record before starting and update it as frame results return. The last 50 runs survive closing the panel, clearing the current report, and later attempts. When updating from an older version, the most recent report is imported once. Earlier overwritten reports cannot be recovered.
+
+Failed controls, unmapped questions, interruptions, and unsuccessful or unconfirmed uploads appear under **Open problems**. Expected manual questions and missing profile facts appear under **All runs** without being marked as bugs. If a result looks wrong despite a success message, choose **Report a problem** beneath the report. **Mark resolved** hides a reviewed case from open problems; **Reopen** restores it.
+
+Use **Export run** for one case or **Export open problems** for the current backlog. The JSON contains a run ID, time, version, public job link, field labels, outcomes, and fixed reason codes. It excludes form answers, profile values, résumé names and contents, raw exceptions, HTML, URL query strings and fragments. Contact-like text in labels is redacted. Unexpected exception details become an `unknown` code. Nothing is sent automatically; exports are separate from your profile backup. Logs are bounded to 200 field entries and eight frames per run, with truncation indicated.
+
+The history is evidence from extension actions, not a record of employer submissions, page validation after manual edits, or activity while JobPilot is idle. It cannot diagnose an employer-side rejection by itself. If diagnostic storage is unavailable, the action result stays visible and JobPilot does not retry the form automatically.
+
 ## Data and backups
 
 Profile, résumé files, and application records stay in the extension's local browser storage. They are not a cloud backup. Export a backup before reinstalling or removing the extension; import only a backup you trust, and review its contents. Backups contain profile, application records, and résumé metadata, but **omit PDF file bytes**. Keep the original PDFs and add them again after restoring in another browser. Filling a supported form intentionally shares the selected details or résumé with that employer's page.
