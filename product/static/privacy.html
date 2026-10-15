@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Application privacy scan · JobPilot</title>
+    <link rel="stylesheet" href="/static/app.css" />
+    <link rel="stylesheet" href="/static/privacy.css" />
+    <script type="module" src="/static/privacy-page.js"></script>
+  </head>
+  <body class="privacy-page">
+    <a class="skip" href="#main">Skip to content</a>
+    <header class="top">
+      <a class="brand" href="/">↗ JobPilot</a>
+      <span class="local">Application privacy scan</span>
+      <a class="button quiet" href="/">Back to JobPilot</a>
+    </header>
+    <main id="main" tabindex="-1">
+      <p class="eyebrow">Before you apply</p>
+      <h1>See what an application asks.</h1>
+      <p class="intro">
+        Check requests for personal information, whether you can decline, and
+        what the employer says it will do with it. Review the questions before
+        deciding what to share.
+      </p>
+
+      <section class="panel" aria-labelledby="scan-heading">
+        <h2 id="scan-heading">Compare application forms</h2>
+        <p>
+          Paste up to 10 direct Greenhouse job links, one per line. For other
+          systems, sign-in pages, or later application steps, use the page scanner
+          below.
+        </p>
+        <form id="scan-form">
+          <label for="job-urls">Job links</label>
+          <textarea id="job-urls" rows="4" required aria-describedby="url-help"
+            placeholder="https://job-boards.greenhouse.io/company/jobs/123456"></textarea>
+          <p id="url-help" class="hint">Public form questions only. No résumé or applicant answers are needed.</p>
+          <button id="scan-button" class="primary" type="submit">Scan job links</button>
+        </form>
+      </section>
+
+      <section class="panel" aria-labelledby="page-scan-heading">
+        <h2 id="page-scan-heading">Inspect the application you have open</h2>
+        <p>
+          Drag the scanner to your browser’s bookmarks bar. Open an application
+          step and choose that bookmark. It reads field labels, choices, required
+          markers, and notices from the visible form. It does not read your
+          answers, attach files, fill fields, or submit the application.
+        </p>
+        <div class="actions">
+          <a id="scan-bookmark" class="button" draggable="true" hidden>Scan this application</a>
+          <span id="bookmark-status" class="hint">Preparing the page scanner…</span>
+        </div>
+        <p id="bookmark-instruction" class="hint">
+          Copy the scanner’s field metadata, return here, and paste it below.
+          Repeat on each application step you want to inspect. Embedded forms
+          may need to be opened in their own tab.
+        </p>
+        <details>
+          <summary>Analyze captured field metadata</summary>
+          <form id="capture-form">
+            <label for="captured-fields">Captured field metadata</label>
+            <textarea id="captured-fields" rows="7" spellcheck="false" required
+              aria-describedby="capture-help" placeholder='{"source_url":"https://…","fields":[{"label":"Legal address","required":true,"options":[]}],"notices":[]}'></textarea>
+            <p id="capture-help" class="hint">
+              Paste the scanner’s JSON. Review it first and remove anything you
+              do not want analyzed. Only question metadata belongs here; do not
+              paste filled answers or your résumé.
+            </p>
+            <button id="analyze-button" class="primary" type="submit">Analyze captured questions</button>
+          </form>
+        </details>
+      </section>
+
+      <div id="status" role="status" aria-live="polite" aria-atomic="true"></div>
+      <div id="error" class="scan-error" role="alert" hidden></div>
+
+      <section id="results-section" aria-labelledby="results-heading" hidden>
+        <div class="results-heading">
+          <div>
+            <h2 id="results-heading" tabindex="-1">Your scan results</h2>
+            <p id="result-summary" class="meta"></p>
+          </div>
+          <button id="download-report" type="button">Download report JSON</button>
+        </div>
+        <p class="coverage-note">
+          <strong>Coverage is incomplete.</strong> These results cover only the
+          inspected fields. Later steps, sign-in, conditional questions, and
+          embedded forms may reveal more requests. A scan cannot establish how
+          an employer actually uses your information.
+        </p>
+        <div class="toolbar privacy-toolbar">
+          <div class="filter-control">
+            <label for="finding-filter">Show</label>
+            <select id="finding-filter" aria-describedby="filter-help">
+              <option value="all">All flagged requests</option>
+              <option value="required">Required responses</option>
+            </select>
+          </div>
+          <p id="filter-help" class="hint">These questions require an answer without a separate decline-to-answer choice. A required Yes/No question does not require a Yes. Unknown requirements still need review.</p>
+        </div>
+        <div id="reports"></div>
+      </section>
+
+      <section class="panel context-panel" aria-labelledby="context-heading">
+        <h2 id="context-heading">Why might a form ask?</h2>
+        <p>
+          Field help or an employer’s stated purpose appears with each finding
+          when available. If the inspected field does not explain a purpose, the
+          report says so. General reporting practices do not establish what a
+          particular company does with your answers.
+        </p>
+        <ul class="context-list">
+          <li>
+            Some race data collection supports applicant-flow monitoring. The
+            EEOC advises keeping it separate from qualification and selection
+            information. <a href="https://www.eeoc.gov/pre-employment-inquiries-and-race" target="_blank" rel="noopener noreferrer">EEOC guidance on race inquiries</a>.
+          </li>
+          <li>
+            Questions about sex, sexual orientation, or transgender status can
+            raise concerns about relevance and discrimination. A flag asks you
+            to review the request; it is not a legal finding.
+            <a href="https://www.eeoc.gov/pre-employment-inquiries-and-gender" target="_blank" rel="noopener noreferrer">EEOC guidance on gender inquiries</a>.
+          </li>
+          <li>
+            Covered federal contractors invite veteran self-identification for
+            compliance and outreach. Applicant disclosure is voluntary.
+            <a href="https://www.dol.gov/agencies/ofccp/faqs/vevraa" target="_blank" rel="noopener noreferrer">DOL veteran self-identification FAQs</a>.
+          </li>
+        </ul>
+      </section>
+      <div id="copy-fallback"></div>
+    </main>
+    <footer>JobPilot · Review the request. Choose what to share.</footer>
+  </body>
+</html>

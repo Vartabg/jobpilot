@@ -1,0 +1,265 @@
+.privacy-page main {
+  max-width: 1120px;
+  margin: auto;
+}
+.privacy-page h1 {
+  max-width: 780px;
+}
+.privacy-page .brand {
+  min-height: 44px;
+}
+.privacy-page .intro {
+  margin-bottom: 28px;
+}
+.privacy-page textarea {
+  margin-top: 7px;
+  overflow-wrap: anywhere;
+}
+.privacy-page #captured-fields {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 14px;
+}
+.privacy-page .actions .hint {
+  align-self: center;
+  margin: 0;
+}
+.privacy-page .scan-error {
+  border: 1px solid var(--red);
+  border-radius: 8px;
+  padding: 16px;
+  color: var(--red);
+  background: #fff0ef;
+  margin-bottom: 22px;
+  overflow-wrap: anywhere;
+}
+.results-heading,
+.report-heading,
+.finding-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.results-heading h2,
+.report-heading h3 {
+  margin-bottom: 8px;
+}
+.results-heading > div,
+.report-heading > div,
+.finding-heading > h4 {
+  min-width: 0;
+}
+.coverage-note {
+  padding: 18px 20px;
+  border: 1px solid #8c9e89;
+  border-radius: 8px;
+  background: var(--soft);
+  font-size: 14px;
+}
+.coverage-note strong {
+  display: block;
+  margin-bottom: 4px;
+}
+.privacy-toolbar {
+  align-items: center;
+  flex-wrap: wrap;
+}
+.privacy-toolbar .filter-control {
+  max-width: 320px;
+  flex: 1 1 240px;
+}
+.privacy-toolbar select {
+  margin-top: 7px;
+}
+.privacy-toolbar .hint {
+  flex: 1 1 240px;
+  margin: 0;
+}
+.privacy-report {
+  overflow-wrap: anywhere;
+}
+.report-link {
+  display: block;
+  max-width: 100%;
+  min-height: 44px;
+  padding: 10px 0;
+  font-size: 13px;
+  margin-bottom: 14px;
+}
+.report-meta {
+  font-size: 13px;
+  color: var(--muted);
+  margin-bottom: 18px;
+}
+.report-findings {
+  display: grid;
+  gap: 14px;
+}
+.finding {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 18px;
+}
+.finding-heading h4 {
+  font-size: 17px;
+  line-height: 1.4;
+  margin: 0;
+}
+.finding-badge {
+  display: inline-block;
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 650;
+  padding: 4px 8px;
+  border: 1px solid #849580;
+  border-radius: 5px;
+  background: var(--soft);
+}
+.finding-badge.review {
+  color: #713e0a;
+  background: #fff2de;
+  border-color: #ba8546;
+}
+.finding-category {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 7px 0 14px;
+}
+.finding dl {
+  display: grid;
+  grid-template-columns: minmax(130px, 0.3fr) minmax(0, 1fr);
+  gap: 7px 18px;
+  font-size: 14px;
+  margin: 0;
+}
+.finding dt {
+  font-weight: 600;
+}
+.finding dd {
+  margin: 0;
+}
+.finding-explanation {
+  font-size: 14px;
+  margin: 14px 0 0;
+}
+.finding details {
+  margin-top: 14px;
+  font-size: 14px;
+}
+.finding ul,
+.notice-list,
+.context-list {
+  padding-left: 22px;
+  margin: 0;
+}
+.finding li,
+.notice-list li,
+.context-list li {
+  margin: 8px 0;
+}
+.report-notices {
+  margin-top: 18px;
+  font-size: 14px;
+}
+.report-notices h4 {
+  font-size: 15px;
+  margin: 0 0 8px;
+}
+.context-panel {
+  margin-top: 28px;
+  font-size: 14px;
+}
+.context-list {
+  color: var(--muted);
+}
+.privacy-page #results-heading:focus {
+  outline: 3px solid #195fb4;
+  outline-offset: 4px;
+}
+@media (max-width: 600px) {
+  .privacy-page .top .button {
+    margin-left: auto;
+  }
+  .privacy-page .panel,
+  .finding {
+    padding: 16px;
+  }
+  .finding dl {
+    display: block;
+  }
+  .finding dd {
+    margin: 2px 0 12px;
+  }
+  .privacy-page .results-heading button,
+  .privacy-page form button {
+    width: 100%;
+  }
+  .privacy-toolbar .filter-control {
+    max-width: none;
+  }
+  .finding-badge {
+    flex-shrink: 1;
+  }
+}
+@media (forced-colors: active) {
+  .privacy-page {
+    --ink: CanvasText;
+    --muted: CanvasText;
+    --paper: Canvas;
+    --line: CanvasText;
+    --green: LinkText;
+    --soft: Canvas;
+    --white: Canvas;
+    --red: CanvasText;
+    color: CanvasText;
+    background: Canvas;
+  }
+  .privacy-page .top,
+  .privacy-page .panel,
+  .privacy-page .finding,
+  .privacy-page .finding-badge,
+  .privacy-page .coverage-note,
+  .privacy-page .empty,
+  .privacy-page .scan-error {
+    color: CanvasText;
+    background: Canvas;
+  }
+  .privacy-page a {
+    color: LinkText;
+  }
+  .privacy-page .skip {
+    background: Canvas;
+  }
+  .privacy-page button,
+  .privacy-page .button,
+  .privacy-page input,
+  .privacy-page textarea,
+  .privacy-page select {
+    color: ButtonText;
+    background: ButtonFace;
+    border-color: ButtonText;
+  }
+  .privacy-page button:disabled {
+    opacity: 1;
+    color: GrayText;
+  }
+  .privacy-page #status,
+  .privacy-page #status.error {
+    color: CanvasText;
+  }
+  .coverage-note,
+  .finding,
+  .finding-badge,
+  .privacy-page .scan-error {
+    border: 1px solid CanvasText;
+  }
+  .finding-badge.review,
+  .privacy-page .scan-error {
+    color: CanvasText;
+  }
+  .privacy-page :focus-visible,
+  .privacy-page #results-heading:focus {
+    outline-color: Highlight;
+  }
+}

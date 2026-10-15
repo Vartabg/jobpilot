@@ -120,6 +120,11 @@ export function showJob(job, state) {
     link.target = "_blank";
     link.rel = "noopener noreferrer";
     actions.append(link);
+    const privacy = node("a", "Scan application privacy", "button");
+    privacy.href = "/privacy?url=" + encodeURIComponent(job.url);
+    privacy.target = "_blank";
+    privacy.rel = "noopener noreferrer";
+    actions.append(privacy);
   }
   const draftButton = button(
     "Prepare application",
