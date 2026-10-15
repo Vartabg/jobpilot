@@ -2,7 +2,7 @@ import {fileAttachment} from './capsule.js';
 import {el, field, button, option, dated, guard, downloadAttachment} from './workspace-ui.js';
 
 export function mountCapsules(root, {call, notify, download}) {
-  let context = {applications: [], resumes: [], stories: []}, pending = null;
+  let context = {applications: [], resumes: [], stories: []}, pending = null, initialized = false, refreshVersion = 0;
   const run = action => guard(root, notify, action);
   const form = el('form'), existing = field('Start from a tracked application', {tag: 'select'});
   const company = field('Company', {required: true}), title = field('Role', {required: true});
@@ -84,7 +84,7 @@ export function mountCapsules(root, {call, notify, download}) {
     const seal = button('Seal this application record', () => void run(async () => {
       if (!confirm.input.checked) throw new Error('Confirm your submission and review before sealing.');
       const result = await call('sealCapsule', {...pending, confirmed: true});
-      invalidate(); form.reset(); answers.replaceChildren(); submitted.input.value = localDate(new Date());
+      invalidate(); form.reset(); initialized = false; answers.replaceChildren(); submitted.input.value = localDate(new Date());
       await refresh(); notify(`Sealed ${result.application.company}. The saved record will not change when you edit your résumé or stories.`);
     }), 'primary');
     review.append(confirm.wrap, el('div', undefined, 'actions'));
@@ -104,10 +104,14 @@ export function mountCapsules(root, {call, notify, download}) {
     detail.append(actions, el('p', 'SHA-256 integrity checksum'), el('code', capsule.integrity.sha256)); card.append(detail);
   }
   async function refresh() {
-    context = await call('getContext');
+    const version = ++refreshVersion;
+    const [nextContext, capsules] = await Promise.all([call('getContext'), call('listCapsules')]);
+    if (version !== refreshVersion) return;
+    const selectedApplication = existing.input.value, selectedResume = initialized ? resume.input.value : nextContext.selectedResumeId;
+    context = nextContext; initialized = true;
     existing.input.replaceChildren(); option(existing.input, '', 'Enter details yourself');
     for (const app of context.applications) option(existing.input, app.id, `${app.company} · ${app.title} (${app.status})`);
-    const selectedResume = resume.input.value || context.selectedResumeId;
+    existing.input.value = context.applications.some(app => app.id === selectedApplication) ? selectedApplication : '';
     resume.input.replaceChildren(); option(resume.input, '', 'No saved résumé selected');
     for (const file of context.resumes) if (!file.missingFile) option(resume.input, file.id, file.label || file.name);
     resume.input.value = selectedResume || '';
@@ -117,7 +121,7 @@ export function mountCapsules(root, {call, notify, download}) {
       const check = field(`${story.title} · revision ${story.revision}`, {type: 'checkbox'}); check.input.value = story.id; check.input.checked = checked.has(story.id); storyChoices.append(check.wrap);
     }
     if (!context.stories.some(v => v.reviewedAt)) storyChoices.append(el('p', 'Review a story in Career memory to include it here.', 'fine-print'));
-    const capsules = await call('listCapsules'); list.replaceChildren();
+    list.replaceChildren();
     if (!capsules.length) list.append(el('p', 'Your first sealed application will appear here.', 'empty'));
     for (const capsule of capsules) {
       const card = el('article', undefined, 'card');
@@ -129,13 +133,15 @@ export function mountCapsules(root, {call, notify, download}) {
   importFile.input.addEventListener('change', () => void run(async () => {
     incoming = null; importPreview.replaceChildren();
     const file = importFile.input.files[0]; if (!file) return;
-    if (file.size > 24 * 1024 * 1024) throw new Error('Capsule imports must be 24 MiB or smaller.');
-    const {validateCapsule} = await import('./capsule.js'); incoming = await validateCapsule(JSON.parse(await file.text()));
-    importPreview.append(el('h3', 'Review capsule import'), el('p', `${incoming.application.company} · ${incoming.application.title}\n${dated(incoming.submittedAt)}\nChecksum and attachments validated.`),
-      button('Import this capsule', () => void run(async () => {
-        const result = await call('importCapsule', incoming); incoming = null; importPreview.replaceChildren(); importFile.input.value = ''; await refresh();
-        notify(result.added ? 'Capsule restored with its original materials.' : 'That identical capsule is already saved.');
-      })));
+    try {
+      if (file.size > 24 * 1024 * 1024) throw new Error('Capsule imports must be 24 MiB or smaller.');
+      const {validateCapsule} = await import('./capsule.js'); incoming = await validateCapsule(JSON.parse(await file.text()));
+      importPreview.append(el('h3', 'Review capsule import'), el('p', `${incoming.application.company} · ${incoming.application.title}\n${dated(incoming.submittedAt)}\nChecksum and attachments validated.`),
+        button('Import this capsule', () => void run(async () => {
+          const result = await call('importCapsule', incoming); incoming = null; importPreview.replaceChildren(); importFile.input.value = ''; await refresh();
+          notify(result.added ? 'Capsule restored with its original materials.' : 'That identical capsule is already saved.');
+        })));
+    } finally { importFile.input.value = ''; }
   }));
   return {refresh};
 }

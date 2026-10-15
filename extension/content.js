@@ -48,7 +48,9 @@
     return !!String(el.value || '').trim();
   }
   function inventory(onError = () => {}) {
-    const controls = [...document.querySelectorAll("input, textarea, select, [role='combobox']:not(input), [role='checkbox']:not(input), [role='radiogroup'], .ashby-application-form-input-yesno")];
+    const scopes = applicationScopes();
+    const controls = [...document.querySelectorAll("input, textarea, select, [role='combobox']:not(input), [role='checkbox']:not(input), [role='radiogroup'], .ashby-application-form-input-yesno")]
+      .filter(el => (!scopes.length || scopes.some(scope => scope.contains(el))) && !unrelatedControl(el));
     const seenRadio = new Set();
     return controls.flatMap(el => { try {
       const choiceProxy=['radio','checkbox'].includes(el.type) && visible(el.closest('.ashby-application-form-input-radio-group-option, .ashby-application-form-input-checkbox-group-option'));
@@ -141,12 +143,14 @@
     const matches = options.filter(o => !o.disabled && o.getAttribute('aria-disabled') !== 'true' && optionMatches(o.textContent,rule,profile));
     return matches.length === 1 ? matches[0] : null;
   }
-  function setText(el, value) {
+  function setText(el, value, guard = () => true) {
     const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
     const setter = Object.getOwnPropertyDescriptor(proto,'value')?.set;
-    if (!setter) return false;
+    if (!setter || !guard()) return false;
     setter.call(el,value);
+    if (!guard()) return false;
     el.dispatchEvent(new Event('input',{bubbles:true}));
+    if (!guard()) return false;
     el.dispatchEvent(new Event('change',{bubbles:true}));
     return true;
   }
@@ -159,19 +163,24 @@
     const menus = [...scope.querySelectorAll("[role='listbox']")].filter(visible);
     return menus.length === 1 ? menus[0] : null;
   }
-  async function fillCombo(el, rule, profile) {
+  async function fillCombo(el, rule, profile, guard) {
     const value = rule.value;
     const ctrl = reactControl(el) || el, input = el.tagName === 'INPUT' ? el : ctrl.querySelector('input');
     const before = input?.value || '';
+    if (!guard()) return 'interrupted';
     input?.focus();
+    if (!guard()) return 'interrupted';
     ctrl.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,button:0}));
+    if (!guard()) return 'interrupted';
     ctrl.dispatchEvent(new MouseEvent('mouseup',{bubbles:true,button:0}));
-    if (input && !/^(Yes|No)$/.test(value)) setText(input,rule.key === 'location' ? profile.city : value);
+    if (!guard()) return 'interrupted';
+    if (input && !/^(Yes|No)$/.test(value)) setText(input,rule.key === 'location' ? profile.city : value,guard);
     const query = input?.value || '';
     const applicantChanged = () => !!selectedReact(el) || (input && input.value !== query);
     let option = null;
     for (let attempt=0; attempt<35; attempt++) {
       await pause(100);
+      if (!guard()) return 'interrupted';
       if (!el.isConnected) break;
       if (applicantChanged()) return 'preserved';
       const menu = menuFor(el);
@@ -180,24 +189,50 @@
       if (option) break;
     }
     if (option) {
+      if (!guard()) return 'interrupted';
       if (applicantChanged()) return 'preserved';
       option.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,button:0}));
+      if (!guard()) return 'interrupted';
       option.dispatchEvent(new MouseEvent('mouseup',{bubbles:true,button:0}));
+      if (!guard()) return 'interrupted';
       option.click();
       await pause(100);
+      if (!guard()) return 'interrupted';
     }
     const ok = !!option && el.getAttribute('aria-expanded')!=='true' && (optionMatches(selectedReact(el),rule,profile) || (!reactControl(el) && optionMatches(el.value || el.textContent,rule,profile)));
     if (!ok && applicantChanged()) return 'preserved';
+    if (!guard()) return 'interrupted';
     (input || ctrl).dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',code:'Escape',bubbles:true}));
+    if (!guard()) return 'interrupted';
     input?.blur();
-    if (!ok && input?.isConnected && !selectedReact(el) && input.value === query) setText(input,before);
+    if (!ok && input?.isConnected && !selectedReact(el) && input.value === query) setText(input,before,guard);
     return ok;
   }
+  const unrelatedControl = el => {
+    const form = el.closest('form, [role="form"]') || el.form;
+    const formName = [form?.getAttribute('aria-label'), ...(form?.getAttribute('aria-labelledby') || '').split(/\s+/).map(id => document.getElementById(id)?.textContent),
+      form?.querySelector(':scope > legend, :scope > h1, :scope > h2, :scope > h3')?.textContent].filter(Boolean).join(' ');
+    return !!el.closest('header, footer, nav, [role="search"], [role="banner"], [role="contentinfo"], [role="navigation"]')
+      || /(?:^|[\s_-])(?:newsletter|subscribe|subscription|search|login|sign[\s_-]?in)(?:$|[\s_-])/i.test(`${form?.id || ''} ${form?.className || ''}`.replace(/([a-z])([A-Z])/g, '$1 $2'))
+      || /\b(newsletter|subscribe|subscription)\b|^(?:search|log[ -]?in|sign[ -]?in)\b/i.test(formName);
+  };
+  function applicationScopes() {
+    const matches = [...document.querySelectorAll('form, [role="form"], #application-form')].filter(scope =>
+      (/application|ashby/i.test(`${scope.id} ${scope.className}`) || [...scope.querySelectorAll("input[type='file']")].some(el =>
+        identifiers(el).some(id => /\b(resume|cv|curriculum vitae)\b/.test(id)) && !identifiers(el).some(id => /cover letter/.test(id))))
+      && [...scope.querySelectorAll('input, textarea, select, [role="combobox"]')].some(el => !unrelatedControl(el) && !el.disabled && !el.readOnly
+        && !['hidden', 'submit', 'button', 'reset'].includes(el.type) && (visible(el) || el.type === 'file' && visible(wrapper(el)))));
+    return matches.filter(scope => !matches.some(other => other !== scope && other.contains(scope)));
+  }
   function resumeTarget() {
-    const matches = [...document.querySelectorAll("input[type='file']")].filter(el => identifiers(el).some(id => /\b(resume|cv|curriculum vitae)\b/.test(id)) && !identifiers(el).some(id => /cover letter/.test(id)));
+    const scopes = applicationScopes();
+    const matches = [...document.querySelectorAll("input[type='file']")].filter(el => !el.disabled && !unrelatedControl(el)
+      && (!scopes.length || scopes.some(scope => scope.contains(el))) && (visible(el) || visible(wrapper(el)))
+      && identifiers(el).some(id => /\b(resume|cv|curriculum vitae)\b/.test(id)) && !identifiers(el).some(id => /cover letter/.test(id)));
     return matches.length === 1 ? {el:matches[0],wrapper:wrapper(matches[0])} : null;
   }
-  async function attachResume(resume) {
+  async function attachResume(resume, guard) {
+    if (!guard()) return {status:'not-requested',message:'No file was selected because the active application changed.'};
     const target = resumeTarget();
     if (!target) return {status:'no-target',message:'No unique résumé upload field found. Attach the file manually.'};
     if (target.el.files?.length || target.el.value || attachedText(target.wrapper)) return {status:'already-attached',message:'An existing attachment was preserved.'};
@@ -208,11 +243,16 @@
       const raw = atob(resume.dataUrl.split(',')[1]), bytes = Uint8Array.from(raw,char => char.charCodeAt(0));
       const transfer = new DataTransfer();
       transfer.items.add(new File([bytes],filename,{type:'application/pdf'}));
+      if (!guard()) return {status:'not-requested',message:'No file was selected because the active application changed.'};
       target.el.files = transfer.files;
+      const interrupted = () => ({status:'prepared',filename,message:'File selected before the page or active tab changed. Its acceptance could not be verified. Inspect the current page.'});
+      if (!guard()) return interrupted();
       target.el.dispatchEvent(new Event('input',{bubbles:true}));
+      if (!guard()) return interrupted();
       target.el.dispatchEvent(new Event('change',{bubbles:true}));
       for (let attempt=0; attempt<16; attempt++) {
         await pause(150);
+        if (!guard()) return interrupted();
         const scope = target.wrapper?.isConnected ? target.wrapper : resumeTarget()?.wrapper, text = scope?.innerText || '';
         const alerts = [...(scope?.querySelectorAll("[role='alert'], .error, [class*='Error'], [class*='error']") || [])].filter(visible).map(el => el.textContent).join(' ');
         if (/failed|invalid|too large|unsupported|not (allowed|accepted)|error|unable/i.test(alerts)) return {status:'failed',filename,message:'The form reported an upload error. Review the page.'};
@@ -235,13 +275,29 @@
   }
   // Re-injecting the script must not let a second click race an existing run.
   const runtime = globalThis.__jobpilotAutofillRuntime ||= {running:false};
-  globalThis.__jobpilotRun = async ({action='inspect',profile={},resume=null}={}) => {
+  globalThis.__jobpilotRun = async ({action='inspect',profile={},resume=null,requireVisible=false}={}) => {
     if (!['inspect','details','resume'].includes(action)) throw new Error('Unknown JobPilot action');
     const report = {action,status:'complete',warnings:[],filled:[],skipped:[],failed:[],required:[],resume:{status:'not-requested',message:''},provider:location.hostname.includes('greenhouse') ? 'Greenhouse' : location.hostname.includes('lever') ? 'Lever' : location.hostname.includes('ashby') ? 'Ashby' : 'Unsupported',pageUrl:location.href};
     if (!hosts.has(location.hostname) || location.protocol !== 'https:') { report.skipped.push({label:'Page',reason:'This frame is outside the supported application hosts'}); return report; }
     const warn = message => { if (!report.warnings.includes(message)) report.warnings.push(message); };
+    let cancelled = false;
+    const noticeChange = () => { if (location.href !== report.pageUrl || requireVisible && document.visibilityState !== 'visible') cancelled = true; };
+    const noticePageHide = () => { cancelled = true; };
+    const guard = () => {
+      noticeChange();
+      if (!cancelled) return true;
+      report.status = 'interrupted'; warn('The application page changed or its tab is no longer active. Existing progress was preserved; inspect the current page before retrying.');
+      return false;
+    };
     if (runtime.running) { report.status='interrupted'; warn('Autofill is already running on this page. Wait for its report before retrying.'); return report; }
+    if (action !== 'inspect' && applicationScopes().length > 1) { report.status='interrupted'; warn('Several application forms are visible in this document. Open the intended form separately before autofilling.'); return report; }
     runtime.running=true;
+    if (action !== 'inspect') {
+      document.addEventListener('visibilitychange', noticeChange);
+      window.addEventListener('pagehide', noticePageHide);
+      window.addEventListener('popstate', noticeChange);
+      window.addEventListener('hashchange', noticeChange);
+    }
     const outcomes = new Map(), attempts = new Map();
     const record = (token,kind,item,rule=null,retryable=false) => outcomes.set(token,{kind,item,rule,retryable});
     try {
@@ -249,7 +305,7 @@
         const deadline = Date.now()+20000;
         let quietSince=Date.now();
         while (Date.now() < deadline) {
-          if (location.href !== report.pageUrl) { report.status='interrupted'; warn('The application page changed. Review the fields already filled, then inspect the new page.'); break; }
+          if (!guard()) break;
           const entries = inventory(warn);
           let pending;
           for (const entry of entries) {
@@ -278,31 +334,47 @@
             if (!rule.value) { record(token,'skipped',{label,reason:'No saved profile value'}); continue; }
             if (el.tagName==='SELECT') {
               const option=exactOption([...el.options].filter(o => !placeholderOption(o)),rule,profile);
-              if (option) { el.value=option.value; el.dispatchEvent(new Event('input',{bubbles:true})); el.dispatchEvent(new Event('change',{bubbles:true})); await pause(100); }
+              if (option) {
+                if (!guard()) break;
+                el.value=option.value;
+                if (!guard()) break;
+                el.dispatchEvent(new Event('input',{bubbles:true}));
+                if (!guard()) break;
+                el.dispatchEvent(new Event('change',{bubbles:true})); await pause(100);
+              }
             } else if (type==='combobox') {
-              if (await fillCombo(el,rule,profile)==='preserved') { record(token,'skipped',{label,reason:'Your dropdown answer or search changed during autofill and was preserved.'}); continue; }
+              const result=await fillCombo(el,rule,profile,guard);
+              if (result==='interrupted') break;
+              if (result==='preserved') { record(token,'skipped',{label,reason:'Your dropdown answer or search changed during autofill and was preserved.'}); continue; }
             }
-            else { setText(el,rule.value); await pause(100); }
+            else { setText(el,rule.value,guard); await pause(100); }
+            if (!guard()) break;
             const after=inventory(warn).filter(item => fieldToken(item,profile)===token);
             if (after.length===1 && acceptedValue(after[0].el,rule,profile)) record(token,'filled',{label,key:rule.key},rule);
             else record(token,'failed',{label,reason:'The form did not retain a valid, unambiguous match. Review this field.'},rule,!el.isConnected && after.length===1 && !after[0].answered);
           } catch (_) { record(token,'failed',{label,reason:'This control could not be filled. Other supported fields were still checked.'}); }
         }
         if (Date.now() >= deadline) { report.status='interrupted'; warn('The form kept changing or took too long. Review progress and retry remaining empty fields.'); }
-        const finalEntries=inventory(warn);
-        for (const [token,outcome] of outcomes) {
+        const finalEntries=guard() ? inventory(warn) : [];
+        for (const [token,outcome] of cancelled ? [] : outcomes) {
           if (outcome.kind==='filled') {
             const matches=finalEntries.filter(item => fieldToken(item,profile)===token);
             if (matches.length!==1 || !acceptedValue(matches[0].el,outcome.rule,profile)) record(token,'failed',{label:outcome.item.label,reason:'The form changed after filling this field. Review its current value.'});
           }
         }
-      } else if (action==='resume') report.resume=await attachResume(resume);
-      report.required=inventory(warn).filter(item => item.required && !item.answered).map(({label,type})=>({label,type}));
+      } else if (action==='resume') report.resume=await attachResume(resume,guard);
+      if (action==='inspect' || guard()) report.required=inventory(warn).filter(item => item.required && !item.answered).map(({label,type})=>({label,type}));
     } catch (_) {
       report.status='interrupted'; warn('Autofill was interrupted. Review the preserved progress and inspect the form before retrying.');
-    } finally { runtime.running=false; }
+    } finally {
+      runtime.running=false;
+      document.removeEventListener('visibilitychange', noticeChange);
+      window.removeEventListener('pagehide', noticePageHide);
+      window.removeEventListener('popstate', noticeChange);
+      window.removeEventListener('hashchange', noticeChange);
+    }
     for (const outcome of outcomes.values()) report[outcome.kind].push(outcome.item);
-    if (report.status==='complete' && (report.failed.length || report.warnings.length || report.resume.status==='failed')) report.status='partial';
+    if (report.status==='complete' && (report.failed.length || report.warnings.length || ['failed','no-target','prepared'].includes(report.resume.status))) report.status='partial';
     return report;
   };
 })();

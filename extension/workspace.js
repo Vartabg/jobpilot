@@ -45,12 +45,14 @@ let incoming;
 const preview = document.querySelector('#restore-preview'), input = document.querySelector('#restore-workspace');
 input.addEventListener('change', () => void guard(tools, notify, async () => {
   incoming = null; preview.hidden = true; const file = input.files[0]; if (!file) return;
-  if (file.size > 50 * 1024 * 1024) throw new Error('Workspace backup imports must be 50 MiB or smaller. Restore individual capsules for larger workspaces.');
-  const value = JSON.parse(await file.text());
-  if (value.schema !== 'jobpilot.workspace/v1' || !['stories', 'capsules', 'inbox'].every(key => Array.isArray(value[key]))) throw new Error('Choose a valid career workspace backup.');
-  incoming = value;
-  document.querySelector('#restore-summary').textContent = `${value.stories.length} stories · ${value.capsules.length} capsules · ${value.inbox.length} inbox records. Capsules are checksum-validated. Stories and tracker updates return to Inbox for review. Current records are preserved.`;
-  preview.hidden = false;
+  try {
+    if (file.size > 50 * 1024 * 1024) throw new Error('Workspace backup imports must be 50 MiB or smaller. Restore individual capsules for larger workspaces.');
+    const value = JSON.parse(await file.text());
+    if (value.schema !== 'jobpilot.workspace/v1' || !['stories', 'capsules', 'inbox'].every(key => Array.isArray(value[key]))) throw new Error('Choose a valid career workspace backup.');
+    incoming = value;
+    document.querySelector('#restore-summary').textContent = `${value.stories.length} stories · ${value.capsules.length} capsules · ${value.inbox.length} inbox records. Capsule checksums are checked during restore. Stories and tracker updates return to Inbox for review. Current records are preserved.`;
+    preview.hidden = false;
+  } finally { input.value = ''; }
 }));
 document.querySelector('#cancel-restore').addEventListener('click', () => { incoming = null; preview.hidden = true; input.value = ''; });
 document.querySelector('#confirm-restore').addEventListener('click', () => void guard(tools, notify, async () => {

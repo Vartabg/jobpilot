@@ -56,6 +56,19 @@ const rpc = (page, operation, ...args) => page.evaluate(async ({operation, args}
   if (!response.ok) throw new Error(response.error); return response.result;
 }, {operation, args});
 const call = (page, operation, ...args) => rpc(page, `workspace:${operation}`, ...args);
+async function delayOperation(page, operation) {
+  await page.evaluate(operation => {
+    const send = chrome.runtime.sendMessage;
+    globalThis.__delayedOperation = false;
+    chrome.runtime.sendMessage = async message => {
+      if (message.operation === `workspace:${operation}`) {
+        globalThis.__delayedOperation = true;
+        await new Promise(resolve => { globalThis.__releaseOperation = resolve; });
+      }
+      return send(message);
+    };
+  }, operation);
+}
 async function downloaded(page, action) {
   const waiting = page.waitForEvent('download'); await action(); const download = await waiting;
   return {name: download.suggestedFilename(), bytes: await readFile(await download.path())};
@@ -224,6 +237,192 @@ test('legacy story import previews and stages candidate accounts without trustin
   });
 });
 
+test('changing pasted inbox content or format invalidates its earlier review before staging', async () => {
+  await workspace(async page => {
+    await page.getByRole('tab', {name: 'Unified inbox'}).click(); const inbox = page.locator('#inbox');
+    const paste = inbox.getByLabel('Or paste job records'), preview = inbox.getByRole('button', {name: 'Preview pasted records'});
+    await paste.fill(JSON.stringify([{...job, status: 'submitted'}])); await preview.click();
+    await expect(inbox.getByRole('button', {name: 'Stage records for review'})).toBeVisible();
+    await paste.fill(JSON.stringify([{...job, status: 'rejected'}]));
+    await expect(inbox.getByRole('button', {name: 'Stage records for review'})).toHaveCount(0);
+    await preview.click(); await expect(inbox.locator('.import-preview')).toContainText('rejected');
+    await inbox.getByLabel('Pasted format').selectOption('csv');
+    await expect(inbox.getByRole('button', {name: 'Stage records for review'})).toHaveCount(0);
+    await preview.click(); await expect(page.locator('#workspace-notice')).toHaveAttribute('role', 'alert');
+    assert.equal((await call(page, 'getInbox')).entries.length, 0);
+  });
+});
+
+test('career memory locks editable fields during a delayed save and repeated actions create only one story', async () => {
+  await workspace(async page => {
+    const memory = page.locator('#memory'); await memory.getByLabel('Story title', {exact: true}).fill('One reviewed account');
+    await delayOperation(page, 'saveStory'); await memory.getByRole('button', {name: 'Save story', exact: true}).click();
+    await expect.poll(() => page.evaluate(() => globalThis.__delayedOperation)).toBe(true);
+    await expect(memory.getByLabel('Story title', {exact: true})).toBeDisabled();
+    await expect(memory.getByLabel('Question or role context')).toBeDisabled();
+    await memory.getByRole('button', {name: 'Save story', exact: true}).dispatchEvent('click');
+    await page.evaluate(() => globalThis.__releaseOperation());
+    await expect(memory.locator('article')).toHaveCount(1);
+    assert.equal((await call(page, 'listStories')).length, 1);
+    await expect(memory.getByLabel('Story title', {exact: true})).toBeEnabled();
+  });
+});
+
+test('capsule refresh and tab switches preserve an intentional empty résumé and tracked-application choice', async () => {
+  await workspace(async page => {
+    const resume = await rpc(page, 'addResume', {name: 'Default.pdf', size: pdf.length, type: 'application/pdf'}, `data:application/pdf;base64,${pdf.toString('base64')}`);
+    await rpc(page, 'saveProfile', {selected_resume_id: resume.id}); const app = await rpc(page, 'saveApplication', job, 'submitted');
+    await page.getByRole('tab', {name: 'Time capsules'}).click(); const capsules = page.locator('#capsules');
+    await capsules.getByLabel('Start from a tracked application').selectOption(app.id);
+    await capsules.getByLabel('Saved résumé used').selectOption('');
+    await capsules.getByRole('button', {name: 'Refresh sealed records'}).click();
+    await expect(capsules).not.toHaveAttribute('aria-busy', 'true');
+    await expect(capsules.getByLabel('Start from a tracked application')).toHaveValue(app.id);
+    await expect(capsules.getByLabel('Saved résumé used')).toHaveValue('');
+    await page.getByRole('tab', {name: 'Career memory'}).click(); await page.getByRole('tab', {name: 'Time capsules'}).click();
+    await expect(capsules.getByLabel('Saved résumé used')).toHaveValue('');
+    await expect(capsules.getByLabel('Company', {exact: true})).toHaveValue(job.company);
+  });
+});
+
+test('failed file imports clear their file controls so the same file can be selected again', async () => {
+  await workspace(async page => {
+    const bad = {name: 'retry.json', mimeType: 'application/json', buffer: Buffer.from('{broken')};
+    const memory = page.locator('#memory').getByLabel('Import story JSON'); await memory.setInputFiles(bad);
+    await expect(page.locator('#memory [role="alert"]')).not.toBeEmpty(); await expect(memory).toHaveValue('');
+    await page.getByRole('tab', {name: 'Time capsules'}).click(); const capsule = page.getByLabel('Import an exported capsule JSON');
+    await capsule.setInputFiles(bad); await expect(page.locator('#workspace-notice')).toHaveAttribute('role', 'alert'); await expect(capsule).toHaveValue('');
+    await page.locator('.backup-tools summary').click(); const restore = page.getByLabel('Restore workspace backup');
+    await restore.setInputFiles(bad); await expect(restore).toHaveValue('');
+    await expect(page.locator('#restore-preview')).toBeHidden();
+  });
+});
+
+test('older asynchronous refresh results cannot erase the latest memory, capsule choices or inbox tracker', async () => {
+  await workspace(async page => {
+    const saved = await call(page, 'saveStory', account);
+    const results = await page.evaluate(async ({story, job}) => {
+      const cases = [
+        {path: './memory-view.js', mount: 'mountMemory', op: 'listStories', old: [], latest: [story], marker: story.summary},
+        {path: './capsule-view.js', mount: 'mountCapsules', op: 'getContext', old: {applications: [], resumes: [], stories: []},
+          latest: {applications: [], resumes: [], stories: [story]}, marker: `${story.title} · revision ${story.revision}`},
+        {path: './inbox-view.js', mount: 'mountInbox', op: 'getInbox', old: {entries: [], applications: []},
+          latest: {entries: [], applications: [{...job, status: 'submitted'}]}, marker: `${job.company} · ${job.title}`},
+      ];
+      const output = [];
+      for (const config of cases) {
+        const root = document.createElement('section'); document.body.append(root); let first = true, release;
+        const view = (await import(config.path))[config.mount](root, {notify() {}, download() {}, call: async op => {
+          if (op !== config.op) return [];
+          if (first) { first = false; return new Promise(resolve => { release = () => resolve(config.old); }); }
+          return config.latest;
+        }});
+        const older = view.refresh(); await view.refresh(); release(); await older;
+        output.push({view: config.mount, keptLatest: root.textContent.includes(config.marker)}); root.remove();
+      }
+      return output;
+    }, {story: saved, job});
+    assert.deepEqual(results, ['mountMemory', 'mountCapsules', 'mountInbox'].map(view => ({view, keptLatest: true})));
+  });
+});
+
+test('memory new/cancel/delete and empty/Markdown exports preserve sealed story copies', async () => {
+  await workspace(async page => {
+    const saved = await call(page, 'saveStory', account);
+    const sealed = await call(page, 'sealCapsule', {confirmed: true, application: job, submittedAt: '2026-10-15T14:30:00Z',
+      answers: [], storyIds: [saved.id], storyVersions: {[saved.id]: `${saved.revision}:${saved.reviewedAt}`}});
+    await page.reload(); const memory = page.locator('#memory');
+    await memory.getByRole('button', {name: 'Edit story', exact: true}).click();
+    await memory.getByLabel('Story title', {exact: true}).fill('Unsaved edit');
+    await memory.getByRole('button', {name: 'Cancel editing'}).click();
+    await expect(memory.getByLabel('Story title', {exact: true})).toHaveValue('');
+    assert.equal((await call(page, 'listStories'))[0].title, saved.title);
+    await memory.getByLabel('Story title', {exact: true}).fill('Unsaved new account');
+    await memory.getByRole('button', {name: 'New story', exact: true}).click();
+    await expect(memory.getByLabel('Story title', {exact: true})).toHaveValue('');
+    const markdown = await downloaded(page, () => memory.getByRole('button', {name: 'Export matching stories as Markdown'}).click());
+    assert.match(markdown.bytes.toString(), /Truth boundaries/); assert.match(markdown.bytes.toString(), /Do not invent a team size/);
+    await memory.getByLabel('Question or role context').fill('no-matching-term');
+    await memory.getByRole('button', {name: 'Export matching stories as JSON'}).click();
+    await expect(memory.getByRole('alert')).toContainText('no matching stories');
+    await memory.getByLabel('Question or role context').fill('');
+    await memory.getByRole('button', {name: 'Delete story', exact: true}).click();
+    await expect(memory.locator('article')).toHaveCount(0);
+    assert.equal((await call(page, 'getCapsule', sealed.id)).stories[0].summary, saved.summary);
+  });
+});
+
+test('capsule answer removal, edit-after-preview, receipt download and duplicate import buttons retain exact outcomes', async () => {
+  await workspace(async page => {
+    await page.getByRole('tab', {name: 'Time capsules'}).click(); const capsules = page.locator('#capsules');
+    await capsules.getByLabel('Company', {exact: true}).fill(job.company); await capsules.getByLabel('Role', {exact: true}).fill(job.title);
+    await capsules.getByLabel('Job URL', {exact: true}).fill(job.url);
+    await capsules.getByRole('button', {name: 'Add a question and answer'}).click();
+    await capsules.getByLabel('Question', {exact: true}).fill('Missing answer'); await capsules.getByRole('button', {name: 'Review capsule', exact: true}).click();
+    await expect(page.locator('#workspace-notice')).toContainText('both the question');
+    await capsules.getByRole('button', {name: 'Remove this answer'}).click();
+    await capsules.getByRole('button', {name: 'Review capsule', exact: true}).click();
+    await capsules.getByRole('button', {name: 'Go back and edit'}).click();
+    await expect(capsules.getByRole('button', {name: 'Seal this application record'})).toBeHidden();
+    await capsules.getByLabel('Confirmation receipt').setInputFiles({name: 'receipt.txt', mimeType: 'text/plain', buffer: Buffer.from('Synthetic confirmation\nexact receipt')});
+    await capsules.getByRole('button', {name: 'Review capsule', exact: true}).click();
+    await capsules.getByLabel('Submission notes', {exact: true}).fill('Edited after preview');
+    await expect(capsules.getByRole('button', {name: 'Seal this application record'})).toBeHidden();
+    await capsules.getByRole('button', {name: 'Review capsule', exact: true}).click(); await capsules.getByLabel('I submitted this application').check();
+    await capsules.getByRole('button', {name: 'Seal this application record'}).click();
+    await capsules.getByRole('button', {name: 'Open saved materials'}).click();
+    const receipt = await downloaded(page, () => capsules.getByRole('button', {name: 'Download saved receipt'}).click());
+    assert.equal(receipt.bytes.toString(), 'Synthetic confirmation\nexact receipt');
+    const exported = await downloaded(page, () => capsules.getByRole('button', {name: 'Export complete capsule'}).click());
+    const capsule = JSON.parse(exported.bytes.toString()); assert.equal(capsule.submissionNote, 'Edited after preview');
+    await capsules.getByLabel('Import an exported capsule JSON').setInputFiles({name: 'same-capsule.json', mimeType: 'application/json', buffer: exported.bytes});
+    await capsules.getByRole('button', {name: 'Import this capsule'}).click();
+    await expect(page.locator('#workspace-notice')).toContainText('already saved'); assert.equal((await call(page, 'listCapsules')).length, 1);
+  });
+});
+
+test('inbox cancel/retry/dismiss and backup download/cancel/restore controls make only explicit changes', async () => {
+  await workspace(async page => {
+    await page.getByRole('tab', {name: 'Unified inbox'}).click(); const inbox = page.locator('#inbox');
+    const fixture = {name: 'retry.csv', mimeType: 'text/csv', buffer: Buffer.from(`Company,Role,URL,Status\nFixture Co,Customer engineer,${job.url},started\n`)};
+    await inbox.getByLabel('Import a tracker or shortlist').setInputFiles(fixture);
+    await inbox.getByRole('button', {name: 'Cancel import', exact: true}).click();
+    assert.equal((await call(page, 'getInbox')).entries.length, 0);
+    await inbox.getByLabel('Import a tracker or shortlist').setInputFiles(fixture);
+    await inbox.getByRole('button', {name: 'Stage records for review'}).click();
+    await inbox.getByRole('button', {name: 'Dismiss this import'}).click();
+    await inbox.getByLabel('Show inbox items').selectOption('all'); await expect(inbox).toContainText('Decision: dismiss');
+    assert.equal((await rpc(page, 'listApplications')).length, 0);
+    await page.locator('.backup-tools summary').click();
+    const backup = await downloaded(page, () => page.getByRole('button', {name: 'Download workspace backup'}).click());
+    const before = JSON.parse(backup.bytes.toString()); assert.equal(before.inbox.length, 1);
+    const file = {name: 'backup.json', mimeType: 'application/json', buffer: backup.bytes};
+    await page.getByLabel('Restore workspace backup').setInputFiles(file); await page.getByRole('button', {name: 'Cancel', exact: true}).click();
+    await expect(page.locator('#restore-preview')).toBeHidden(); assert.equal((await call(page, 'getInbox')).entries.length, 1);
+    await page.getByLabel('Restore workspace backup').setInputFiles(file); await page.getByRole('button', {name: 'Restore after review'}).click();
+    await expect(page.locator('#workspace-notice')).toContainText('restored'); assert.equal((await rpc(page, 'listApplications')).length, 0);
+  });
+});
+
+test('delayed capsule seal and inbox stage ignore repeated clicks while tabs change', async () => {
+  await workspace(async page => {
+    await page.getByRole('tab', {name: 'Time capsules'}).click(); const capsules = page.locator('#capsules');
+    await capsules.getByLabel('Company', {exact: true}).fill(job.company); await capsules.getByLabel('Role', {exact: true}).fill(job.title);
+    await capsules.getByLabel('Job URL', {exact: true}).fill(job.url); await capsules.getByRole('button', {name: 'Review capsule', exact: true}).click();
+    await capsules.getByLabel('I submitted this application').check(); await delayOperation(page, 'sealCapsule');
+    const seal = capsules.getByRole('button', {name: 'Seal this application record'}); await seal.click(); await seal.dispatchEvent('click');
+    await page.getByRole('tab', {name: 'Career memory'}).click(); await page.getByRole('tab', {name: 'Time capsules'}).click();
+    await page.evaluate(() => globalThis.__releaseOperation()); await expect(capsules.getByRole('button', {name: 'Open saved materials'})).toHaveCount(1);
+    assert.equal((await call(page, 'listCapsules')).length, 1);
+    await page.getByRole('tab', {name: 'Unified inbox'}).click(); const inbox = page.locator('#inbox');
+    await inbox.getByLabel('Or paste job records').fill(JSON.stringify([{...job, status: 'started'}]));
+    await inbox.getByRole('button', {name: 'Preview pasted records'}).click(); await delayOperation(page, 'stageImport');
+    const stage = inbox.getByRole('button', {name: 'Stage records for review'}); await stage.click(); await stage.dispatchEvent('click');
+    await page.evaluate(() => globalThis.__releaseOperation()); await expect(inbox.getByRole('button', {name: 'Add to tracker'})).toHaveCount(1);
+    assert.equal((await call(page, 'getInbox')).entries.length, 1);
+  });
+});
+
 test('desktop and phone layouts have no horizontal overflow, keyboard tabs work and accessible names pass axe', async () => {
   await mkdir(screenshotDir, {recursive: true});
   for (const viewport of [{width: 1200, height: 900}, {width: 390, height: 844}]) await workspace(async page => {
@@ -268,6 +467,10 @@ test('real isolated MV3 broker permits workspace tabs and persists memory across
     const saved = await call(second, 'listStories'); assert.equal(saved.length, 1); assert.ok(saved[0].reviewedAt);
     await second.goto(`chrome-extension://${extensionId}/sidepanel.html`);
     assert.equal((await call(second, 'listStories'))[0].title, saved[0].title);
+    const opened = context.waitForEvent('page'); await second.locator('#open-workspace').click(); const careerPage = await opened;
+    await expect(careerPage).toHaveURL(`chrome-extension://${extensionId}/workspace.html`);
+    await expect(careerPage.getByRole('heading', {name: 'Story Vault', exact: true})).toBeVisible();
+    await expect(careerPage.locator('#memory article')).toContainText('Real broker synthetic account');
     assert.deepEqual(errors, []); assert.deepEqual(external, [], 'real extension smoke must not access employer sites or external services');
   } finally { await context?.close(); await rm(profile, {recursive: true, force: true}); }
 });

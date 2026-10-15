@@ -3,7 +3,7 @@ import {el, field, button, dated, guard} from './workspace-ui.js';
 
 export function mountInbox(root, {call, notify}) {
   const run = action => guard(root, notify, action);
-  let pending = null, filename = '';
+  let pending = null, filename = '', refreshVersion = 0;
   const file = field('Import a tracker or shortlist (XLSX, CSV, TSV, or JSON)', {type: 'file'});
   file.input.accept = '.xlsx,.csv,.tsv,.json';
   const paste = field('Or paste job records as JSON, CSV, or TSV', {tag: 'textarea', maxLength: 1000000, rows: 4});
@@ -14,13 +14,17 @@ export function mountInbox(root, {call, notify}) {
   for (const [value, label] of [['pending', 'Pending review'], ['all', 'All imports and decisions']]) { const option = el('option', label); option.value = value; show.input.append(option); }
   const importCard = el('section', undefined, 'card');
   importCard.append(el('h3', 'Bring your search together'), file.wrap, paste.wrap, format.wrap,
-    button('Preview pasted records', () => void run(async () => { pending = parseInboxText(paste.input.value, {format: format.input.value, filename: 'Pasted records'}); filename = 'Pasted records'; renderPreview(); })), preview);
+    button('Preview pasted records', () => void run(async () => { clearPreview(); pending = parseInboxText(paste.input.value, {format: format.input.value, filename: 'Pasted records'}); filename = 'Pasted records'; renderPreview(); })), preview);
   root.replaceChildren(el('h2', 'Unified inbox'), el('p', 'Review shortlists and tracker updates from your other tools alongside your current application records. Imported claims stay separate until you accept them.'),
     importCard, show.wrap, button('Refresh inbox and tracker', () => void run(refresh)), entries, el('h3', 'Current application tracker'), tracker);
   file.input.addEventListener('change', () => void run(async () => {
-    pending = null; preview.replaceChildren(); const selected = file.input.files[0]; if (!selected) return;
-    pending = await parseInboxFile(selected); filename = selected.name; renderPreview();
+    clearPreview(); const selected = file.input.files[0]; if (!selected) return;
+    try { pending = await parseInboxFile(selected); filename = selected.name; renderPreview(); }
+    finally { file.input.value = ''; }
   }));
+  function clearPreview() { pending = null; preview.replaceChildren(); }
+  paste.input.addEventListener('input', clearPreview);
+  format.input.addEventListener('change', clearPreview);
   function renderPreview() {
     preview.replaceChildren(el('h3', `Review import: ${pending.length} job records`),
       el('p', 'Staging creates pending inbox items. It does not change your application tracker.'));
@@ -41,7 +45,9 @@ export function mountInbox(root, {call, notify}) {
       : `Saved: ${entry.current.company} · ${entry.current.title}\nStatus: ${entry.current.status}\n${entry.current.notes || 'No saved notes.'}`;
   }
   async function refresh() {
-    const data = await call('getInbox'); entries.replaceChildren(); tracker.replaceChildren();
+    const version = ++refreshVersion, data = await call('getInbox');
+    if (version !== refreshVersion) return;
+    entries.replaceChildren(); tracker.replaceChildren();
     const visible = data.entries.filter(entry => show.input.value === 'all' || entry.state === 'pending');
     if (!visible.length) entries.append(el('p', 'No imports need review. Your current tracker is below.', 'empty'));
     for (const entry of visible) {

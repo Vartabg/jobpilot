@@ -204,7 +204,7 @@ test("manual job capture remains available without invoking autofill", async () 
   tab.url = "https://example.org/jobs/123";
   chrome.scripting.executeScript = async request => {
     calls.push(request);
-    return [{ frameId: 0, result: { title: "Engineer", company: "Example Co", description: "A job" } }];
+    return [{ frameId: 0, result: { pageUrl: tab.url, title: "Engineer", company: "Example Co", description: "A job" } }];
   };
   const result = await captureCurrentJob();
   assert.equal(result.supported, false);

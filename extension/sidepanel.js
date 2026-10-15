@@ -25,6 +25,7 @@ const state = {
 };
 let draftTimer;
 let duplicateGeneration = 0;
+let busyControls = new Map();
 
 function element(tag, className, text) {
   const node = document.createElement(tag);
@@ -118,14 +119,20 @@ function switchTab(tab, moveFocus = false) {
 function setBusy(busy) {
   state.busy = busy;
   document.body.setAttribute('aria-busy', String(busy));
-  for (const button of [
-    $('#capture-job'), $('#inspect-form'), $('#fill-details'), $('#attach-resume'),
-    $('#save-started'), $('#save-submitted'), $('#save-profile'), $('#export-data'),
-    $('#confirm-import'), $('#refresh-applications'), $('#refresh-history'), $('#export-problems'), $('#report-problem'),
-  ]) button.disabled = busy;
-  $('#resume-upload').disabled = busy;
-  $('#import-data').disabled = busy;
-  for (const control of $$('#application-list select, #resume-library button, #run-history button')) control.disabled = busy;
+  $('main').inert = busy;
+  if (busy) {
+    busyControls = new Map($$('main button, main input, main select, main textarea').map(control => [control, control.disabled]));
+    for (const control of busyControls.keys()) control.disabled = true;
+  } else {
+    for (const [control, disabled] of busyControls) if (control.isConnected) control.disabled = disabled;
+    // These lists can be rebuilt while the operation is pending. Their newly
+    // rendered controls inherit busy=true and are not in the original snapshot.
+    for (const control of $$('#application-list select, #resume-library button, #run-history button')) {
+      if (!busyControls.has(control)) control.disabled = false;
+    }
+    busyControls.clear();
+  }
+  $('#open-workspace').setAttribute('aria-disabled', String(busy));
   if (!busy) updateActionButtons();
 }
 
@@ -298,6 +305,10 @@ function renumberHistory(kind) {
     const label = kind === 'work' ? 'Position' : 'Education';
     $('h3', entry).textContent = `${label} ${index + 1}`;
     $('button', entry).setAttribute('aria-label', `Remove ${label.toLowerCase()} ${index + 1}`);
+    if (kind === 'work') {
+      $('[data-field="start_date"]', entry).setAttribute('aria-label', `Position ${index + 1} start date, year and month`);
+      $('[data-field="end_date"]', entry).setAttribute('aria-label', `Position ${index + 1} end date, year and month`);
+    }
   });
 }
 
@@ -741,6 +752,13 @@ async function confirmImport() {
 }
 
 function bindEvents() {
+  $('#open-workspace').addEventListener('click', event => {
+    event.preventDefault();
+    void perform(async () => {
+      await chrome.tabs.create({url: chrome.runtime.getURL('workspace.html')});
+      showNotice('Career workspace opened in a new tab.');
+    });
+  });
   for (const button of $$('[data-tab]')) {
     button.addEventListener('click', () => switchTab(button.dataset.tab));
     button.addEventListener('keydown', event => {
@@ -777,7 +795,7 @@ function bindEvents() {
   $('#inspect-form').addEventListener('click', () => runAction('inspect'));
   $('#fill-details').addEventListener('click', () => runAction('details'));
   $('#attach-resume').addEventListener('click', () => runAction('resume'));
-  $('#clear-report').addEventListener('click', () => { state.report = null; renderReport(); queuePersistUi(); });
+  $('#clear-report').addEventListener('click', () => { if (state.busy) return; state.report = null; renderReport(); queuePersistUi(); });
   $('#report-problem').addEventListener('click', () => perform(async () => {
     await updateRun(state.report.diagnosticId, {reported: true, resolved: false});
     state.runs = await listRuns(); renderHistory(); renderReport(); switchTab('history');
@@ -818,12 +836,14 @@ function bindEvents() {
     const file = $('#resume-upload').files[0];
     if (!file) return;
     perform(async () => {
-      const metadata = await addResume(file, $('#resume-label').value.trim());
-      state.resumes = await listResumes();
-      state.selectedResumeId = metadata?.id || state.selectedResumeId;
-      renderResumes(); await persistUi();
-      $('#resume-upload').value = ''; $('#resume-label').value = '';
-      showNotice('Résumé saved locally. It is ready to choose in Apply.');
+      try {
+        const metadata = await addResume(file, $('#resume-label').value.trim());
+        state.resumes = await listResumes();
+        state.selectedResumeId = metadata?.id || state.selectedResumeId;
+        renderResumes(); await persistUi();
+        $('#resume-label').value = '';
+        showNotice('Résumé saved locally. It is ready to choose in Apply.');
+      } finally { $('#resume-upload').value = ''; }
     });
   });
   $('#application-filter').addEventListener('change', renderApplications);

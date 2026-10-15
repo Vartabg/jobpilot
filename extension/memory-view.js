@@ -4,7 +4,7 @@ import { importStories, searchStories, storyMarkdown, storyPacket } from './memo
 // are explicit downloads, and imports become reviewable Inbox items.
 export function mountMemory(root, { call, notify, download }) {
   const doc = root.ownerDocument;
-  let stories = [], selected = null, imported = null, busy = false;
+  let stories = [], selected = null, imported = null, busy = false, refreshVersion = 0;
   const node = (tag, value, className) => {
     const item = doc.createElement(tag);
     if (value !== undefined) item.textContent = value;
@@ -53,10 +53,11 @@ export function mountMemory(root, { call, notify, download }) {
 
   async function perform(action) {
     if (busy) return;
-    busy = true; error.textContent = '';
-    for (const control of root.querySelectorAll('button, input[type="file"]')) control.disabled = true;
+    busy = true; error.textContent = ''; root.setAttribute('aria-busy', 'true');
+    const disabled = [...root.querySelectorAll('button, input, textarea, select')].map(control => [control, control.disabled]);
+    for (const [control] of disabled) control.disabled = true;
     try { await action(); } catch (failure) { error.textContent = failure?.message || 'The story operation could not be completed.'; }
-    finally { busy = false; for (const control of root.querySelectorAll('button, input[type="file"]')) control.disabled = false; }
+    finally { busy = false; root.removeAttribute('aria-busy'); for (const [control, previous] of disabled) if (control.isConnected) control.disabled = previous; }
   }
   function resetForm(story = null) {
     selected = story; formHeading.textContent = story ? 'Edit career story' : 'Add a career story';
@@ -107,20 +108,22 @@ export function mountMemory(root, { call, notify, download }) {
   file.addEventListener('change', () => void perform(async () => {
     imported = null; preview.replaceChildren(); const selectedFile = file.files?.[0];
     if (!selectedFile) return;
-    if (selectedFile.size > 2 * 1024 * 1024) throw new Error('Story imports must be 2 MiB or smaller.');
-    const records = importStories(JSON.parse(await selectedFile.text()));
-    if (!records.length) throw new Error('This file contains no stories.');
-    imported = records;
-    preview.append(node('h3', `Preview: ${records.length} imported stories`),
-      node('p', 'Imported wording approvals are cleared. Stage these stories in Inbox to review before adding them to the vault.'));
-    const list = node('ul');
-    for (const story of records) list.append(node('li', `${story.title}${story.summary ? ` — ${story.summary.slice(0, 180)}` : ''}`));
-    preview.append(list, button('Stage stories in Inbox', async () => {
-      const count = await call('stageStories', imported, selectedFile.name);
-      imported = null; preview.replaceChildren(node('p', `${count.added} stories staged; ${count.duplicates} repeated records skipped. Review them in Inbox.`));
-      file.value = ''; notify('Imported stories are ready to review in Inbox.');
-    }));
+    try {
+      if (selectedFile.size > 2 * 1024 * 1024) throw new Error('Story imports must be 2 MiB or smaller.');
+      const records = importStories(JSON.parse(await selectedFile.text()));
+      if (!records.length) throw new Error('This file contains no stories.');
+      imported = records;
+      preview.append(node('h3', `Preview: ${records.length} imported stories`),
+        node('p', 'Imported wording approvals are cleared. Stage these stories in Inbox to review before adding them to the vault.'));
+      const list = node('ul');
+      for (const story of records) list.append(node('li', `${story.title}${story.summary ? ` — ${story.summary.slice(0, 180)}` : ''}`));
+      preview.append(list, button('Stage stories in Inbox', async () => {
+        const count = await call('stageStories', imported, selectedFile.name);
+        imported = null; preview.replaceChildren(node('p', `${count.added} stories staged; ${count.duplicates} repeated records skipped. Review them in Inbox.`));
+        file.value = ''; notify('Imported stories are ready to review in Inbox.');
+      }));
+    } finally { file.value = ''; }
   }));
-  async function refresh() { stories = await call('listStories'); render(); }
+  async function refresh() { const version = ++refreshVersion, records = await call('listStories'); if (version === refreshVersion) { stories = records; render(); } }
   return { refresh };
 }

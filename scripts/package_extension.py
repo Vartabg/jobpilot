@@ -18,7 +18,8 @@ FILES = ('manifest.json', 'background.js', 'model.js', 'diagnostics.js', 'action
          'sidepanel.html', 'sidepanel.js', 'sidepanel.css', 'README.md',
          'workspace.html', 'workspace.css', 'workspace.js', 'workspace-ui.js',
          'workspace-client.js', 'workspace-store.js', 'memory.js', 'memory-view.js',
-         'capsule.js', 'capsule-view.js', 'inbox-import.js', 'inbox-view.js', 'WORKSPACE_GUIDE.md')
+         'capsule.js', 'capsule-view.js', 'inbox-import.js', 'inbox-view.js', 'WORKSPACE_GUIDE.md',
+         'BUTTON_AUDIT.md')
 
 
 def package(output: Path, profile: Path | None = None, resume: Path | None = None,

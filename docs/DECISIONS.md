@@ -1,3 +1,17 @@
+# 2026-10-15 — Button reliability audit (0.9.1)
+
+Exercise the extension's control groups with synthetic browser fixtures and a
+real isolated MV3 installation. Form actions must stay tied to the current job
+and tab, and stop across navigation or visibility changes, including while a
+dropdown or upload waits. Restrict recognized application scopes so hidden old
+forms and unrelated signup controls do not block or receive application data.
+
+Keep user-visible previews consistent with their inputs. Disable edits while
+saves run, invalidate changed import previews, preserve explicit selections on
+refresh, and allow same-file import retries. The workspace opens through the
+Chrome tabs API. Keep the existing permissions and manual submission boundary.
+See the [control/page coverage](../extension/BUTTON_AUDIT.md).
+
 # 2026-10-15 — Career memory, application capsules, and a review inbox
 
 Extend the existing Chrome extension with a bundled career workspace tab, using
