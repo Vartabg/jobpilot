@@ -170,4 +170,8 @@ def create_app(root: Path, on_quit=None) -> FastAPI:
     from .importing import install_imports
 
     install_imports(app, store)
+
+    from .privacy_routes import install_privacy
+
+    install_privacy(app, token)
     return app

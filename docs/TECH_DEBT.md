@@ -1,5 +1,19 @@
 # Verification follow-up
 
+## Applicant privacy scanner manual release checks — 2026-10-15
+
+Affected users: screen-reader, touch and browser-zoom users of the privacy scan
+and its native capture dialog. Owner: JobPilot maintainer. Target: 2026-10-22,
+before a public accessibility-conformance claim for this flow.
+
+Keyboard, reverse tab order, dialog Escape/focus return, accessibility-tree
+labels and announcements, axe AA checks, 320/640px reflow, forced system colors
+and reduced motion were verified. Actual VoiceOver speech, physical-device
+orientation/coarse-pointer use and browser-menu zoom at 200%/400% were not
+performed. Mitigation: native controls/dialog, semantic reports, visible focus,
+44px controls, metadata copy fallback, explicit partial coverage, and source
+availability. Responsive-width checks do not replace those manual checks.
+
 ## Physical iPhone Safari and VoiceOver — 2026-09-05
 
 Affected users: people using the phone application flow with Safari and VoiceOver.
