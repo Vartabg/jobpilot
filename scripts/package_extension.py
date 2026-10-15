@@ -19,7 +19,8 @@ FILES = ('manifest.json', 'background.js', 'model.js', 'diagnostics.js', 'action
          'workspace.html', 'workspace.css', 'workspace.js', 'workspace-ui.js',
          'workspace-client.js', 'workspace-store.js', 'memory.js', 'memory-view.js',
          'capsule.js', 'capsule-view.js', 'inbox-import.js', 'inbox-view.js', 'WORKSPACE_GUIDE.md',
-         'BUTTON_AUDIT.md')
+         'BUTTON_AUDIT.md', 'privacy-analyzer.js', 'privacy-content.js',
+         'privacy-action.js', 'privacy-panel.js')
 
 
 def package(output: Path, profile: Path | None = None, resume: Path | None = None,

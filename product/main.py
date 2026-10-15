@@ -18,8 +18,10 @@ def main():
     parser = argparse.ArgumentParser(description="Open JobPilot on this computer.")
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--no-open", action="store_true")
+    parser.add_argument("--privacy", action="store_true", help="Open the application privacy scanner.")
     parser.add_argument("--data-dir", type=Path, default=data_path())
     args = parser.parse_args()
+    start_page = "/privacy" if args.privacy else "/"
     root = args.data_dir.expanduser().resolve()
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
     lock = (root / "app.lock").open("w")
@@ -30,7 +32,7 @@ def main():
             try:
                 state = json.loads((root / "running.json").read_text())
                 if state.get("port") in range(1, 65536):
-                    webbrowser.open(f"http://127.0.0.1:{state['port']}")
+                    webbrowser.open(f"http://127.0.0.1:{state['port']}{start_page}")
             except (OSError, ValueError):
                 pass
         return
@@ -56,7 +58,7 @@ def main():
         def open_when_ready():
             for _ in range(100):
                 if server.started:
-                    webbrowser.open(f"http://127.0.0.1:{port}")
+                    webbrowser.open(f"http://127.0.0.1:{port}{start_page}")
                     return
                 if server.should_exit:
                     return

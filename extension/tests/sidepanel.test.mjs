@@ -103,6 +103,34 @@ async function workspace(run, { width = 400, seed = null } = {}) {
   finally { await context.close(); }
 }
 
+test('privacy button scans without profile data, keeps decline choices, and restores its local report', async () => {
+  await workspace(async page => {
+    await page.evaluate(() => {
+      chrome.scripting.executeScript = async request => {
+        __extensionCalls.push({files:request.files,args:request.args});
+        if (request.files) return [{frameId:0,documentId:'privacy-doc',result:{source_url:'https://boards.greenhouse.io/example/jobs/123',document_type:'text/html'}}];
+        return [{frameId:0,documentId:'privacy-doc',result:{document_type:'text/html',parent_visibility:'visible',visible_embeds:0,
+          payload:{source_url:'https://boards.greenhouse.io/example/jobs/123',notices:[],fields:[
+            {label:'Legal Address',required:true,options:[]},
+            {label:'Gender identity',required:true,options:['Woman','Man','Prefer not to answer']}]}}}];
+      };
+    });
+    await page.getByRole('button',{name:'Scan privacy on this page'}).click();
+    await expect(page.locator('#privacy-count')).toContainText('2 flagged requests');
+    await expect(page.locator('#privacy-findings')).toContainText('Response required; disclosure optional');
+    await expect(page.locator('#privacy-heading')).toBeFocused();
+    await page.getByLabel('Show requests').selectOption('required');
+    await expect(page.locator('.privacy-finding')).toHaveCount(1);
+    assert.equal(await page.evaluate(()=>__extensionCalls.some(call=>call.args?.[0]?.profile || call.args?.[0]?.resume)),false);
+    await page.reload();
+    await expect(page.locator('#privacy-status')).toContainText('last saved scan');
+    await expect(page.locator('.privacy-finding')).toHaveCount(2);
+    await expect(page.locator('#privacy-findings')).toContainText('Main application page');
+    await page.getByRole('button',{name:'Clear saved scan'}).click();
+    await expect(page.locator('#privacy-result')).toBeHidden();
+  });
+});
+
 test("profile edits persist and an unanswered work-authorization question remains unknown", async () => {
   await workspace(async page => {
     await expect(page.locator('#extension-version')).toHaveText(` ${manifest.version}`);

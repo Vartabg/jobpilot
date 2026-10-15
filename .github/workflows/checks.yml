@@ -21,10 +21,14 @@ jobs:
           python -m pip install -e '.[dev]'
           python -m playwright install --with-deps chromium
           npm install --prefix "$RUNNER_TEMP/ui-audit" --no-save --no-package-lock axe-core@4.13.0
+          npm ci --ignore-scripts
+          npx playwright install --with-deps chromium
       - name: Python regressions
         run: PYTHONPATH="$(dirname "$PWD")" python -m pytest tests/ -q
       - name: Swipe action regressions
         run: node --test tests/swipe_actions.test.cjs
+      - name: Extension regressions and native privacy scan
+        run: node --test extension/tests/*.test.mjs
       - name: Browser and accessibility checks
         run: python scripts/check_ui.py --axe "$RUNNER_TEMP/ui-audit/node_modules/axe-core/axe.min.js"
       - name: Applicant privacy scan accessibility and interactions

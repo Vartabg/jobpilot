@@ -2,6 +2,19 @@
 
 JobPilot keeps your profile, résumés, and application records in a Chrome side panel beside the job you are viewing. The extension works locally: the profile and tracker do not require the Python server or a hosted account.
 
+Version **0.11.0** adds **Scan privacy on this page** in Apply. Open the job's
+application step, click the JobPilot toolbar icon to grant page access, and scan
+before sharing answers. The report shows exact question wording, required or
+optional responses, decline choices, and employer-provided help. It reads visible
+field metadata without reading entered answers, filling, advancing, or submitting.
+The last scan stays local and can be exported. Rescan each step: later, hidden,
+conditional or inaccessible embedded questions remain outside coverage. Existing
+permissions are unchanged; no new host access or Python service is required.
+
+For comparing public Greenhouse forms by link, the companion product supports
+`python -m product.main --privacy`. Other ATS pages use the extension's visible
+scan; an uninspected step is never treated as privacy-safe.
+
 Version **0.10.0** includes a **Career workspace** link in the side panel: searchable,
 reviewed career stories with assistant exports; immutable application time
 capsules with independent résumé/receipt copies; and an inbox for reviewing XLSX,

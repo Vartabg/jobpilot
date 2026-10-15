@@ -6,6 +6,7 @@ import {
 } from './model.js';
 import { captureCurrentJob, runCurrentAction } from './actions.js';
 import { REASONS } from './diagnostics.js';
+import { setupPrivacyPanel } from './privacy-panel.js';
 
 const UI_KEY = 'jobpilot_ui_v1';
 const STATUS_LABELS = {
@@ -900,4 +901,4 @@ async function init() {
   } finally { setBusy(false); }
 }
 
-init();
+init().then(() => setupPrivacyPanel({perform, showNotice}));

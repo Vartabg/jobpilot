@@ -8,6 +8,7 @@
     <script type="module" src="sidepanel.js"></script>
   </head>
   <body>
+    <a class="privacy-skip" href="#main">Skip to workspace</a>
     <header class="app-header">
       <div class="brand"><span class="brand-mark" aria-hidden="true">J</span><div><h1>JobPilot</h1><p>Your application workspace</p></div></div>
       <span class="local-badge">Saved locally</span>
@@ -20,7 +21,7 @@
       <button id="tab-history" type="button" role="tab" aria-selected="false" aria-controls="panel-history" tabindex="-1" data-tab="history">History <span id="problem-count" class="tab-count">0</span></button>
     </nav>
     <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
-    <main>
+    <main id="main" tabindex="-1">
       <section id="panel-apply" class="tab-panel" role="tabpanel" aria-labelledby="tab-apply">
         <section class="card current-job">
           <div class="section-heading"><div><h2>Current job</h2><p>Capture a listing, then review its details.</p></div><button id="capture-job" class="button small" type="button">Capture tab</button></div>
@@ -31,6 +32,24 @@
           </form>
           <div id="portal-status" class="portal-status"><span class="status-dot neutral" aria-hidden="true"></span><span>Capture the tab to identify this page.</span></div>
           <div id="duplicate-notice" class="inline-note" hidden></div>
+        </section>
+        <section class="card" aria-labelledby="privacy-card-heading">
+          <h2 id="privacy-card-heading">Application privacy</h2>
+          <p>See personal-information requests before sharing your answers.</p>
+          <button id="scan-privacy" type="button" class="button full" disabled>Scan privacy on this page</button>
+          <p id="privacy-status" class="fine-print" role="status" aria-live="polite">Open an application step and click the JobPilot toolbar icon to grant access, then scan. Profile and résumé data are not needed.</p>
+          <section id="privacy-result" hidden>
+            <h3 id="privacy-heading" tabindex="-1">Privacy scan results</h3>
+            <p id="privacy-context" class="fine-print"></p>
+            <p id="privacy-count"></p>
+            <p class="inline-note">Coverage is incomplete. Later steps, hidden questions and inaccessible frames may ask for more. A scan does not establish how the employer uses information. Rescan each step.</p>
+            <label>Show requests<select id="privacy-filter"><option value="all">All flagged requests</option><option value="required">Required responses</option></select></label>
+            <p class="fine-print">A required Yes/No question does not require a Yes. “Prefer not to answer” is reported as a way to withhold disclosure.</p>
+            <div id="privacy-findings"></div>
+            <details><summary>Coverage notes</summary><ul id="privacy-notices"></ul></details>
+            <details><summary>Why might a form ask?</summary><p class="fine-print">Some demographic collection supports applicant monitoring. That does not establish how this employer uses answers. The report shows the field's own help when available. <a href="https://www.eeoc.gov/pre-employment-inquiries-and-race" target="_blank" rel="noopener noreferrer">Read EEOC guidance</a>.</p></details>
+            <div class="action-grid"><button id="privacy-export" type="button" class="button" disabled>Export scan</button><button id="privacy-clear" type="button" class="button" disabled>Clear saved scan</button></div>
+          </section>
         </section>
         <section class="card">
           <div class="section-heading"><div><h2>Prepare the form</h2><p>Each action runs only when you choose it.</p></div></div>
