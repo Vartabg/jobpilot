@@ -52,12 +52,21 @@ test("worker refuses profile access from content scripts or external pages", asy
     { id: "test-id", url: "https://boards.greenhouse.io/example", tab: { id: 1 } },
     { id: "other-id", url: "chrome-extension://other-id/sidepanel.html" },
     { id: "test-id", url: "https://example.org" },
+    { id: "test-id", url: "chrome-extension://test-id/other.html" },
   ]) {
     const result = await message("getProfile", [], sender);
     assert.equal(result.ok, false);
     assert.match(result.error, /only inside/i);
   }
   assert.equal(calls, 0);
+});
+
+test('worker accepts its own workspace document in a tab without trusting employer tabs', async () => {
+  const {message} = worker(async operation => operation);
+  const result = await message('workspace:listStories', [], {id: 'test-id',
+    url: 'chrome-extension://test-id/workspace.html#memory', tab: {id: 17}});
+  assert.equal(result.ok, true);
+  assert.equal(result.result, 'workspace:listStories');
 });
 
 test("a rejected model operation does not poison subsequent worker requests", async () => {

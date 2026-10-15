@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Career workspace · JobPilot</title>
+  <link rel="stylesheet" href="workspace.css">
+  <script type="module" src="workspace.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#workspace-content">Skip to workspace</a>
+  <header><a class="brand" href="workspace.html"><span aria-hidden="true">J</span> JobPilot</a><span class="local-badge">Saved in this browser</span></header>
+  <div class="layout">
+    <aside>
+      <p class="eyebrow">YOUR CAREER WORKSPACE</p>
+      <nav aria-label="Career workspace" role="tablist" aria-orientation="vertical">
+        <button id="tab-memory" role="tab" aria-selected="true" aria-controls="memory" data-view="memory">Career memory</button>
+        <button id="tab-capsules" role="tab" aria-selected="false" aria-controls="capsules" tabindex="-1" data-view="capsules">Time capsules</button>
+        <button id="tab-inbox" role="tab" aria-selected="false" aria-controls="inbox" tabindex="-1" data-view="inbox">Unified inbox</button>
+      </nav>
+      <details class="backup-tools"><summary>Backup and restore</summary><p>Export stories, capsules, and inbox history, including attached files.</p>
+        <button id="backup-workspace" type="button">Download workspace backup</button>
+        <label>Restore workspace backup<input id="restore-workspace" type="file" accept=".json,application/json"></label>
+        <div id="restore-preview" hidden><p id="restore-summary"></p><button id="confirm-restore" type="button">Restore after review</button><button id="cancel-restore" type="button">Cancel</button></div>
+        <p class="fine-print">Backups contain personal information. The profile and live tracker have a separate backup in the side panel.</p>
+      </details>
+    </aside>
+    <main id="workspace-content" tabindex="-1">
+      <div id="workspace-notice" class="notice" role="status" aria-live="polite" hidden></div>
+      <section id="memory" role="tabpanel" aria-labelledby="tab-memory"></section>
+      <section id="capsules" role="tabpanel" aria-labelledby="tab-capsules" hidden></section>
+      <section id="inbox" role="tabpanel" aria-labelledby="tab-inbox" hidden></section>
+    </main>
+  </div>
+  <footer>JobPilot · Your stories and records stay local. Exports are shared only when you choose.</footer>
+</body>
+</html>

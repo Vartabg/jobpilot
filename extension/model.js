@@ -1,6 +1,7 @@
 // Local domain storage. UI callers use the worker broker so multiple panels
 // cannot overwrite one another's application/resume read-modify-write updates.
 import { RUN_LIMIT, sanitizeRun } from './diagnostics.js';
+import { executeWorkspaceOperation } from './workspace-store.js';
 export const APPLICATION_STATUSES = ["started", "submitted", "interview", "rejected", "offer", "withdrawn"];
 export const SCHEMA_VERSION = 1;
 const KEYS = { profile: "jobpilot_profile_v1", applications: "jobpilot_applications_v1", resumes: "jobpilot_resumes_v1" };
@@ -370,6 +371,9 @@ const handlers = {
 };
 
 export async function executeModelOperation(operation, args) {
+  if (typeof operation === 'string' && operation.startsWith('workspace:')) {
+    return executeWorkspaceOperation(operation.slice(10), args, {legacy: executeModelOperation, normalizeJobUrl});
+  }
   if (!Object.hasOwn(handlers, operation) || !Array.isArray(args)) throw new Error("Unknown JobPilot storage operation.");
   return handlers[operation](...args);
 }

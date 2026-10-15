@@ -1,3 +1,25 @@
+# 2026-10-15 — Career memory, application capsules, and a review inbox
+
+Extend the existing Chrome extension with a bundled career workspace tab, using
+the same serialized trusted-UI worker broker and live application tracker. Store
+the new stories, immutable capsules, and import review history in extension-local
+IndexedDB; keep capsule list metadata separate from file bytes. No Python server,
+new browser permissions, AI provider, or cloud synchronization is required.
+
+Career wording is reviewed by the candidate and edits invalidate that approval.
+Imported accounts need review. Portable JSON/Markdown packets let a person share
+selected context with assistants; ordinary chats do not automatically read the
+extension. Capsules copy the chosen files and story revisions, preserve exact
+answer/posting text, and are sealed only after explicit review. They record a
+user's account of a submission, with optional receipts; checksums detect changes
+and do not certify delivery to an employer.
+
+XLSX, CSV, TSV, and JSON records enter a pending inbox with source/row provenance.
+The applicant resolves conflicts explicitly, and stale reviews/edits are rejected.
+No new code fills or submits employer forms. Full workspace backups include
+capsule file bytes; profile/tracker backups keep their existing contract. See the
+[workspace guide](../extension/WORKSPACE_GUIDE.md) for formats, limits, and checks.
+
 # 2026-09-29 — An extension for the owner's application workflow
 
 The owner requested that JobPilot become a Chrome extension. Start with a

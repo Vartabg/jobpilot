@@ -28,10 +28,13 @@ chrome.runtime.onStartup.addListener(() => queue(async () => { await configure()
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type !== "jobpilot:model") return false;
-  // Only extension pages may access the profile and résumé library. Content
-  // scripts receive the specific user-approved payload through executeScript.
-  if (sender.id !== chrome.runtime.id || sender.tab ||
-      !sender.url?.startsWith(chrome.runtime.getURL(""))) {
+  // Chrome supplies sender.url: content scripts have the employer's URL,
+  // whereas our workspace can legitimately live in a tab (sender.tab exists).
+  // Permit only our two bundled UI documents, including their hash/query.
+  const extensionRoot = chrome.runtime.getURL("");
+  const document = sender.url?.startsWith(extensionRoot)
+    ? sender.url.slice(extensionRoot.length).split(/[?#]/)[0] : '';
+  if (sender.id !== chrome.runtime.id || !['sidepanel.html', 'workspace.html'].includes(document)) {
     sendResponse({ ok: false, error: "JobPilot storage is available only inside the extension." });
     return false;
   }

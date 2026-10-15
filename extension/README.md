@@ -2,6 +2,13 @@
 
 JobPilot keeps your profile, résumés, and application records in a Chrome side panel beside the job you are viewing. The extension works locally: the profile and tracker do not require the Python server or a hosted account.
 
+Version **0.9.0** adds a **Career workspace** link in the side panel: searchable,
+reviewed career stories with assistant exports; immutable application time
+capsules with independent résumé/receipt copies; and an inbox for reviewing XLSX,
+CSV, TSV, and JSON tracker imports. See [the workflow and limits](WORKSPACE_GUIDE.md).
+Use **Backup and restore** in that workspace for complete capsule files. The
+existing profile/tracker backup below still omits library PDF bytes.
+
 ## Install
 
 1. Build the unpacked extension with `python3 scripts/package_extension.py --output ~/job-search/JobPilot-Extension --zip`. Use the output directory, not this source directory.

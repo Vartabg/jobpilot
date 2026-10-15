@@ -1,6 +1,7 @@
 """Packaging checks: distributables never accidentally bundle ignored artifacts."""
 import importlib.util
 import json
+import re
 import tempfile
 import unittest
 import zipfile
@@ -13,6 +14,17 @@ spec.loader.exec_module(packager)
 
 
 class ExtensionPackageTests(unittest.TestCase):
+    def test_distributable_contains_workspace_and_all_local_module_dependencies(self):
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp) / 'JobPilot-workspace'
+            packager.package(output)
+            self.assertTrue((output / 'workspace.html').is_file())
+            self.assertTrue((output / 'WORKSPACE_GUIDE.md').is_file())
+            for script in output.glob('*.js'):
+                references = re.findall(r'''(?:from\s*|import\s*\()\s*['"]\./([^'"]+)['"]''', script.read_text())
+                for reference in references:
+                    self.assertTrue((output / reference).is_file(), f'{script.name} needs {reference}')
+
     def test_default_package_has_only_allowlisted_sources(self):
         with tempfile.TemporaryDirectory() as temp:
             output = Path(temp) / 'JobPilot-0.8.0'
