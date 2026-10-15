@@ -2,7 +2,7 @@
 
 JobPilot keeps your profile, résumés, and application records in a Chrome side panel beside the job you are viewing. The extension works locally: the profile and tracker do not require the Python server or a hosted account.
 
-Version **0.9.1** includes a **Career workspace** link in the side panel: searchable,
+Version **0.10.0** includes a **Career workspace** link in the side panel: searchable,
 reviewed career stories with assistant exports; immutable application time
 capsules with independent résumé/receipt copies; and an inbox for reviewing XLSX,
 CSV, TSV, and JSON tracker imports. See [the workflow and limits](WORKSPACE_GUIDE.md).
@@ -35,9 +35,19 @@ The extension never presses the employer's submit button. Review every answer an
 
 ## Portal coverage and first-release limits
 
-Automatic form filling supports the allowed Greenhouse, Lever, and Ashby hosts listed in `manifest.json`. Other sites use manual profile copying and application tracking; they do not get an automatic-fill success message.
+Automatic form filling supports the allowed Greenhouse, Lever, and Ashby hosts listed in `manifest.json`, plus public Workday candidate job routes described below. Other sites use manual profile copying and application tracking; they do not get an automatic-fill success message.
 
 Existing answers and attachments are preserved. Work and education fields fill only when a clearly labelled, numbered section can be matched to the same verified profile row. Ambiguous or unsupported repeaters require manual copying. The extension does not add missing work-history rows or navigate multi-step application forms.
+
+### Workday applications
+
+Version 0.10.0 supports public candidate job routes on `tenant.wdN.myworkdayjobs.com` and `wdN.myworkdaysite.com/[locale/]recruiting/tenant/site/job/...`. It uses the existing **activeTab** permission: open the job or application step, click the JobPilot toolbar icon on that tab, then capture or inspect. No new persistent host permission is added.
+
+Capture the job before opening its application. After you sign in or choose to apply manually, use **Inspect fields**, **Fill details**, and **Attach selected résumé** on the current step. My Information and My Experience use verified contact and existing history controls; the résumé step supports an explicit local PDF upload. Review every result, advance the step yourself, and inspect again. Workday may replace the form without changing the URL; JobPilot stops an in-flight action when the step changes.
+
+Sign-in, account creation, verification, application questions, disclosures, demographic answers, attestations, and final submission stay under your control. Unknown or translated labels, ambiguous history rows, and unsupported date/phone formats remain manual. Existing answers and attachments stay intact. The report distinguishes a selected file from a résumé that the page displays as accepted.
+
+Job identities ignore locale, tracking parameters, and `/apply/...` suffixes while retaining the host, tenant, career site, and job path. Older tracked Workday records retain their IDs, notes, résumé choices, and status when reopened from another application step. Sealed capsules keep their original evidence.
 
 Version 0.8.1 rechecks the live form between fields, handles delayed Greenhouse location suggestions and country/state aliases, and discovers fields revealed by earlier selections. It waits up to 3.5 seconds for an associated dropdown and limits a details action to about 20 seconds. A changing, ambiguous, or rejected control appears in the review report rather than stopping every other supported field. User edits made during autofill are preserved.
 

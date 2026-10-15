@@ -136,6 +136,27 @@ test('an inbox review rejects a stale tracker comparison and changes no decision
   });
 });
 
+test('an older Workday inbox item still compares against its existing tracker record after URL support is added', async () => {
+  await workspace(async page => {
+    const url = 'https://fixture.wd5.myworkdayjobs.com/en-US/External/job/Austin/Engineer_R123';
+    const existing = await rpc(page, 'saveApplication', {...job,url,notes:'Preserve this note'}, 'interview');
+    await call(page,'stageImport',[{...job,url:url+'/apply/applyManually',status:'submitted'}],'Earlier import');
+    await page.evaluate(async () => {
+      const db = await new Promise((resolve,reject)=> {const request=indexedDB.open('jobpilot-career-workspace',1);
+        request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});
+      await new Promise((resolve,reject)=> {const tx=db.transaction('inbox','readwrite'),store=tx.objectStore('inbox');
+        const request=store.getAll();request.onsuccess=()=> {for(const item of request.result) {
+          item.job.identity='website:'+item.job.url;item.job.provider='website';store.put(item);
+        }};tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);});db.close();
+    });
+    const inbox=await call(page,'getInbox');
+    assert.equal(inbox.entries[0].current.id,existing.id);
+    await call(page,'resolveInbox',inbox.entries[0].id,'keep',inbox.entries[0].currentToken);
+    const records=await rpc(page,'listApplications');
+    assert.equal(records.length,1);assert.equal(records[0].status,'interview');assert.equal(records[0].notes,'Preserve this note');
+  });
+});
+
 test('stale story edits and deletions cannot overwrite newer wording or resurrect removed accounts', async () => {
   await workspace(async page => {
     const first = await call(page, 'saveStory', account); await page.reload(); const memory = page.locator('#memory');

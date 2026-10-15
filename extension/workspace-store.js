@@ -111,7 +111,7 @@ export async function executeWorkspaceOperation(operation, args, {legacy, normal
       const stories = await read('stories');
       const entries = await Promise.all((await read('inbox')).sort(newest).map(async entry => {
         const current = entry.kind === 'story' ? stories.find(v => v.id === entry.story.id)
-          : applications.find(v => v.identity === entry.job.identity);
+          : applications.find(v => v.identity === normalizeJobUrl(entry.job.url).identity);
         return {...entry, current: current || null, currentToken: await digest(JSON.stringify(current || null))};
       }));
       return {entries, applications};

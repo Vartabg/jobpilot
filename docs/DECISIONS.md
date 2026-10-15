@@ -1,3 +1,19 @@
+# 2026-10-15 — Workday candidate applications (0.10.0)
+
+Support verified public Workday job routes on tenant.wdN.myworkdayjobs.com and
+wdN.myworkdaysite.com/recruiting/tenant/site, including locale prefixes and
+application suffixes. Use the existing toolbar-triggered activeTab grant;
+do not request persistent access to every Workday tenant or employee portals.
+
+Scope actions to the current recognized application step, exclude account
+gates, and stop on step replacement even if the URL remains unchanged.
+Fill only verified field mappings and existing history rows; attach a selected
+local PDF separately. Sign-in, account creation, questions, disclosures,
+attestations, navigation and submission stay manual. Canonical job identity
+keeps tenant/site/job boundaries and reconciles older generic Workday tracker
+records without rewriting sealed capsules. Test both candidate URL families
+through real DOM fixtures and isolated MV3 scripting.
+
 # 2026-10-15 — Button reliability audit (0.9.1)
 
 Exercise the extension's control groups with synthetic browser fixtures and a

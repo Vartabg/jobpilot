@@ -87,6 +87,31 @@ function safeUrl(value) {
   return url.href;
 }
 
+// Only public candidate job routes qualify. Employee Workday and account/search
+// pages never become autofill targets just because their host contains Workday.
+export function workdayJob(value) {
+  let url;
+  try { url = new URL(value); } catch { return null; }
+  if (url.protocol !== 'https:' || url.username || url.password || url.port) return null;
+  const host = url.hostname.toLowerCase();
+  const path = url.pathname.split('/').filter(Boolean);
+  if (/^[a-z]{2,3}(?:-[a-z0-9]{2,8}){1,2}$/i.test(path[0] || '')) path.shift();
+  let tenant = '', site, jobIndex;
+  if (/^[a-z0-9][a-z0-9-]*\.wd\d+\.myworkdayjobs\.com$/.test(host)) {
+    site = path[0]; jobIndex = 1;
+  } else if (/^wd\d+\.myworkdaysite\.com$/.test(host) && path[0] === 'recruiting') {
+    tenant = path[1]; site = path[2]; jobIndex = 3;
+  } else return null;
+  if (!site || path[jobIndex] !== 'job' || jobIndex === 3 && !tenant) return null;
+  const end = path.indexOf('apply', jobIndex + 1);
+  const jobPath = path.slice(jobIndex + 1, end < 0 ? undefined : end);
+  if (!jobPath.length) return null;
+  const prefix = tenant ? ['recruiting', tenant, site] : [site];
+  const canonical = `${url.origin}/${[...prefix, 'job', ...jobPath].join('/')}`;
+  return {host, tenant, site, jobPath, url: canonical,
+    identity: `workday:${host}:${tenant ? tenant + ':' : ''}${site}:${jobPath.join('/').toLowerCase()}`};
+}
+
 export function normalizeJobUrl(value) {
   const url = new URL(safeUrl(value));
   url.hash = "";
@@ -94,7 +119,11 @@ export function normalizeJobUrl(value) {
   const host = url.hostname.toLowerCase();
   let provider = "website";
   let identity;
-  if (["boards.greenhouse.io", "job-boards.greenhouse.io", "boards-eu.greenhouse.io", "job-boards.eu.greenhouse.io"].includes(host)) {
+  const workday = workdayJob(url.href);
+  if (workday) {
+    provider = 'workday'; identity = workday.identity;
+    url.href = workday.url;
+  } else if (["boards.greenhouse.io", "job-boards.greenhouse.io", "boards-eu.greenhouse.io", "job-boards.eu.greenhouse.io"].includes(host)) {
     provider = "greenhouse";
     const jobsIndex = path.indexOf("jobs");
     const job = url.searchParams.get("gh_jid") || (jobsIndex >= 0 ? path[jobsIndex + 1] : "");
@@ -297,7 +326,12 @@ const handlers = {
     await fileOperation("readwrite", "delete", id);
     return true;
   },
-  async listApplications() { return read(KEYS.applications, []); },
+  async listApplications() {
+    // Older releases stored Workday as a generic website. Resolve that identity
+    // when reading so a later application step updates the existing record.
+    return (await read(KEYS.applications, [])).map(application => workdayJob(application.url)
+      ? {...application, ...normalizeJobUrl(application.url)} : application);
+  },
   async findApplication(url) {
     const { identity } = normalizeJobUrl(url);
     return (await handlers.listApplications()).find((application) => application.identity === identity) || null;

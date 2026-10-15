@@ -173,7 +173,9 @@ function renderPortalStatus() {
   let message = 'Capture the tab to identify this page.';
   if (captured && state.job.supported === true) {
     dot.classList.add('supported');
-    message = `${state.job.provider || 'Supported portal'} · Autofill available on this captured page`;
+    message = state.job.provider === 'Workday'
+      ? 'Workday · Open the application step, click JobPilot on that tab, then inspect or fill this step.'
+      : `${state.job.provider || 'Supported portal'} · Autofill available on this captured page`;
   } else if (captured && state.job.supported === false) {
     dot.classList.add('unsupported');
     message = 'Autofill unavailable here. You can still save this job and use your profile.';

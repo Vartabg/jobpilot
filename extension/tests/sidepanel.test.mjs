@@ -129,6 +129,44 @@ test("profile edits persist and an unanswered work-authorization question remain
   });
 });
 
+test('Workday capture, inspect, fill, attach and tracker buttons use the current step and selected local PDF', async () => {
+  await workspace(async page => {
+    await page.evaluate(() => {
+      const url = 'https://fixture.wd5.myworkdayjobs.com/en-US/External/job/Austin/Engineer_R123/apply/applyManually';
+      chrome.tabs.query = async () => [{id:17,url,title:'Engineer'}];
+      chrome.scripting.executeScript = async request => {
+        __extensionCalls.push({files:request.files,args:request.args});
+        if (request.files) return [{frameId:0}];
+        if (request.args?.[0]?.probe) return [{frameId:0,result:{pageUrl:url,hasForm:true,isTop:true,visibleEmbeds:[],
+          workdayScope:{hasForm:true,canFillDetails:true,canAttachResume:true,stepKey:'applyFlowMyExpPage'}}}];
+        if (request.args?.[0]?.action) return [{frameId:0,result:{status:'complete',provider:'Workday',pageUrl:url,
+          filled:request.args[0].action==='details' ? [{label:'First Name',key:'first_name'}] : [],skipped:[],failed:[],required:[],
+          resume:request.args[0].action==='resume' ? {status:'accepted',filename:'Exact.pdf',message:'Form displays Exact.pdf'} : {status:'not-requested'}}}];
+        return [{frameId:0,result:{pageUrl:url,documentType:'text/html',company:'Fixture',title:'Engineer'}}];
+      };
+    });
+    await page.locator('#capture-job').click();
+    await expect(page.locator('#portal-status')).toContainText('Workday');
+    await expect(page.locator('#portal-status')).toContainText('this step');
+    await page.locator('#inspect-form').click();
+    await expect(page.locator('#notice')).toContainText('Inspection finished');
+    await page.locator('#fill-details').click();
+    await expect(page.locator('#report-summary')).toContainText('1 field confirmed filled');
+    await page.locator('#attach-resume').click();
+    await expect(page.locator('#report-upload')).toContainText('Form displays Exact.pdf');
+    const sent = await page.evaluate(() => __extensionCalls.filter(call=>call.args?.[0]?.action).map(call=>call.args[0]));
+    assert.deepEqual(sent.map(value=>value.action),['inspect','details','resume']);
+    assert.equal(sent[0].profile.first_name,undefined);
+    assert.equal(sent[1].profile.first_name,'Alex');
+    assert.equal(sent[2].resume.metadata.name,'Exact.pdf');
+    assert.ok(sent.every(value=>value.expectedWorkdayStep==='applyFlowMyExpPage'));
+    await page.locator('#save-started').click();
+    const applications = await page.evaluate(async()=> (await import('./model.js')).listApplications());
+    assert.equal(applications.length,1); assert.equal(applications[0].provider,'workday');
+    assert.equal(applications[0].status,'started');
+  }, {seed:{profile:{first_name:'Alex'},resumes:[{path:'initial-resume.pdf',name:'Exact.pdf',label:'Exact'}]}});
+});
+
 test("first-use seeded PDF enters real local IndexedDB and edited details survive restart", async () => {
   await workspace(async page => {
     await page.locator('[data-tab="profile"]').click();
@@ -450,7 +488,7 @@ test('clear report cannot erase a pending action and unsupported pages show acti
     await expect(page.locator('#report-summary')).toContainText('No empty visible required fields');
     await page.evaluate(() => { chrome.tabs.query = async () => [{id:17,url:'https://example.org/jobs/1'}]; });
     await page.locator('#fill-details').click();
-    await expect(page.locator('#notice')).toContainText('Autofill supports Greenhouse, Lever, and Ashby');
+    await expect(page.locator('#notice')).toContainText('Autofill supports Greenhouse, Lever, Ashby, and Workday');
     await expect(page.locator('#report-summary')).toContainText('Autofill interrupted');
     await expect(page.locator('#fill-details')).toBeEnabled();
   });

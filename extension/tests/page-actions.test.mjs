@@ -180,8 +180,8 @@ test('HTTP variants of every supported host remain capture-only', async t => {
   });
 });
 
-test('custom employer, Workday and lookalike pages support manual capture without autofill', async t => {
-  for (const url of ['https://careers.employer.test/role/1', 'https://example.wd5.myworkdayjobs.com/en-US/careers/job/1', 'https://jobs.ashbyhq.com.evil.test/example/123']) await t.test(new URL(url).hostname, async () => {
+test('custom employer and lookalike pages support manual capture without autofill', async t => {
+  for (const url of ['https://careers.employer.test/role/1', 'https://example.wd5.myworkdayjobs.com.evil.test/en-US/careers/job/1', 'https://jobs.ashbyhq.com.evil.test/example/123']) await t.test(new URL(url).hostname, async () => {
     await fixture({url}, async ({calls}) => {
       assert.equal((await captureCurrentJob()).provider, 'Manual');
       for (const action of ['inspect', 'details', 'resume']) await assert.rejects(runCurrentAction(action, profile, resume), /supports|host/i);

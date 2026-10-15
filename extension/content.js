@@ -11,7 +11,45 @@
     }
     return true;
   };
-  const wrapper = el => el.closest(".ashby-application-form-field-entry, .file-upload, .field, .field-wrapper, .form-field, [data-field], [class*='FieldWrapper'], [class*='FileUpload'], fieldset") || el.parentElement;
+  function workdayPage() {
+    const url = new URL(location.href), path = url.pathname.split('/').filter(Boolean);
+    if (url.protocol !== 'https:' || url.username || url.password || url.port) return false;
+    if (/^[a-z]{2,3}(?:-[a-z0-9]{2,8}){1,2}$/i.test(path[0] || '')) path.shift();
+    const index = /^[a-z0-9][a-z0-9-]*\.wd\d+\.myworkdayjobs\.com$/.test(url.hostname) ? 1
+      : /^wd\d+\.myworkdaysite\.com$/.test(url.hostname) && path[0] === 'recruiting' && path[1] ? 3 : -1;
+    return index > 0 && !!path[index - 1] && path[index] === 'job' && !!path[index + 1] && path[index + 1] !== 'apply';
+  }
+  const WORKDAY_STEPS = ['applyFlowMyInfoPage', 'applyFlowMyExpPage', 'applyFlowAutoFillPage', 'applyFlowPrimaryQuestionsPage',
+    'applyFlowSecondaryQuestionsPage', 'applyFlowSupplementaryQuestionsPage', 'applyFlowSelfIdentifyPage',
+    'applyFlowVoluntaryDisclosuresPage', 'applyFlowMyAvailabilityPage', 'applyFlowReviewPage'];
+  const workdayStepIds = new WeakMap();
+  let nextWorkdayStep = 1;
+  function workdayState() {
+    const empty = message => ({hasForm: false, canFillDetails: false, canAttachResume: false, stepKey: '', message, root: null, step: null});
+    if (!workdayPage()) return empty('Open a supported Workday job application.');
+    const auth = [...document.querySelectorAll('[data-automation-id="signInContent"], [data-automation-id="signInFormo"], input[type="password"], [role="dialog"]')]
+      .some(el => visible(el) && (el.matches('input[type="password"], [data-automation-id="signInContent"], [data-automation-id="signInFormo"]')
+        || /\b(sign in|log in|create (?:an? )?account|forgot password)\b/i.test(el.getAttribute('aria-label') || el.querySelector('h1, h2, [data-automation-id="dialogLabel"]')?.textContent || '')));
+    if (auth) return empty('Complete Workday sign-in or account steps yourself, then inspect the visible application step.');
+    const roots = [...document.querySelectorAll('[data-automation-id="applyFlowPage"]')].filter(visible);
+    if (roots.length !== 1) return empty('Open one visible Workday application step before using autofill.');
+    const steps = [...roots[0].querySelectorAll(WORKDAY_STEPS.map(id => `[data-automation-id="${id}"]`).join(','))].filter(visible);
+    if (steps.length !== 1) return empty('The current Workday application step could not be verified. Wait for it to load and inspect again.');
+    const step = steps[0], name = step.getAttribute('data-automation-id');
+    if (!workdayStepIds.has(step)) workdayStepIds.set(step, nextWorkdayStep++);
+    const progress = roots[0].querySelector('[data-automation-id="progressBarActiveStep"]');
+    const stepKey = `${name}:${workdayStepIds.get(step)}:${norm(progress?.textContent).slice(0,200)}`;
+    return {hasForm: true, canFillDetails: ['applyFlowMyInfoPage', 'applyFlowMyExpPage'].includes(name),
+      canAttachResume: ['applyFlowMyExpPage', 'applyFlowAutoFillPage'].includes(name), stepKey, root: roots[0], step,
+      message: ['applyFlowMyInfoPage', 'applyFlowMyExpPage', 'applyFlowAutoFillPage'].includes(name)
+        ? 'Only the current visible Workday step is supported. Review it and move to the next step yourself.'
+        : 'Complete Workday questions, disclosures, availability and final review yourself.'};
+  }
+  globalThis.__jobpilotWorkdayScope = () => {
+    const {root, step, ...metadata} = workdayState(); return metadata;
+  };
+  const wrapper = el => (workdayPage() && (el.closest('[data-automation-id="resumeUpload"]') || el.closest('[data-automation-id^="formField-"]')))
+    || el.closest(".ashby-application-form-field-entry, .file-upload, .field, .field-wrapper, .form-field, [data-field], [class*='FieldWrapper'], [class*='FileUpload'], fieldset") || el.parentElement;
   const ashbyQuestion = el => el.closest('.ashby-application-form-field-entry, fieldset')?.querySelector('.ashby-application-form-question-title');
   function labelText(node) {
     if (!node) return '';
@@ -24,10 +62,20 @@
     for (const id of (el.getAttribute('aria-labelledby') || '').split(/\s+/)) if (id) items.push(labelText(document.getElementById(id)));
     for (const label of el.labels || []) items.push(labelText(label));
     if (el.type === 'file') items.unshift(labelText(wrapper(el)?.querySelector(".upload-label, [id^='upload-label'], label, legend")));
-    if (!items.some(Boolean)) items.push(labelText(ashbyQuestion(el) || wrapper(el)?.querySelector("label, legend, [class*='Label'], [class*='label']")));
+    if (!items.some(Boolean)) items.push(labelText(ashbyQuestion(el) || wrapper(el)?.querySelector("label, legend, [class*='Label'], [class*='label'], h3, h4")));
     return items.filter(Boolean).map(s => s.trim()).filter(Boolean);
   }
-  const identifiers = el => [...labels(el), el.name, el.id, el.placeholder, el.getAttribute('autocomplete')].filter(Boolean).map(norm);
+  const WORKDAY_FIELDS = {firstName:'First name',lastName:'Last name',fullName:'Full name',email:'Email',phoneNumber:'Phone number',
+    addressLine1:'Address line 1',city:'City',postalCode:'Postal code',country:'Country',countryRegion:'State',
+    companyName:'Company',jobTitle:'Job title',schoolName:'School',school:'School',degree:'Degree',fieldOfStudy:'Field of study',
+    startDate:'Start date',endDate:'End date'};
+  const identifiers = el => {
+    if (!workdayPage()) return [...labels(el), el.name, el.id, el.placeholder, el.getAttribute('autocomplete')].filter(Boolean).map(norm);
+    const named = labels(el);
+    if (named.length) return named.map(norm); // A custom question must never inherit an unrelated technical ID.
+    const field = el.getAttribute('data-automation-id') || wrapper(el)?.getAttribute('data-automation-id')?.replace(/^formField-/, '');
+    return WORKDAY_FIELDS[field] ? [norm(WORKDAY_FIELDS[field])] : [];
+  };
   const labelOf = el => (labels(el)[0] || el.name || el.id || el.type || 'Unlabeled field').trim().slice(0,180);
   const required = el => {
     if (el.required || el.getAttribute('aria-required')==='true' || labels(el).some(t=>/\*|\brequired\b/i.test(t))) return true;
@@ -37,24 +85,28 @@
   };
   const reactControl = el => el.closest("[class*='select__control'], [class*='Select__control'], [class*='react-select__control']");
   const selectedReact = el => reactControl(el)?.querySelector("[class*='single-value'], [class*='multi-value'], [class*='singleValue'], [class*='multiValue']")?.textContent?.trim() || '';
-  const combo = el => el.getAttribute('role') === 'combobox' || !!reactControl(el);
+  const workdaySelect = el => workdayPage() && el.tagName === 'BUTTON' && el.getAttribute('aria-haspopup') === 'listbox';
+  const selectedCombo = el => workdaySelect(el) ? (/^(select|choose)(\b|$)|^[-–—]+$/i.test(el.textContent.trim()) ? '' : el.textContent.trim()) : selectedReact(el);
+  const combo = el => el.getAttribute('role') === 'combobox' || !!reactControl(el) || workdaySelect(el);
   const placeholderOption = o => !o || o.disabled || !o.value || /^(select|choose|please select|please choose)(\b|$)/i.test(o.text.trim());
-  const attachedText = container => /\b[^\s]+\.(pdf|docx?|rtf)\b|remove (file|resume)|replace (file|resume)|resume.*uploaded/i.test((container?.innerText || '').replace(/Accepted file types:[^\n]*/gi, ''));
+  const attachedText = container => workdayPage()
+    ? [...(container?.querySelectorAll('[data-automation-id="file-upload-item-name"]') || [])].some(el => visible(el) && el.textContent.trim())
+    : /\b[^\s]+\.(pdf|docx?|rtf)\b|remove (file|resume)|replace (file|resume)|resume.*uploaded/i.test((container?.innerText || '').replace(/Accepted file types:[^\n]*/gi, ''));
   function answered(el) {
     if (['checkbox','radio'].includes(el.type)) return el.checked;
     if (el.type === 'file') return !!el.files?.length || attachedText(wrapper(el));
     if (el.tagName === 'SELECT') return !placeholderOption(el.selectedOptions[0]);
-    if (combo(el)) return !!selectedReact(el) || (!reactControl(el) && !!el.value && el.getAttribute('aria-expanded') !== 'true');
+    if (combo(el)) return !!selectedCombo(el) || (!workdaySelect(el) && !reactControl(el) && !!el.value && el.getAttribute('aria-expanded') !== 'true');
     return !!String(el.value || '').trim();
   }
   function inventory(onError = () => {}) {
     const scopes = applicationScopes();
-    const controls = [...document.querySelectorAll("input, textarea, select, [role='combobox']:not(input), [role='checkbox']:not(input), [role='radiogroup'], .ashby-application-form-input-yesno")]
+    const controls = [...document.querySelectorAll("input, textarea, select, [role='combobox']:not(input), button[aria-haspopup='listbox'], [role='checkbox']:not(input), [role='radiogroup'], .ashby-application-form-input-yesno")]
       .filter(el => (!scopes.length || scopes.some(scope => scope.contains(el))) && !unrelatedControl(el));
     const seenRadio = new Set();
     return controls.flatMap(el => { try {
       const choiceProxy=['radio','checkbox'].includes(el.type) && visible(el.closest('.ashby-application-form-input-radio-group-option, .ashby-application-form-input-checkbox-group-option'));
-      if (el.disabled || el.readOnly || ['hidden','submit','button','reset'].includes(el.type) || !(visible(el) || choiceProxy || (el.type === 'file' && visible(wrapper(el))))) return [];
+      if (el.disabled || el.matches(':disabled') || el.readOnly || ['hidden','submit','reset'].includes(el.type) || el.type === 'button' && !workdaySelect(el) || !(visible(el) || choiceProxy || (el.type === 'file' && visible(wrapper(el))))) return [];
       if (el.matches('.ashby-application-form-input-yesno')) return [{el,label:labelOf(el),type:'choice',required:required(el),answered:!!el.querySelector("button[aria-pressed='true']")}];
       if (el.type === 'radio') {
         if (seenRadio.has(el)) return [];
@@ -74,6 +126,18 @@
   }
   const DENY = /\breferr|\breferred\b|pronoun|citizen|nationality|ethnic|race\b|racial|gender|sex\b|disabil|veteran|consent|agree|certif|signature|privacy|salary|compensation|desired pay|relocat|how.*hear|years.*experience|how many years|why\b|describe|explain|tell (us|me)|cover letter|reason for leaving|emergency|spouse|recruiter|employee (id|number|name)|sponsorship.*type|type.*sponsorship|not authorized/;
   function historyContext(el, profile) {
+    if (workdayPage()) {
+      for (let group = el.parentElement; group; group = group.parentElement) {
+        if (!group.matches('[role="group"][aria-labelledby], fieldset')) continue;
+        const title = norm((group.getAttribute('aria-labelledby') || '').split(/\s+/).map(id => document.getElementById(id)?.textContent || '').join(' ')
+          || group.querySelector(':scope > legend, :scope > h2, :scope > h3')?.textContent);
+        const numbered = /^(work experience|employment history|work history|professional experience|education) (\d+)$/.exec(title);
+        if (!numbered) continue;
+        const type = numbered[1] === 'education' ? 'education' : 'work_history', index = Number(numbered[2]) - 1;
+        return {type,index,row:profile[type]?.[index]};
+      }
+      return null; // Do not shift saved history based on which rows happen to be visible.
+    }
     const groups = [...document.querySelectorAll('fieldset, [data-jobpilot-section]')];
     const classify = group => {
       const title = norm(group.getAttribute('data-jobpilot-section') || group.querySelector(':scope > legend, :scope > h2, :scope > h3')?.textContent);
@@ -95,12 +159,12 @@
       if (!history.row) return {reason:'No saved history for this row'};
       const rules = history.type === 'work_history'
         ? [['company',/^(company|company name|employer|employer name)$/],['title',/^(title|job title|position)$/],['start_date',/^start date$/],['end_date',/^end date$/]]
-        : [['school',/^(school|school name|university|institution|institution name)$/],['degree',/^(degree|degree type)$/],['field',/^(field|field of study|major)$/],['start_date',/^start date$/],['end_date',/^(end date|graduation date)$/]];
+        : [['school',/^(school|school name|school or university|university|institution|institution name)$/],['degree',/^(degree|degree type)$/],['field',/^(field|field of study|major)$/],['start_date',/^start date$/],['end_date',/^(end date|graduation date)$/]];
       const match = rules.find(([,re]) => exact(re));
       if (!match) return {reason:'History field needs review'};
       const key = match[0], value = history.row[key] || '';
       if (key === 'end_date' && history.row.current) return {reason:'Current job: leave end date to you'};
-      if (/date$/.test(key) && ((el.type === 'date' && !/^\d{4}-\d{2}-\d{2}$/.test(value)) || (el.type === 'month' && !/^\d{4}-\d{2}$/.test(value)))) return {reason:'Saved date does not match this field format'};
+      if (/date$/.test(key) && (workdayPage() && !['date','month'].includes(el.type) || (el.type === 'date' && !/^\d{4}-\d{2}-\d{2}$/.test(value)) || (el.type === 'month' && !/^\d{4}-\d{2}$/.test(value)))) return {reason:'Saved date does not match this field format'};
       return {key:`${history.type}.${history.index}.${key}`,value};
     }
     if (ids.some(id => /company|employer|school|university|institution|education|start date|end date|graduation/.test(id))) return {reason:'History context is not clear'};
@@ -110,9 +174,13 @@
     const sponsorshipLabels = labels(el).map(label => norm(label.replace(/\([^)]*\)/g, '')));
     if (sponsorshipLabels.some(id => /^(do|will|would) you (now or in the future )?(require|need)( visa)? sponsorship( (now|in the future|for employment|to work|now or in the future))* (to legally work |to work )?in (the )?(united states|us|u s|usa)$/.test(id)) || exact(/^(do|will|would) you (now or in the future )?(require|need)( visa)? sponsorship( (now|in the future|for employment|to work|now or in the future))* in (the )?(united states|us|u s|usa)$/)) return usProfile ? {key:'requires_sponsorship',value:typeof profile.requires_sponsorship === 'boolean' ? (profile.requires_sponsorship ? 'Yes' : 'No') : ''} : {reason:'Sponsorship country does not match your saved profile'};
     const full = [profile.first_name,profile.last_name].filter(Boolean).join(' ');
+    if (workdayPage() && exact(/^(phone|phone number|mobile|mobile number|telephone|tel)$/)
+      && [...(workdayState().step?.querySelectorAll('[data-automation-id], button, select') || [])].some(node => visible(node)
+        && (/(?:^|[-_.])countryPhoneCode(?:$|[-_.])/.test(node.getAttribute('data-automation-id') || '')
+          || labels(node).some(label => /^(country phone code|phone country code|country calling code)$/.test(norm(label)))))) return {reason:'This phone field has a separate country code. Review its format and enter it yourself.'};
     const rules = [
       ['preferred_name',/^(what is your )?preferred name$/,profile.preferred_name],
-      ['first_name',/^(first name|given name|firstname|givenname)$/,profile.first_name],['last_name',/^(last name|family name|surname|lastname|familyname)$/,profile.last_name],['full_name',/^(full name|your name|applicant name|name|name full|(what is your )?(legal )?first and last name)$/,full],
+      ['first_name',/^(first name|given names?|firstname|givenname|given name s)$/,profile.first_name],['last_name',/^(last name|family name|surname|lastname|familyname)$/,profile.last_name],['full_name',/^(full name|your name|applicant name|name|name full|(what is your )?(legal )?first and last name)$/,full],
       ['email',/^(email|e mail|email address)$/,profile.email],['phone',/^(what is your )?(phone|phone number|mobile|mobile number|cell phone|telephone|tel)$/,profile.phone],
       ['address_line1',/^(address line 1|address line1|street address|address line one|what is the first line of your address)$/,profile.address_line1],
       ['address_line2',/^(address line 2|address line2|address line two|what is the second line of your address( if relevant)?)$/,profile.address_line2],
@@ -159,7 +227,8 @@
     const listId = el.getAttribute('aria-controls') || el.getAttribute('aria-owns') || input?.getAttribute('aria-controls') || input?.getAttribute('aria-owns');
     if (listId) return document.getElementById(listId);
     // An unassociated portal menu is deliberately not searched globally.
-    const scope = ctrl.closest('.ashby-application-form-field-entry, .select-shell, .field, .field-wrapper, .form-field, [data-field], fieldset') || ctrl.parentElement;
+    const scope = (workdayPage() && ctrl.closest('[data-automation-id^="formField-"]'))
+      || ctrl.closest('.ashby-application-form-field-entry, .select-shell, .field, .field-wrapper, .form-field, [data-field], fieldset') || ctrl.parentElement;
     const menus = [...scope.querySelectorAll("[role='listbox']")].filter(visible);
     return menus.length === 1 ? menus[0] : null;
   }
@@ -174,9 +243,10 @@
     if (!guard()) return 'interrupted';
     ctrl.dispatchEvent(new MouseEvent('mouseup',{bubbles:true,button:0}));
     if (!guard()) return 'interrupted';
+    if (workdaySelect(el)) { ctrl.click(); if (!guard()) return 'interrupted'; }
     if (input && !/^(Yes|No)$/.test(value)) setText(input,rule.key === 'location' ? profile.city : value,guard);
     const query = input?.value || '';
-    const applicantChanged = () => !!selectedReact(el) || (input && input.value !== query);
+    const applicantChanged = () => !!selectedCombo(el) || (input && input.value !== query);
     let option = null;
     for (let attempt=0; attempt<35; attempt++) {
       await pause(100);
@@ -199,13 +269,13 @@
       await pause(100);
       if (!guard()) return 'interrupted';
     }
-    const ok = !!option && el.getAttribute('aria-expanded')!=='true' && (optionMatches(selectedReact(el),rule,profile) || (!reactControl(el) && optionMatches(el.value || el.textContent,rule,profile)));
+    const ok = !!option && el.getAttribute('aria-expanded')!=='true' && (optionMatches(selectedCombo(el),rule,profile) || (!reactControl(el) && optionMatches(el.value || el.textContent,rule,profile)));
     if (!ok && applicantChanged()) return 'preserved';
     if (!guard()) return 'interrupted';
     (input || ctrl).dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',code:'Escape',bubbles:true}));
     if (!guard()) return 'interrupted';
     input?.blur();
-    if (!ok && input?.isConnected && !selectedReact(el) && input.value === query) setText(input,before,guard);
+    if (!ok && input?.isConnected && !selectedCombo(el) && input.value === query) setText(input,before,guard);
     return ok;
   }
   const unrelatedControl = el => {
@@ -217,6 +287,7 @@
       || /\b(newsletter|subscribe|subscription)\b|^(?:search|log[ -]?in|sign[ -]?in)\b/i.test(formName);
   };
   function applicationScopes() {
+    if (workdayPage()) { const state = workdayState(); return state.step ? [state.step] : []; }
     const matches = [...document.querySelectorAll('form, [role="form"], #application-form')].filter(scope =>
       (/application|ashby/i.test(`${scope.id} ${scope.className}`) || [...scope.querySelectorAll("input[type='file']")].some(el =>
         identifiers(el).some(id => /\b(resume|cv|curriculum vitae)\b/.test(id)) && !identifiers(el).some(id => /cover letter/.test(id))))
@@ -228,7 +299,8 @@
     const scopes = applicationScopes();
     const matches = [...document.querySelectorAll("input[type='file']")].filter(el => !el.disabled && !unrelatedControl(el)
       && (!scopes.length || scopes.some(scope => scope.contains(el))) && (visible(el) || visible(wrapper(el)))
-      && identifiers(el).some(id => /\b(resume|cv|curriculum vitae)\b/.test(id)) && !identifiers(el).some(id => /cover letter/.test(id)));
+      && (workdayPage() && el.closest('[data-automation-id="resumeUpload"]') || identifiers(el).some(id => /\b(resume|cv|curriculum vitae)\b/.test(id)))
+      && (!identifiers(el).some(id => /cover letter/.test(id)) || workdayPage() && identifiers(el).some(id => /\b(resume|cv|curriculum vitae)\b/.test(id))));
     return matches.length === 1 ? {el:matches[0],wrapper:wrapper(matches[0])} : null;
   }
   async function attachResume(resume, guard) {
@@ -254,9 +326,13 @@
         await pause(150);
         if (!guard()) return interrupted();
         const scope = target.wrapper?.isConnected ? target.wrapper : resumeTarget()?.wrapper, text = scope?.innerText || '';
+        if (workdayPage() && [...(scope?.querySelectorAll('[data-automation-id="file-upload-failed"]') || [])].some(visible)) return {status:'failed',filename,message:'The form reported an upload error. Review the page.'};
         const alerts = [...(scope?.querySelectorAll("[role='alert'], .error, [class*='Error'], [class*='error']") || [])].filter(visible).map(el => el.textContent).join(' ');
         if (/failed|invalid|too large|unsupported|not (allowed|accepted)|error|unable/i.test(alerts)) return {status:'failed',filename,message:'The form reported an upload error. Review the page.'};
-        if (text.includes(filename) && !/uploading|processing|please wait/i.test(text)) return {status:'accepted',filename,message:'The form displays this résumé attachment. Review it before submitting.'};
+        const accepted = !workdayPage() || ![...(scope?.querySelectorAll('[data-automation-id="file-loading-dots"]') || [])].some(visible)
+          && [...(scope?.querySelectorAll('[data-automation-id="file-upload-successful"]') || [])].some(visible)
+          && [...(scope?.querySelectorAll('[data-automation-id="file-upload-item-name"]') || [])].some(el => visible(el) && el.textContent.trim() === filename);
+        if (accepted && text.includes(filename) && !/uploading|processing|please wait/i.test(text)) return {status:'accepted',filename,message:'The form displays this résumé attachment. Review it before submitting.'};
       }
       return {status:'prepared',filename,message:'File selected; the form has not confirmed acceptance. Check the attachment on the page.'};
     } catch (error) { return {status:'failed',filename,message:error.message || 'The file could not be attached. Upload it manually.'}; }
@@ -270,18 +346,31 @@
     if (!el?.isConnected) return false;
     if ((el.validity && !el.validity.valid) || el.getAttribute('aria-invalid') === 'true') return false;
     if (el.tagName === 'SELECT') return !placeholderOption(el.selectedOptions[0]) && optionMatches(el.selectedOptions[0].textContent,rule,profile);
-    if (combo(el)) return el.getAttribute('aria-expanded')!=='true' && optionMatches(selectedReact(el) || (!reactControl(el) ? el.value || el.textContent : ''),rule,profile);
+    if (combo(el)) return el.getAttribute('aria-expanded')!=='true' && optionMatches(selectedCombo(el) || (!reactControl(el) ? el.value || el.textContent : ''),rule,profile);
     return el.value === String(rule.value);
   }
   // Re-injecting the script must not let a second click race an existing run.
   const runtime = globalThis.__jobpilotAutofillRuntime ||= {running:false};
-  globalThis.__jobpilotRun = async ({action='inspect',profile={},resume=null,requireVisible=false}={}) => {
+  globalThis.__jobpilotRun = async ({action='inspect',profile={},resume=null,requireVisible=false,expectedWorkdayStep=''}={}) => {
     if (!['inspect','details','resume'].includes(action)) throw new Error('Unknown JobPilot action');
-    const report = {action,status:'complete',warnings:[],filled:[],skipped:[],failed:[],required:[],resume:{status:'not-requested',message:''},provider:location.hostname.includes('greenhouse') ? 'Greenhouse' : location.hostname.includes('lever') ? 'Lever' : location.hostname.includes('ashby') ? 'Ashby' : 'Unsupported',pageUrl:location.href};
-    if (!hosts.has(location.hostname) || location.protocol !== 'https:') { report.skipped.push({label:'Page',reason:'This frame is outside the supported application hosts'}); return report; }
+    const workday = workdayPage();
+    const report = {action,status:'complete',warnings:[],filled:[],skipped:[],failed:[],required:[],resume:{status:'not-requested',message:''},provider:workday ? 'Workday' : location.hostname.includes('greenhouse') ? 'Greenhouse' : location.hostname.includes('lever') ? 'Lever' : location.hostname.includes('ashby') ? 'Ashby' : 'Unsupported',pageUrl:location.href};
+    if ((!hosts.has(location.hostname) && !workday) || location.protocol !== 'https:') { report.skipped.push({label:'Page',reason:'This frame is outside the supported application hosts'}); return report; }
     const warn = message => { if (!report.warnings.includes(message)) report.warnings.push(message); };
+    const initialWorkday = workday ? workdayState() : null;
+    if (initialWorkday && (!initialWorkday.hasForm || action === 'details' && !initialWorkday.canFillDetails || action === 'resume' && !initialWorkday.canAttachResume
+      || expectedWorkdayStep && expectedWorkdayStep !== initialWorkday.stepKey)) {
+      report.status='interrupted'; warn(expectedWorkdayStep && expectedWorkdayStep !== initialWorkday.stepKey
+        ? 'The Workday application step changed. Inspect the current step before retrying.' : initialWorkday.message); return report;
+    }
     let cancelled = false;
-    const noticeChange = () => { if (location.href !== report.pageUrl || requireVisible && document.visibilityState !== 'visible') cancelled = true; };
+    const noticeChange = () => {
+      if (location.href !== report.pageUrl || requireVisible && document.visibilityState !== 'visible') cancelled = true;
+      if (initialWorkday) {
+        const current = workdayState();
+        if (!current.hasForm || current.stepKey !== initialWorkday.stepKey || current.root !== initialWorkday.root || current.step !== initialWorkday.step) cancelled = true;
+      }
+    };
     const noticePageHide = () => { cancelled = true; };
     const guard = () => {
       noticeChange();
@@ -292,11 +381,17 @@
     if (runtime.running) { report.status='interrupted'; warn('Autofill is already running on this page. Wait for its report before retrying.'); return report; }
     if (action !== 'inspect' && applicationScopes().length > 1) { report.status='interrupted'; warn('Several application forms are visible in this document. Open the intended form separately before autofilling.'); return report; }
     runtime.running=true;
+    let workdayObserver;
     if (action !== 'inspect') {
       document.addEventListener('visibilitychange', noticeChange);
       window.addEventListener('pagehide', noticePageHide);
       window.addEventListener('popstate', noticeChange);
       window.addEventListener('hashchange', noticeChange);
+      if (initialWorkday) {
+        workdayObserver = new MutationObserver(noticeChange);
+        workdayObserver.observe(initialWorkday.root, {subtree:true,childList:true,characterData:true,attributes:true,
+          attributeFilter:['data-automation-id','aria-current','aria-hidden','hidden','style']});
+      }
     }
     const outcomes = new Map(), attempts = new Map();
     const record = (token,kind,item,rule=null,retryable=false) => outcomes.set(token,{kind,item,rule,retryable});
@@ -328,7 +423,7 @@
             const {el}=live[0];
             if (['radio','checkbox','choice','file','password'].includes(type)) { record(token,'skipped',{label,reason:type==='file' ? 'Use Attach résumé separately' : 'Answer this question yourself'}); continue; }
             if (answered(el)) { record(token,'skipped',{label,reason:'Your existing answer was preserved'}); continue; }
-            if (combo(el) && String(el.value || '').trim()) { record(token,'skipped',{label,reason:'An existing dropdown search was preserved. Choose its option on the page.'}); continue; }
+            if (combo(el) && !workdaySelect(el) && String(el.value || '').trim()) { record(token,'skipped',{label,reason:'An existing dropdown search was preserved. Choose its option on the page.'}); continue; }
             const rule=ruleFor(el,profile);
             if (rule.reason) { record(token,'skipped',{label,reason:rule.reason}); continue; }
             if (!rule.value) { record(token,'skipped',{label,reason:'No saved profile value'}); continue; }
@@ -372,6 +467,7 @@
       window.removeEventListener('pagehide', noticePageHide);
       window.removeEventListener('popstate', noticeChange);
       window.removeEventListener('hashchange', noticeChange);
+      workdayObserver?.disconnect();
     }
     for (const outcome of outcomes.values()) report[outcome.kind].push(outcome.item);
     if (report.status==='complete' && (report.failed.length || report.warnings.length || ['failed','no-target','prepared'].includes(report.resume.status))) report.status='partial';

@@ -1,4 +1,4 @@
-# Button and page audit — 0.9.1
+# Button and page audit — 0.10.0
 
 This release tests the outcome of each control group with synthetic data and
 isolated browser profiles. It does not submit applications or certify every
@@ -34,8 +34,10 @@ a guarantee of universal autofill support.
 ## Pages and documents
 
 Supported autofill hosts are the four Greenhouse domains, two Lever domains,
-and `jobs.ashbyhq.com` already in the manifest. HTTP variants, arbitrary employer
-sites (including unsupported ATS hosts), browser-internal URLs, and file/PDF
+and `jobs.ashbyhq.com` already in the manifest. Workday candidate job routes on
+`tenant.wdN.myworkdayjobs.com` and `wdN.myworkdaysite.com` use the existing
+toolbar-triggered activeTab grant. Employee Workday, account/search pages, HTTP
+variants, arbitrary employer sites, browser-internal URLs, and file/PDF
 documents do not receive unsupported autofill injections. The local profile,
 tracker, exports, and career workspace remain available independently of page
 autofill access. Capture needs an ordinary job webpage and valid page access.
@@ -46,6 +48,18 @@ replaced controls, visible/hidden/ambiguous frames, unrelated third-party frames
 missing results, expired permissions, tab switches, pending navigation, and
 changes while a dropdown or upload is waiting. Unclear or restricted controls
 remain manual, with an explanation in the result.
+
+Workday checks cover both candidate URL families, optional locale prefixes,
+job/apply identity, contact controls, button/listbox dropdowns, existing work
+and education rows, explicit résumé upload, and account gates. Step changes are
+checked even when the URL stays the same. No Next, account creation, consent,
+or submission action is automated. See the Workday section of README.md for
+the current scope and manual steps.
+
+Selectors were checked against the public Workday candidate apply-flow bundle:
+<https://www.myworkdaycdn.com/wday/asset/candidate-experience-apply-flow/candidate-experience-apply-flow.min.js>.
+Anonymous public pages establish current markup; synthetic browser fixtures
+exercise writes without using an employer's saved application or personal data.
 
 ## Run the checks
 
