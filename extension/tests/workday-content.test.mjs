@@ -524,3 +524,145 @@ test('Workday file help text and pending filenames cannot claim upload acceptanc
       });
   });
 });
+
+// Disclosure controls reproduce the fixed public questions and associated
+// portal listbox observed read-only on Workiva, 2026-10-16. Values below are
+// synthetic; tests never load or submit a real application.
+const protectedChoice='I IDENTIFY AS ONE OR MORE OF THE CLASSIFICATIONS OF PROTECTED VETERANS LISTED ABOVE';
+const veteranDecline='I DO NOT WISH TO SELF-IDENTIFY';
+const savedDisclosures=(veteran_status='',other_demographics='')=>({...profile,disclosure_preferences:{veteran_status,other_demographics}});
+const disclosureSelect=(id,question,options,extra='')=>`<div data-automation-id="formField-${id}"><label for="${id}">${question}</label><select id="${id}" ${extra}><option value="">Select One</option>${options.map((text,index)=>`<option value="choice-${index}">${text}</option>`).join('')}</select></div>`;
+const disclosureRadios=(id,question,options,extra='')=>`<div data-automation-id="formField-${id}"><label id="${id}-label">${question}</label><div aria-required="true" aria-labelledby="${id}-label">${options.map((text,index)=>`<label><input id="${id}-${index}" name="${id}" type="radio" style="opacity:0" value="choice-${index}" ${extra}>${text}</label>`).join('')}</div></div>`;
+
+test('disclosure veteran enums map exact general and protected choices without inferring protected status',async t=>{
+  for(const [pref,general,protectedIndex] of [
+    ['protected_veteran',1,0],['veteran',0,-1],['not_veteran',2,1],['decline',3,2],
+  ]) await t.test(pref,async()=>{
+    await fixture(flow(disclosureSelect('general','Please confirm your veteran status *',['Yes',protectedChoice,'I am not a veteran',veteranDecline])+
+      disclosureSelect('protected','Are you a protected veteran? *',[protectedChoice,'I am not a protected veteran',veteranDecline])+
+      disclosureSelect('gender','Gender *',['Female','Wish to not disclose'])+input('manual-name','First Name')+transparentAgreement(),'applyFlowVoluntaryDisclosuresPage'),async page=>{
+      const result=await execute(page,'details',savedDisclosures(pref));
+      assert.equal(await page.locator('#general').inputValue(),'choice-'+general);
+      assert.equal(await page.locator('#protected').inputValue(),protectedIndex<0?'':'choice-'+protectedIndex);
+      assert.equal(await page.locator('#gender').inputValue(),'');assert.equal(await page.locator('#manual-name').inputValue(),'');
+      assert.equal(await page.locator('input[type=checkbox]').isChecked(),false);assert.equal(result.failed.length,0);
+      assert.equal(await page.evaluate(()=>navigationClicks),0);
+      for(const secret of ['protected_veteran',protectedChoice,veteranDecline,'choice-']) assert.equal(JSON.stringify(result).includes(secret),false,secret);
+    });
+  });
+});
+
+test('disclosure nondisclosure covers only named demographics and never answers unset veteran preferences',async()=>{
+  const fields=[['gender','Gender','Wish to not disclose'],['pronouns','What are your pronouns?','Prefer not to say'],
+    ['race','What race or ethnicity do you most closely identify with?','I do not wish to answer. (United States of America)'],
+    ['ethnicity','Ethnicity','Decline to disclose'],['orientation','Sexual orientation','Prefer not to answer'],
+    ['disability','Do you have a disability?','I do not want to answer'],['disability-form','Disability status','Decline to self-identify']];
+  await fixture(flow(fields.map(([id,question,decline])=>disclosureSelect(id,question,['No',decline])).join('')+
+    disclosureSelect('veteran','Veteran status',['Yes',veteranDecline])+input('signature','Full Name')+input('date','Date','type=date')+
+    transparentAgreement(),'applyFlowSelfIdentifyPage'),async page=>{
+    const result=await execute(page,'details',savedDisclosures('','decline'));
+    for(const [id] of fields) assert.equal(await page.locator('#'+id).inputValue(),'choice-1',id);
+    for(const id of ['veteran','signature','date']) assert.equal(await page.locator('#'+id).inputValue(),'');
+    assert.equal(await page.locator('input[type=checkbox]').isChecked(),false);assert.equal(result.filled.length,fields.length);
+    assert.equal(await page.evaluate(()=>navigationClicks),0);
+  });
+});
+
+test('disclosure options reject subtype, spouse, negation, duplicate, disabled and value-collision bait before any events',async()=>{
+  const cases=[
+    ['subtype','Please confirm your veteran status',['Disabled veteran','Recently separated veteran','Armed Forces Service Medal veteran','Active duty wartime veteran']],
+    ['negated','Please confirm your veteran status',['I IDENTIFY AS A VETERAN, JUST NOT A PROTECTED VETERAN','I am not a protected veteran']],
+    ['qualified','Please confirm your veteran status',[protectedChoice+' (disabled veteran)']],
+    ['duplicate','Are you a protected veteran?',[protectedChoice,protectedChoice]],
+    ['spouse','Are you the spouse of a protected veteran?',['Yes',protectedChoice]],
+    ['branch','What branch of the military did you serve in?',['Yes',protectedChoice]],
+    ['disabled-question','Are you a disabled veteran?',['Yes',protectedChoice]],
+  ];
+  const collision=disclosureSelect('collision','Gender',['Female','Prefer not to answer']).replaceAll('value="choice-1"','value="choice-0"');
+  const disabled=disclosureSelect('disabled','Gender',['Prefer not to answer']).replace('<option value="choice-0">','<option disabled value="choice-0">');
+  await fixture(flow(cases.map(([id,q,opts])=>disclosureSelect(id,q,opts)).join('')+collision+disabled+
+    disclosureSelect('protected-only-no','Are you a veteran?',['Not a protected veteran'])+
+    disclosureSelect('disability-no','Do you have a disability?',['No','No disability']), 'applyFlowVoluntaryDisclosuresPage')+
+    '<script>window.choiceEvents=0;document.querySelectorAll("select").forEach(el=>{el.oninput=el.onchange=()=>choiceEvents++});</script>',async page=>{
+    const result=await execute(page,'details',savedDisclosures('protected_veteran','decline'));
+    assert.equal(result.filled.length,0);assert.equal(await page.evaluate(()=>choiceEvents),0);
+    assert.deepEqual(await page.locator('select').evaluateAll(els=>els.map(el=>el.value)),Array(cases.length+4).fill(''));
+    assert.equal(await page.evaluate(()=>navigationClicks),0);
+  });
+  await fixture(flow(disclosureSelect('general','Are you a veteran?',['Not a protected veteran']),'applyFlowPrimaryQuestionsPage'),async page=>{
+    assert.equal((await execute(page,'details',savedDisclosures('not_veteran'))).filled.length,0);
+    assert.equal(await page.locator('#general').inputValue(),'');
+  });
+});
+
+test('disclosure existing selections and native multiple selections are preserved without events',async()=>{
+  const existing=disclosureSelect('existing','Gender',['Male','Wish to not disclose']).replace('value="choice-0"','selected value="choice-0"');
+  const multiple=disclosureSelect('multiple','Race',['Existing A','Existing B','Prefer not to answer'],'multiple').replace('value="choice-0"','selected value="choice-0"').replace('value="choice-1"','selected value="choice-1"');
+  await fixture(flow(existing+multiple+button('existing-button','Please confirm your veteran status', 'PRIVATE_EXISTING_CHOICE')+
+    disclosureRadios('existing-radio','Are you a veteran?',['Yes','No']).replace('id="existing-radio-1"','checked id="existing-radio-1"'),'applyFlowVoluntaryDisclosuresPage')+
+    '<script>window.choiceEvents=0;document.querySelectorAll("select,input,button[aria-haspopup]").forEach(el=>{el.oninput=el.onchange=el.onclick=()=>choiceEvents++});</script>',async page=>{
+    const before=await page.locator('[data-automation-id="applyFlowVoluntaryDisclosuresPage"]').innerHTML();
+    const result=await execute(page,'details',savedDisclosures('protected_veteran','decline'));
+    assert.equal(result.filled.length,0);assert.equal(await page.evaluate(()=>choiceEvents),0);
+    assert.equal(await page.locator('[data-automation-id="applyFlowVoluntaryDisclosuresPage"]').innerHTML(),before);
+    assert.equal(JSON.stringify(result).includes('PRIVATE_EXISTING_CHOICE'),false);
+    assert.deepEqual(await page.locator('#multiple').evaluate(el=>[...el.selectedOptions].map(o=>o.value)),['choice-0','choice-1']);
+  });
+});
+
+test('disclosure Workiva button portal options become associated only after opening and match fixed labels',async()=>{
+  await fixture(flow(questionnaireChoice('veteran','Please confirm your veteran status')+questionnaireChoice('race','What race or ethnicity do you most closely identify with?')+
+    questionnaireChoice('gender','Gender'),'applyFlowVoluntaryDisclosuresPage')+choices('primaryQuestionnaire--veteran',['Yes',protectedChoice],150)+
+    choices('primaryQuestionnaire--race',['Another choice','I do not wish to answer. (United States of America)'],150)+choices('primaryQuestionnaire--gender',['Female','Wish to not disclose'],150),async page=>{
+    assert.equal(await page.locator('#primaryQuestionnaire--veteran').getAttribute('aria-controls'),null);
+    const result=await execute(page,'details',savedDisclosures('protected_veteran','decline'));
+    assert.equal(result.filled.length,3);assert.equal(result.failed.length,0);
+    assert.equal(await page.locator('#primaryQuestionnaire--veteran').textContent(),protectedChoice);assert.equal(await page.locator('#primaryQuestionnaire--gender').textContent(),'Wish to not disclose');
+    assert.equal(JSON.stringify(result).includes(protectedChoice),false);
+    assert.equal((await execute(page,'details',savedDisclosures('decline','decline'))).filled.length,0,'repeat preserves the first answers');
+    assert.equal(await page.evaluate(()=>navigationClicks),0);
+  });
+});
+
+test('disclosure native radio groups use only their fixed question and unique visible associated choices',async t=>{
+  for(const [pref,options,index] of [['protected_veteran',['Yes',protectedChoice],1],['veteran',['Yes','No'],0],['not_veteran',['Yes','No'],1],['decline',['Yes',veteranDecline],1]]) await t.test(pref,async()=>{
+    await fixture(flow(disclosureRadios('veteran','Please confirm your veteran status *',options)+
+      disclosureRadios('gender','Gender *',['Female','Wish to not disclose'])+transparentAgreement(),'applyFlowVoluntaryDisclosuresPage'),async page=>{
+      const result=await execute(page,'details',savedDisclosures(pref,'decline'));
+      assert.equal(await page.locator('#veteran-'+index).isChecked(),true);assert.equal(await page.locator('#gender-1').isChecked(),true);
+      assert.equal(await page.locator('input[type=checkbox]').isChecked(),false);assert.equal(result.filled.length,2);
+      assert.deepEqual(result.filled.map(item=>item.label),['Please confirm your veteran status *','Gender *']);
+      assert.equal(await page.evaluate(()=>navigationClicks),0);
+    });
+  });
+});
+
+test('disclosure radios reject hidden, off-field, ambiguous and unverified option-only questions',async()=>{
+  const html=disclosureRadios('duplicate','Gender',['Prefer not to answer','Prefer not to answer'])+
+    disclosureRadios('hidden','Gender',['Female','Prefer not to answer']).replace('<label><input id="hidden-1"','<label style="display:none"><input id="hidden-1"')+
+    disclosureRadios('hidden-question','Gender',['Prefer not to answer']).replace('<label id="hidden-question-label"','<label style="display:none" id="hidden-question-label"')+
+    '<div data-automation-id="formField-unverified"><label><input type="radio" id="unverified" name="unverified">Veteran status</label><label><input type="radio" name="unverified">Prefer not to answer</label></div>'+
+    disclosureRadios('collision-radio','Gender',['Prefer not to answer'])+'<div data-automation-id="formField-other-radio"><label><input id="neighbor-answer" type="radio" name="collision-radio" checked>Applicant answer</label></div>'+
+    '<div data-automation-id="formField-off"><label id="off-label">Gender</label><div aria-required="true" aria-labelledby="off-label"><input id="off" type="radio" name="off"></div></div><div data-automation-id="formField-neighbor"><label for="off">Prefer not to answer</label></div>';
+  await fixture(flow(html,'applyFlowVoluntaryDisclosuresPage'),async page=>{
+    const result=await execute(page,'details',savedDisclosures('decline','decline'));
+    assert.equal(result.filled.length,0);assert.equal(await page.locator('input:checked').count(),1);
+    assert.equal(await page.locator('#neighbor-answer').isChecked(),true,'same-name native questions cannot uncheck a neighboring answer');
+  });
+});
+
+test('disclosure delayed menu stops if the fixed question or same-URL step changes',async t=>{
+  for(const change of ['question','step']) await t.test(change,async()=>{
+    await fixture(flow(button('gender','Gender *'),'applyFlowVoluntaryDisclosuresPage')+choices('gender',['Wish to not disclose'],350),async page=>{
+      const running=execute(page,'details',savedDisclosures('','decline'));await page.waitForSelector('#gender[aria-expanded=true]');
+      await page.evaluate(change=>{
+        if(change==='question') document.querySelector('#gender-label').textContent='Are you authorized to work?';
+        else document.querySelector('[data-automation-id="applyFlowVoluntaryDisclosuresPage"]').outerHTML='<div data-automation-id="applyFlowSelfIdentifyPage"><label>Full name<input id="next-name"></label></div>';
+      },change);
+      const result=await running;assert.equal(result.status,'interrupted');assert.equal(result.filled.length,0);
+      if(change==='question') assert.equal(await page.locator('#gender').textContent(),'Select One');
+      else assert.equal(await page.locator('#next-name').inputValue(),'');
+      assert.equal(await page.evaluate(()=>navigationClicks),0);
+    });
+  });
+});

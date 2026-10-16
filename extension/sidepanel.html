@@ -94,6 +94,13 @@
             <label>Require U.S. employment sponsorship<select name="requires_sponsorship"><option value="">Choose for your situation</option><option value="yes">Yes</option><option value="no">No</option></select></label>
             <p class="fine-print">Unanswered questions stay blank. These saved answers apply to explicitly U.S. questions when your profile country is the United States.</p>
           </section>
+          <section class="card" aria-labelledby="disclosure-preferences-heading">
+            <h2 id="disclosure-preferences-heading">Voluntary disclosure preferences</h2>
+            <p>Optional preferences you choose and save locally. Leave a preference blank to answer those questions yourself.</p>
+            <label>Veteran status preference<select name="disclosure_veteran_status"><option value="">Answer manually</option><option value="protected_veteran">I identify as a protected veteran</option><option value="veteran">I identify as a veteran</option><option value="not_veteran">I do not identify as a veteran</option><option value="decline">Prefer not to disclose</option></select></label>
+            <label>Other demographic questions<select name="disclosure_other_demographics"><option value="">Answer manually</option><option value="decline">Choose an offered decline option</option></select></label>
+            <p class="fine-print">The demographic preference applies only to gender, pronouns, race, ethnicity, sexual orientation, and disability questions. Fill details applies a preference only to an unambiguous offered choice and preserves existing answers. Agreements, consent, and attestations remain manual.</p>
+          </section>
           <section class="card">
             <div class="section-heading"><div><h2>Work history</h2><p>Use accurate titles and dates.</p></div><button id="add-work" class="button small" type="button">Add</button></div>
             <div id="work-history" class="repeater"></div>

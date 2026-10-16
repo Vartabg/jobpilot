@@ -48,6 +48,46 @@ test("profile preserves unknown authorization and retains only verified structur
   await assert.rejects(run("saveProfile", [{ ...emptyProfile(), work_authorized: "yes" }]), /authorization/i);
 });
 
+test('voluntary disclosure preferences default to blank, retain only supported fields and round-trip through backups', async () => {
+  const blank={veteran_status:'',other_demographics:''};
+  assert.deepEqual(emptyProfile().disclosure_preferences,blank);
+  assert.deepEqual((await run('getProfile',[])).disclosure_preferences,blank);
+  for(const veteran_status of ['','protected_veteran','veteran','not_veteran','decline']) {
+    const saved=await run('saveProfile',[{disclosure_preferences:{veteran_status,other_demographics:'decline',gender:'PRIVATE',unknown:true},gender:'PRIVATE'}]);
+    assert.deepEqual(saved.disclosure_preferences,{veteran_status,other_demographics:'decline'});
+    assert.equal('gender' in saved,false);
+  }
+  const backup=await run('exportData',[]); data={};
+  await run('importData',[backup]);
+  assert.deepEqual((await run('getProfile',[])).disclosure_preferences,{veteran_status:'decline',other_demographics:'decline'});
+  const imported=await run('importData',[{...backup,profile:{disclosure_preferences:{veteran_status:'veteran',other_demographics:'',unknown:'PRIVATE'}}},{replaceProfile:true}]);
+  assert.equal(imported.profileImported,true);
+  assert.deepEqual((await run('getProfile',[])).disclosure_preferences,{veteran_status:'veteran',other_demographics:''});
+  assert.equal(JSON.stringify(await run('exportData',[])).includes('PRIVATE'),false);
+  assert.deepEqual((await run('saveProfile',[{disclosure_preferences:blank}])).disclosure_preferences,blank);
+});
+
+test('invalid disclosure preferences reject save and import atomically without changing existing data', async () => {
+  await run('saveProfile',[{first_name:'Existing',disclosure_preferences:{veteran_status:'decline'}}]);
+  for(const disclosure_preferences of [null,[],false,'decline',42,{veteran_status:true},{veteran_status:null},{veteran_status:'yes'},
+    {veteran_status:' decline '},{other_demographics:'yes'},{other_demographics:1},{other_demographics:null}]) {
+    const before=structuredClone(data),count=writes;
+    await assert.rejects(run('saveProfile',[{disclosure_preferences}]),/disclosure/i);
+    await assert.rejects(run('importData',[{schemaVersion:1,profile:{disclosure_preferences},applications:[],resumes:[]},{replaceProfile:true}]),/disclosure/i);
+    assert.deepEqual(data,before); assert.equal(writes,count);
+  }
+});
+
+test('a preference-only profile is protected from optional seeding and implicit backup replacement', async () => {
+  const preferences={veteran_status:'',other_demographics:'decline'};
+  await run('saveProfile',[{disclosure_preferences:preferences}]);
+  let requested=false; globalThis.fetch=async()=>{requested=true;throw new Error('Seed must not load');};
+  assert.equal((await initializeLocalData()).reason,'existing_data'); assert.equal(requested,false);
+  const result=await run('importData',[{schemaVersion:1,profile:{first_name:'Incoming'},applications:[],resumes:[]}]);
+  assert.equal(result.profilePreserved,true);
+  const profile=await run('getProfile',[]); assert.equal(profile.first_name,''); assert.deepEqual(profile.disclosure_preferences,preferences);
+});
+
 test("job identity dedupes tracking parameters and apply paths while preserving different requisitions", () => {
   const greenhouse = normalizeJobUrl("https://boards.greenhouse.io/example/jobs/123?gh_src=campaign");
   const greenhouseNewHost = normalizeJobUrl("https://job-boards.greenhouse.io/example/jobs/123?utm_source=foo#apply");

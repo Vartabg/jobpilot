@@ -17,6 +17,7 @@ const PROFILE_FIELDS = [
   'first_name', 'last_name', 'preferred_name', 'email', 'phone', 'address_line1', 'address_line2', 'city', 'state', 'postal_code',
   'country', 'linkedin_url', 'github_url', 'portfolio_url', 'current_title',
 ];
+const DISCLOSURE_FIELDS = ['veteran_status', 'other_demographics'];
 const $ = (selector, scope = document) => scope.querySelector(selector);
 const $$ = (selector, scope = document) => [...scope.querySelectorAll(selector)];
 const state = {
@@ -209,7 +210,7 @@ async function checkDuplicate() {
 function renderProfileSummary() {
   const container = $('#profile-summary');
   const name = [state.profile.first_name, state.profile.last_name].filter(Boolean).join(' ');
-  const hasProfile = Boolean(name || state.profile.email || state.profile.work_history?.length);
+  const hasProfile = Boolean(name || state.profile.email || state.profile.work_history?.length || DISCLOSURE_FIELDS.some(key => state.profile.disclosure_preferences?.[key]));
   const text = hasProfile
     ? [name || 'Saved profile', state.profile.email || ''].filter(Boolean).join(' · ')
     : 'Add your profile to fill application fields.';
@@ -321,6 +322,7 @@ function renderProfile() {
   for (const key of ['work_authorized', 'requires_sponsorship']) {
     form.elements.namedItem(key).value = state.profile[key] === true ? 'yes' : state.profile[key] === false ? 'no' : '';
   }
+  for (const key of DISCLOSURE_FIELDS) form.elements.namedItem(`disclosure_${key}`).value = state.profile.disclosure_preferences?.[key] || '';
   const work = $('#work-history');
   const education = $('#education-history');
   work.replaceChildren(); education.replaceChildren();
@@ -353,6 +355,7 @@ function readProfile() {
     const value = $('#profile-form').elements.namedItem(key).value;
     result[key] = value === 'yes' ? true : value === 'no' ? false : null;
   }
+  result.disclosure_preferences = Object.fromEntries(DISCLOSURE_FIELDS.map(key => [key, $('#profile-form').elements.namedItem(`disclosure_${key}`).value]));
   result.work_history = readHistory('#work-history');
   result.education = readHistory('#education-history');
   result.selected_resume_id = state.selectedResumeId;

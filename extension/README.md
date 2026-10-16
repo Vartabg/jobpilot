@@ -2,6 +2,17 @@
 
 JobPilot keeps your profile, résumés, and application records in a Chrome side panel beside the job you are viewing. The extension works locally: the profile and tracker do not require the Python server or a hosted account.
 
+Version **0.12.0** adds optional **Disclosure preferences** in Profile. Save your
+veteran-status choice and whether to decline other demographic disclosures, then
+use **Fill details** on each application step. JobPilot chooses an unambiguous
+offered answer and preserves existing answers. Protected-veteran preferences can
+answer general veteran questions; a general veteran preference never implies
+protected status. Other demographic preferences only select a supplied decline
+choice for gender, pronouns, race/ethnicity, sexual orientation, or disability.
+Missing or ambiguous choices stay manual. Agreements, signatures, and submission
+remain under your control. Preferences stay local and are included in profile
+backups; they are never included as answer values in diagnostic exports.
+
 Version **0.11.0** adds **Scan privacy on this page** in Apply. Open the job's
 application step, click the JobPilot toolbar icon to grant page access, and scan
 before sharing answers. The report shows exact question wording, required or
@@ -39,12 +50,12 @@ For a private package that starts with your verified details and a PDF, add `--p
 
 ## Apply with the side panel
 
-- **Profile:** edit verified contact details, work authorization, work history, and education. An unanswered authorization question remains unknown; it does not become a yes or no by default.
+- **Profile:** edit verified contact details, work authorization, work history, education, and optional disclosure preferences. Unanswered preferences remain unknown; they do not become a yes or no by default.
 - **Résumés:** add PDFs and choose which version to use for the current application.
 - **Current job:** review the captured company, role, and URL before saving them. Inspect the form, fill supported details, then review the remaining fields.
 - **Tracker:** save an application as started. After the employer shows its submission confirmation, mark it submitted yourself. Filling fields or attaching a file does not mean an application was submitted.
 
-The extension never presses the employer's submit button. Review every answer and attachment on the employer's page before submitting. Consent, signatures, demographic questions, salary expectations, and job-specific claims require your answer.
+The extension never presses the employer's submit button. Review every answer and attachment on the employer's page before submitting. Consent, signatures, demographic questions without a saved matching preference, salary expectations, and job-specific claims require your answer.
 
 ## Portal coverage and first-release limits
 
@@ -64,7 +75,7 @@ Capture the job before opening its application. After you sign in or choose to a
 
 A Workday session can expire while an open form still displays your signed-in name. If Workday returns page errors, keep that tab open while restoring sign-in in a second tab, then return to the preserved form. A successful JobPilot fill verifies the fields it changed; it does not certify that Workday has saved or accepted the whole step.
 
-Sign-in, account creation, verification, application questions, disclosures, demographic answers, attestations, and final submission stay under your control. Unknown or translated labels, ambiguous history rows, and unsupported date/phone formats remain manual. Existing answers and attachments stay intact. Selected Workday multi-select tokens, such as a field of study, are preserved even when their search box is empty. Empty or draft-only multi-selects require choosing an option on the application page. The report distinguishes a selected file from a résumé that the page displays as accepted.
+Sign-in, account creation, verification, job-specific application questions, attestations, and final submission stay under your control. On verified question, disclosure, and self-identification steps, **Fill details** may apply your saved disclosure preferences only; it does not fill names, signatures, dates, or other contact details there. Unknown or translated labels, ambiguous history rows, and unsupported date/phone formats remain manual. Existing answers and attachments stay intact. Selected Workday multi-select tokens, such as a field of study, are preserved even when their search box is empty. Empty or draft-only multi-selects require choosing an option on the application page. The report distinguishes a selected file from a résumé that the page displays as accepted.
 
 Job identities ignore locale, tracking parameters, and `/apply/...` suffixes while retaining the host, tenant, career site, and job path. Older tracked Workday records retain their IDs, notes, résumé choices, and status when reopened from another application step. Sealed capsules keep their original evidence.
 

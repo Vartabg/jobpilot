@@ -59,7 +59,7 @@ async function fixture({url = standard, html = posting, bodyForUrl, beforeScript
     }}};
   try { return await run({page, context, calls}); } finally { await context.close(); }
 }
-function privateCalls(calls) { return calls.filter(request => request.args?.[0]?.profile?.email || request.args?.[0]?.resume?.dataUrl); }
+function privateCalls(calls) { return calls.filter(request => Object.keys(request.args?.[0]?.profile || {}).length > 0 || request.args?.[0]?.resume?.dataUrl); }
 
 test('Workday identity strips locale/query/apply steps while preserving host, tenant, site and job', () => {
   for (const base of [standard, recruiting]) {
@@ -225,5 +225,90 @@ test('same-URL Workday step replacement during a run stops before writing into t
     assert.equal(report.status, 'interrupted', JSON.stringify(report));
     assert.equal(await page.locator('#next-step-name').inputValue(), '');
     assert.equal(await page.locator('body').getAttribute('data-advanced'), null);
+  });
+});
+
+const disclosurePreferences = {veteran_status: 'protected_veteran', other_demographics: 'decline'};
+const disclosureProfile = {...profile, disclosure_preferences: disclosurePreferences};
+const disclosureFields = `<label for="veteran">Please confirm your veteran status *</label><select id="veteran" required>
+  <option value="">Select One</option><option>I IDENTIFY AS ONE OR MORE OF THE CLASSIFICATIONS OF PROTECTED VETERANS LISTED ABOVE</option>
+  <option>I AM NOT A VETERAN</option><option>I DO NOT WISH TO SELF-IDENTIFY</option></select>
+  <label for="race">What race or ethnicity do you most closely identify with? *</label><select id="race" required>
+  <option value="">Select One</option><option>I do not wish to answer. (United States of America)</option><option>Another choice</option></select>
+  <label for="first-name">First name</label><input id="first-name"><label for="signature">Signature</label><input id="signature">
+  <label for="date">Date</label><input id="date" type="date"><label><input id="agreement" type="checkbox" required>I agree to privacy processing</label>`;
+
+test('saved disclosure preferences alone reach eligible Workday later steps without contact data or agreement changes', async t => {
+  for (const marker of ['applyFlowPrimaryQuestionsPage', 'applyFlowSecondaryQuestionsPage', 'applyFlowSupplementaryQuestionsPage',
+    'applyFlowVoluntaryDisclosuresPage', 'applyFlowSelfIdentifyPage']) await t.test(marker, async () => {
+    await fixture({url: `${standard}/apply/applyManually`, html: step(disclosureFields, marker, marker)}, async ({page, calls}) => {
+      const report = await runCurrentAction('details', disclosureProfile, resume, {expectedUrl: standard});
+      assert.equal(report.status, 'complete', JSON.stringify(report));
+      assert.match(await page.locator('#veteran').inputValue(), /CLASSIFICATIONS OF PROTECTED VETERANS/);
+      assert.match(await page.locator('#race').inputValue(), /do not wish to answer/);
+      const sent = privateCalls(calls);
+      assert.equal(sent.length, 1);
+      assert.deepEqual(sent[0].args[0].profile, {disclosure_preferences: disclosurePreferences});
+      assert.equal(sent[0].args[0].disclosureOnly, true);
+      assert.equal(sent[0].args[0].resume, null);
+      for (const id of ['first-name', 'signature', 'date']) assert.equal(await page.locator('#' + id).inputValue(), '');
+      assert.equal(await page.locator('#agreement').isChecked(), false);
+      assert.equal(await page.locator('body').getAttribute('data-advanced'), null);
+      assert.equal(await page.locator('body').getAttribute('data-submitted'), null);
+      assert.doesNotMatch(JSON.stringify(report), /protected_veteran|CLASSIFICATIONS OF PROTECTED VETERANS|do not wish to answer/);
+      calls.length = 0;
+      const again = await runCurrentAction('details', disclosureProfile, null, {expectedUrl: standard});
+      assert.equal(again.frames[0].filled.length, 0);
+      assert.equal(await page.locator('#agreement').isChecked(), false);
+    });
+  });
+});
+
+test('missing or invalid preferences never enable Workday disclosure writes or send profile values', async t => {
+  for (const invalid of [undefined, null, {}, [], {veteran_status: ''}, {veteran_status: 'yes'},
+    {veteran_status: 'protected_veteran', other_demographics: null}, {veteran_status: true, other_demographics: 'decline'}]) {
+    await t.test(JSON.stringify(invalid) || 'missing', async () => {
+      await fixture({url: `${standard}/apply/applyManually`, html: step(disclosureFields, 'applyFlowVoluntaryDisclosuresPage')}, async ({page, calls}) => {
+        const report = await runCurrentAction('details', {...profile, disclosure_preferences: invalid}, null, {expectedUrl: standard});
+        assert.equal(report.status, 'interrupted');
+        assert.equal(privateCalls(calls).length, 0);
+        assert.equal(await page.locator('#veteran').inputValue(), '');
+        assert.equal(await page.locator('#race').inputValue(), '');
+      });
+    });
+  }
+});
+
+test('saved preferences do not enable Workday review, availability or authentication steps', async t => {
+  for (const marker of ['applyFlowReviewPage', 'applyFlowMyAvailabilityPage']) await t.test(marker, async () => {
+    await fixture({url: `${standard}/apply/applyManually`, html: step(disclosureFields, marker)}, async ({page, calls}) => {
+      for (const action of ['details', 'resume']) {
+        assert.equal((await runCurrentAction(action, disclosureProfile, resume, {expectedUrl: standard})).status, 'interrupted');
+      }
+      assert.equal(privateCalls(calls).length, 0);
+      assert.equal(await page.locator('#veteran').inputValue(), '');
+    });
+  });
+  await fixture({url: `${standard}/apply/applyManually`, html: step(disclosureFields, 'applyFlowVoluntaryDisclosuresPage') + '<input type="password">'}, async ({page, calls}) => {
+    assert.equal((await runCurrentAction('details', disclosureProfile, null)).status, 'interrupted');
+    assert.equal(privateCalls(calls).length, 0);
+    assert.equal(await page.locator('#veteran').inputValue(), '');
+  });
+});
+
+test('same-URL replacement before a disclosure run is rechecked before any answer is written', async () => {
+  let changed = false;
+  await fixture({url: `${standard}/apply/applyManually`, html: step(disclosureFields, 'applyFlowVoluntaryDisclosuresPage'),
+    afterScript: async (request, {page}) => {
+      if (!changed && request.args?.[0]?.probe) {
+        changed = true;
+        await page.locator('[data-automation-id="applyFlowVoluntaryDisclosuresPage"]').evaluate(el => el.setAttribute('data-automation-id', 'applyFlowReviewPage'));
+      }
+    }}, async ({page, calls}) => {
+    const report = await runCurrentAction('details', disclosureProfile, null, {expectedUrl: standard});
+    assert.equal(report.status, 'interrupted', JSON.stringify(report));
+    for (const id of ['veteran', 'race', 'first-name', 'signature', 'date']) assert.equal(await page.locator('#' + id).inputValue(), '');
+    assert.equal(await page.locator('#agreement').isChecked(), false);
+    for (const request of privateCalls(calls)) assert.deepEqual(request.args[0].profile, {disclosure_preferences: disclosurePreferences});
   });
 });

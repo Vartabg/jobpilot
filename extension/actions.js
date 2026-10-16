@@ -96,6 +96,16 @@ function frameFailure(frameId, error) {
   };
 }
 
+function disclosureProfile(profile) {
+  const preferences = profile?.disclosure_preferences;
+  if (!preferences || typeof preferences !== 'object' || Array.isArray(preferences)) return null;
+  const veteran = preferences.veteran_status === undefined ? '' : preferences.veteran_status;
+  const other = preferences.other_demographics === undefined ? '' : preferences.other_demographics;
+  if (!['', 'protected_veteran', 'veteran', 'not_veteran', 'decline'].includes(veteran)
+    || !['', 'decline'].includes(other) || !veteran && !other) return null;
+  return {disclosure_preferences: {veteran_status: veteran, other_demographics: other}};
+}
+
 export async function runCurrentAction(action, profile, resume = null, {expectedUrl = '', onProgress} = {}) {
   if (!["inspect", "details", "resume"].includes(action)) throw new Error("Unknown application action");
   const {tab, url} = await activePage();
@@ -107,6 +117,7 @@ export async function runCurrentAction(action, profile, resume = null, {expected
     throw new Error("The current tab is a different job from your saved draft. Capture this tab before filling or attaching a résumé.");
   }
   const report = {pageUrl: url.href, frames: [], status: 'running', warnings: []};
+  const disclosures = action === 'details' ? disclosureProfile(profile) : null;
   let discovered;
   try {
     await chrome.scripting.executeScript({target: {tabId: tab.id, allFrames: true}, files: ["content.js"]});
@@ -166,7 +177,8 @@ export async function runCurrentAction(action, profile, resume = null, {expected
   const visibleEmbeds = (Array.isArray(main?.result.visibleEmbeds) ? main.result.visibleEmbeds : []).map(identity).filter(Boolean);
   const candidates = frames.filter(frame => frame.result.hasForm
     && (!workdayJob(frame.result.pageUrl) || (action === 'inspect' ? true
-      : action === 'details' ? frame.result.workdayScope?.canFillDetails : frame.result.workdayScope?.canAttachResume))
+      : action === 'details' ? (frame.result.workdayScope?.canFillDetails
+        || disclosures && frame.result.workdayScope?.canFillDisclosures === true) : frame.result.workdayScope?.canAttachResume))
     && frame.result.parentVisible !== false && identity(frame.result.pageUrl) === expectedIdentity
     && (frame === main || visibleEmbeds.includes(identity(frame.result.pageUrl))));
   let targets = frames.filter(frame => identity(frame.result.pageUrl) === expectedIdentity);
@@ -190,6 +202,9 @@ export async function runCurrentAction(action, profile, resume = null, {expected
   // A result belongs to the document that was inspected, not to a replacement
   // document that happens to reuse its frame ID after navigation.
   for (const frame of targets) {
+    const disclosureOnly = action === 'details' && !ambiguous && candidates.length > 0
+      && !!workdayJob(frame.result.pageUrl) && !frame.result.workdayScope?.canFillDetails
+      && frame.result.workdayScope?.canFillDisclosures === true;
     try { await unchangedPage(tab.id, url.href); }
     catch (error) {
       report.frames.push({...frameFailure(frame.frameId, error), error: error.message});
@@ -220,7 +235,7 @@ export async function runCurrentAction(action, profile, resume = null, {expected
         if (payload.expectedWorkdayStep) {
           const scope = globalThis.__jobpilotWorkdayScope?.();
           const allowed = payload.action === 'inspect' ? scope?.hasForm
-            : payload.action === 'details' ? scope?.canFillDetails : scope?.canAttachResume;
+            : payload.action === 'details' ? (payload.disclosureOnly ? scope?.canFillDisclosures === true : scope?.canFillDetails) : scope?.canAttachResume;
           if (scope?.stepKey !== payload.expectedWorkdayStep || !allowed) {
             return {status:'interrupted', filled:[], skipped:[], failed:[], required:[],
               error:'The Workday step changed or requires your input. Inspect the current step before retrying.'};
@@ -236,7 +251,8 @@ export async function runCurrentAction(action, profile, resume = null, {expected
         }
       }, args: [{action: action === 'inspect' || ambiguous || !candidates.length ? 'inspect' : action,
         requireVisible: action !== 'inspect' && !ambiguous && candidates.length > 0,
-        profile: action === 'details' && !ambiguous && candidates.length ? profile : {},
+        profile: action === 'details' && !ambiguous && candidates.length ? (disclosureOnly ? disclosures : profile) : {},
+        disclosureOnly,
         resume: action === "resume" && !ambiguous && candidates.length ? resume : null,
         expectedWorkdayStep: frame.result.workdayScope?.stepKey || '',
         expectedIdentity: normalizeJobUrl(url.href).identity, expectedPageUrl: url.href}]});

@@ -157,6 +157,43 @@ test("profile edits persist and an unanswered work-authorization question remain
   });
 });
 
+test('voluntary disclosure preferences save, reload and clear to manual without changing employer fields', async () => {
+  await workspace(async page=>{
+    await page.locator('[data-tab="profile"]').click();
+    const veteran=page.getByLabel('Veteran status preference'),other=page.getByLabel('Other demographic questions');
+    await expect(page.locator('#save-profile')).toBeEnabled();
+    await expect(veteran).toHaveValue(''); await expect(other).toHaveValue('');
+    await veteran.selectOption('protected_veteran'); await other.selectOption('decline');
+    await page.locator('#save-profile').click(); await expect(page.locator('#notice')).toContainText('Profile saved');
+    assert.deepEqual(await page.evaluate(()=>__storageData.jobpilot_profile_v1.disclosure_preferences),{veteran_status:'protected_veteran',other_demographics:'decline'});
+    await page.reload(); await page.locator('[data-tab="profile"]').click();
+    await expect(veteran).toHaveValue('protected_veteran'); await expect(other).toHaveValue('decline');
+    await veteran.selectOption(''); await other.selectOption('');
+    await page.locator('#save-profile').click(); await expect(page.locator('#notice')).toContainText('Profile saved');
+    await page.reload(); await page.locator('[data-tab="profile"]').click();
+    await expect(veteran).toHaveValue(''); await expect(other).toHaveValue('');
+    assert.equal(await page.evaluate(()=>__extensionCalls.length),0,'Saving preferences never injects into an employer page');
+  });
+});
+
+test('profile backup imports display approved preference fields and reject invalid choices without overwriting them', async () => {
+  await workspace(async page=>{
+    await page.locator('[data-tab="profile"]').click();
+    const file=profile=>({name:'preferences.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify({schemaVersion:1,profile,applications:[],resumes:[]}))});
+    await page.locator('#import-data').setInputFiles(file({disclosure_preferences:{veteran_status:'veteran',other_demographics:'decline',unknown:'PRIVATE'}}));
+    await expect(page.locator('#import-preview')).toBeVisible(); await page.locator('#confirm-import').click();
+    await expect(page.getByLabel('Veteran status preference')).toHaveValue('veteran');
+    await expect(page.getByLabel('Other demographic questions')).toHaveValue('decline');
+    assert.deepEqual(await page.evaluate(()=>__storageData.jobpilot_profile_v1.disclosure_preferences),{veteran_status:'veteran',other_demographics:'decline'});
+    await page.locator('#import-data').setInputFiles(file({disclosure_preferences:{veteran_status:'invented'}}));
+    await expect(page.locator('#import-preview')).toBeVisible(); await page.locator('#import-replace-profile').check();
+    await page.locator('#confirm-import').click(); await expect(page.locator('#notice')).toContainText('supported voluntary disclosure');
+    await expect(page.getByLabel('Veteran status preference')).toHaveValue('veteran');
+    assert.deepEqual(await page.evaluate(()=>__storageData.jobpilot_profile_v1.disclosure_preferences),{veteran_status:'veteran',other_demographics:'decline'});
+    await page.locator('#cancel-import').click();
+  });
+});
+
 test('Workday capture, inspect, fill, attach and tracker buttons use the current step and selected local PDF', async () => {
   await workspace(async page => {
     await page.evaluate(() => {

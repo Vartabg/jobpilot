@@ -18,15 +18,19 @@ const input = (id = 'run-1') => ({id, action: 'details', job: {company: 'Example
 
 test('diagnostic allowlist excludes answers, profile, upload details, HTML, credentials and raw exceptions', () => {
   const record = input();
-  record.profile = {email: 'private@example.org', address_line1: '42 Private Lane'};
+  record.profile = {email: 'private@example.org', address_line1: '42 Private Lane',
+    disclosure_preferences: {veteran_status: 'protected_veteran', other_demographics: 'decline'}};
   record.job.notes = 'Private note';
   Object.assign(record.report, {html: '<input value="private">', error: 'secret exception at /Users/alex/private.pdf'});
   Object.assign(record.report.frames[0], {pageUrl: 'https://private.test/?password=secret',
+    filled: [{label: 'Veteran status', key: 'disclosure_preferences.veteran_status', value: 'protected_veteran',
+      selectedText: 'I IDENTIFY AS ONE OR MORE OF THE CLASSIFICATIONS OF PROTECTED VETERANS LISTED ABOVE'}],
     failed: [{label: 'Contact private@example.org +1 (312) 555-1234', value: 'Secret answer', reason: 'Exception with personal data'}],
     resume: {status: 'failed', filename: 'private-resume.pdf', dataUrl: 'data:application/pdf;base64,SECRET', message: 'Another secret'}});
   const saved = sanitizeRun(record, null, '0.8.3');
   const json = JSON.stringify(saved);
   for (const secret of ['private@example.org', 'Private Lane', 'Private note', '<input', '/Users/', 'Secret answer', 'private-resume', 'base64', '?token', '#secret', '555-1234', 'Exception with']) assert.ok(!json.includes(secret), secret);
+  for (const secret of ['disclosure_preferences', 'protected_veteran', 'other_demographics', 'selectedText', 'CLASSIFICATIONS OF PROTECTED VETERANS']) assert.ok(!json.includes(secret), secret);
   assert.equal(saved.url, 'https://jobs.ashbyhq.com/example/requisition');
   assert.equal(saved.error, 'unknown');
   assert.equal(saved.frames[0].failed[0].reason, 'unknown');

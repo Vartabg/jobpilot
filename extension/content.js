@@ -22,10 +22,22 @@
   const WORKDAY_STEPS = ['applyFlowMyInfoPage', 'applyFlowMyExpPage', 'applyFlowAutoFillPage', 'applyFlowPrimaryQuestionsPage',
     'applyFlowSecondaryQuestionsPage', 'applyFlowSupplementaryQuestionsPage', 'applyFlowSelfIdentifyPage',
     'applyFlowVoluntaryDisclosuresPage', 'applyFlowMyAvailabilityPage', 'applyFlowReviewPage'];
+  const DISCLOSURE_STEPS = ['applyFlowPrimaryQuestionsPage','applyFlowSecondaryQuestionsPage','applyFlowSupplementaryQuestionsPage','applyFlowVoluntaryDisclosuresPage','applyFlowSelfIdentifyPage'];
+  const DISCLOSURE_MANUAL = 'No saved disclosure choice applies to this question. Answer it yourself.';
+  const DISCLOSURE_MATCH = 'No unique offered choice matches your saved disclosure preference. Review this question yourself.';
+  function disclosurePreferences(profile) {
+    const saved=profile?.disclosure_preferences;
+    const empty={veteran_status:'',other_demographics:''};
+    if (!saved || typeof saved !== 'object' || Array.isArray(saved)) return empty;
+    const veteran=saved.veteran_status === undefined ? '' : saved.veteran_status, other=saved.other_demographics === undefined ? '' : saved.other_demographics;
+    if (!['','protected_veteran','veteran','not_veteran','decline'].includes(veteran) || !['','decline'].includes(other)) return empty;
+    return {veteran_status:veteran,other_demographics:other};
+  }
+  const disclosuresEnabled = profile => Object.values(disclosurePreferences(profile)).some(Boolean);
   const workdayStepIds = new WeakMap();
   let nextWorkdayStep = 1;
   function workdayState() {
-    const empty = message => ({hasForm: false, canFillDetails: false, canAttachResume: false, stepKey: '', message, root: null, step: null});
+    const empty = message => ({hasForm: false, canFillDetails: false, canFillDisclosures:false, canAttachResume: false, stepKey: '', message, root: null, step: null});
     if (!workdayPage()) return empty('Open a supported Workday job application.');
     const auth = [...document.querySelectorAll('[data-automation-id="signInContent"], [data-automation-id="signInFormo"], input[type="password"], [role="dialog"]')]
       .some(el => visible(el) && (el.matches('input[type="password"], [data-automation-id="signInContent"], [data-automation-id="signInFormo"]')
@@ -40,6 +52,7 @@
     const progress = roots[0].querySelector('[data-automation-id="progressBarActiveStep"]');
     const stepKey = `${name}:${workdayStepIds.get(step)}:${norm(progress?.textContent).slice(0,200)}`;
     return {hasForm: true, canFillDetails: ['applyFlowMyInfoPage', 'applyFlowMyExpPage'].includes(name),
+      canFillDisclosures:DISCLOSURE_STEPS.includes(name),
       canAttachResume: ['applyFlowMyExpPage', 'applyFlowAutoFillPage'].includes(name), stepKey, root: roots[0], step,
       message: ['applyFlowMyInfoPage', 'applyFlowMyExpPage', 'applyFlowAutoFillPage'].includes(name)
         ? 'Only the current visible Workday step is supported. Review it and move to the next step yourself.'
@@ -181,6 +194,70 @@
     return associated.length === 1 && associated[0].htmlFor === el.id && field.contains(associated[0])
       && associated[0].closest('[data-automation-id^="formField-"]') === field && !!labelText(associated[0]).trim();
   }
+  function disclosureRadioQuestion(el) {
+    if (!el.name) return null;
+    // Native radio names are exclusive across the whole form, even when
+    // separate visual questions reuse one name. Never uncheck a neighbor.
+    const exclusive=radios=>[...document.querySelectorAll('input[type="radio"]')]
+      .filter(other=>other.name === el.name && other.form === el.form).every(other=>radios.includes(other));
+    if (workdayPage()) {
+      const metadata=workdayRadioQuestion(el);
+      if (metadata && visible(metadata.question) && metadata.references.every(visible)) return exclusive(metadata.radios) ? metadata : null;
+    }
+    const fieldset=el.closest('fieldset');
+    if (!fieldset || !visible(fieldset)) return null;
+    const legends=[...fieldset.querySelectorAll(':scope > legend')].filter(visible);
+    const radios=[...fieldset.querySelectorAll('input[type="radio"]')];
+    if (legends.length !== 1 || !radios.length || !exclusive(radios) || radios.some(radio => radio.name !== el.name || radio.form !== el.form || radio.closest('fieldset') !== fieldset)) return null;
+    if (workdayPage()) {
+      const field=el.closest('[data-automation-id^="formField-"]');
+      if (!field || !field.contains(fieldset) || radios.some(radio=>radio.closest('[data-automation-id^="formField-"]') !== field)) return null;
+    }
+    const label=labelText(legends[0]).trim();
+    return label ? {label,radios,question:fieldset} : null;
+  }
+  function fixedDisclosureQuestion({el,type,radioQuestion}) {
+    if (type === 'radio') return radioQuestion?.label || '';
+    if (workdaySelect(el)) {
+      const fixed=labels(el); return fixed.length === 1 ? fixed[0] : '';
+    }
+    const associated=[...(el.labels || [])].filter(visible);
+    if (associated.length === 1) return labelText(associated[0]).trim();
+    if (associated.length > 1) return '';
+    const scope=wrapper(el);
+    const references=(el.getAttribute('aria-labelledby') || '').split(/\s+/).map(id=>document.getElementById(id))
+      .filter(node=>node && node.matches('label, legend, .ashby-application-form-question-title') && visible(node) && scope?.contains(node));
+    return references.length === 1 ? labelText(references[0]).trim() : '';
+  }
+  const veteranQuestions=new Set(['veteran','veteran status','military veteran status','military service veteran status','are you a veteran','are you a military veteran','do you identify as a veteran','please indicate your veteran status','please select your veteran status','please confirm your veteran status']);
+  const protectedQuestions=new Set(['protected veteran','protected veteran status','are you a protected veteran','do you identify as a protected veteran','please indicate your protected veteran status']);
+  const demographicQuestions=new Set(['gender','gender identity','sex','what is your gender','what is your gender identity','pronoun','pronouns','preferred pronouns','what are your pronouns','what pronouns do you use',
+    'race','ethnicity','race ethnicity','race and ethnicity','ethnic background','racial or ethnic identity','what is your race','what is your ethnicity','how would you describe your race or ethnicity','what race or ethnicity do you most closely identify with','are you hispanic or latino','hispanic or latino',
+    'sexual orientation','what is your sexual orientation','disability','disability status','do you have a disability','do you have a disability or have you ever had one','please indicate your disability status']);
+  const declineChoices=new Set(['prefer not to say','prefer not to answer','i prefer not to answer','i do not wish to answer','do not wish to answer','i do not wish to disclose','do not wish to disclose','prefer not to disclose','i prefer not to disclose',
+    'decline to disclose','i decline to disclose','decline to answer','i decline to answer','wish to not disclose','choose not to disclose','i choose not to disclose','i do not wish to self identify','i do not want to answer','decline to self identify']);
+  const veteranYes=new Set(['yes','veteran','i am a veteran','i identify as a veteran','i am a military veteran']);
+  const protectedYes=new Set(['protected veteran','i am a protected veteran','i identify as a protected veteran','i identify as one or more of the classifications of protected veterans listed above']);
+  const veteranNo=new Set(['no','not a veteran','i am not a veteran','i am not a military veteran','i do not identify as a veteran']);
+  const protectedNo=new Set(['not a protected veteran','i am not a protected veteran','i am not a protected veteran as defined above','i do not identify as a protected veteran']);
+  const disclosureText = value => norm(String(value || '').replace(/\s*\(United States of America\)\s*$/i,'')).replace(/\s+required$/,'');
+  function disclosureRule(entry,profile) {
+    if (!disclosuresEnabled(profile) || !(['select-one','combobox'].includes(entry.type) || entry.type === 'radio' && entry.el.type === 'radio')) return null;
+    const label=fixedDisclosureQuestion(entry), question=disclosureText(label);
+    const kind=protectedQuestions.has(question) ? 'protected' : veteranQuestions.has(question) ? 'veteran' : demographicQuestions.has(question) ? 'demographic' : '';
+    if (!kind) return null;
+    const saved=disclosurePreferences(profile), preference=kind === 'demographic' ? saved.other_demographics : saved.veteran_status;
+    if (!preference || kind === 'protected' && preference === 'veteran') return {label,reason:DISCLOSURE_MANUAL};
+    return {label,key:kind === 'demographic' ? 'disclosure_preferences.other_demographics' : 'disclosure_preferences.veteran_status',value:'offered-choice',disclosure:{kind,preference,question}};
+  }
+  function disclosureOption(text, rule) {
+    const value=disclosureText(text), {kind,preference}=rule.disclosure;
+    if (preference === 'decline') return declineChoices.has(value);
+    if (kind === 'demographic') return false;
+    if (preference === 'not_veteran') return veteranNo.has(value) || kind === 'protected' && protectedNo.has(value);
+    if (preference === 'veteran') return kind === 'veteran' && veteranYes.has(value);
+    return preference === 'protected_veteran' && (protectedYes.has(value) || (kind === 'protected' ? value === 'yes' : veteranYes.has(value)));
+  }
   function inventory(onError = () => {}) {
     const scopes = applicationScopes();
     const controls = [...document.querySelectorAll("input, textarea, select, [role='combobox']:not(input), button[aria-haspopup='listbox'], [role='checkbox']:not(input), [role='radiogroup'], .ashby-application-form-input-yesno")]
@@ -194,12 +271,12 @@
       if (el.matches('.ashby-application-form-input-yesno')) return [{el,label:labelOf(el),type:'choice',required:required(el),answered:!!el.querySelector("button[aria-pressed='true']")}];
       if (el.type === 'radio') {
         if (seenRadio.has(el)) return [];
-        const workday = workdayPage(), field = workday ? el.closest('[data-automation-id^="formField-"]') : null;
-        const group = (metadata ? metadata.radios.filter(other => controls.includes(other)) : el.name ? controls.filter(other => other.type === 'radio' && other.name === el.name && other.form === el.form
+        const radioQuestion=disclosureRadioQuestion(el), workday = workdayPage(), field = workday ? el.closest('[data-automation-id^="formField-"]') : null;
+        const group = (radioQuestion ? radioQuestion.radios.filter(other => controls.includes(other)) : metadata ? metadata.radios.filter(other => controls.includes(other)) : el.name ? controls.filter(other => other.type === 'radio' && other.name === el.name && other.form === el.form
           && (!workday || other.closest('[data-automation-id^="formField-"]') === field)) : [el]);
         group.forEach(radio=>seenRadio.add(radio));
-        const question = metadata?.label || labelText(ashbyQuestion(el)) || el.closest('fieldset')?.querySelector('legend')?.textContent;
-        return [{el,label:(question || labelOf(el)).trim().slice(0,180),type:'radio',required:!!metadata?.required || group.some(required),answered:group.some(r => r.checked)}];
+        const question = radioQuestion?.label || metadata?.label || labelText(ashbyQuestion(el)) || el.closest('fieldset')?.querySelector(':scope > legend')?.textContent;
+        return [{el,label:(question || 'Radio question').trim().slice(0,180),type:'radio',required:!!metadata?.required || group.some(required),answered:group.some(r => r.checked),radioQuestion}];
       }
       if (el.getAttribute('role') === 'radiogroup') {
         if (el.querySelector("input[type='radio']")) return [];
@@ -283,6 +360,7 @@
   const stateValue = value => norm(stateNames[String(value || '').toUpperCase()] || value);
   const bachelorOfArts = new Set(['ba','b a','bachelor of arts','bachelor of arts ba','bachelor of arts b a']);
   function optionMatches(text, rule, profile) {
+    if (rule.disclosure) return disclosureOption(text,rule);
     if (rule.key === 'country') return sameCountry(text.replace(/\s*\+\s*\d+\s*$/, ''),rule.value);
     if (rule.key === 'state') return stateValue(text) === stateValue(rule.value);
     if (workdayPage() && /^education\.\d+\.degree$/.test(rule.key) && bachelorOfArts.has(norm(rule.value))) return bachelorOfArts.has(norm(text));
@@ -296,8 +374,20 @@
     return norm(text) === norm(rule.value);
   }
   function exactOption(options, rule, profile) {
-    const matches = options.filter(o => !o.disabled && o.getAttribute('aria-disabled') !== 'true' && optionMatches(o.textContent,rule,profile));
+    let matches = options.filter(o => !o.disabled && !o.matches?.(':disabled') && o.getAttribute('aria-disabled') !== 'true' && optionMatches(o.textContent,rule,profile));
+    if (rule.disclosure?.preference === 'protected_veteran') {
+      const protectedMatches=matches.filter(option=>protectedYes.has(disclosureText(option.textContent)));
+      if (protectedMatches.length) matches=protectedMatches;
+    }
     return matches.length === 1 ? matches[0] : null;
+  }
+  function radioChoices(metadata) {
+    return (metadata?.radios || []).flatMap(el=>{
+      const shown=visible(el) || workdayRadioProxy(el,workdayRadioQuestion(el)) || visible(el.closest('.ashby-application-form-input-radio-group-option'));
+      const associated=[...(el.labels || [])].filter(label=>visible(label) && metadata.question?.contains(label));
+      if (!shown || associated.length !== 1) return [];
+      return [{el,textContent:labelText(associated[0]).trim(),disabled:el.disabled || el.matches(':disabled'),getAttribute:key=>el.getAttribute(key)}];
+    });
   }
   function setText(el, value, guard = () => true) {
     const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
@@ -332,7 +422,7 @@
     ctrl.dispatchEvent(new MouseEvent('mouseup',{bubbles:true,button:0}));
     if (!guard()) return 'interrupted';
     if (workdaySelect(el)) { ctrl.click(); if (!guard()) return 'interrupted'; }
-    if (input && !/^(Yes|No)$/.test(value)) setText(input,rule.key === 'location' ? profile.city : value,guard);
+    if (input && !rule.disclosure && !/^(Yes|No)$/.test(value)) setText(input,rule.key === 'location' ? profile.city : value,guard);
     const query = input?.value || '';
     const applicantChanged = () => !!selectedCombo(el) || (input && input.value !== query);
     let option = null;
@@ -471,20 +561,26 @@
   function acceptedValue(el, rule, profile) {
     if (!el?.isConnected) return false;
     if ((el.validity && !el.validity.valid) || el.getAttribute('aria-invalid') === 'true') return false;
+    if (rule.disclosure && el.type === 'radio') {
+      const metadata=disclosureRadioQuestion(el), checked=metadata?.radios.filter(radio=>radio.checked) || [];
+      return disclosureText(metadata?.label) === rule.disclosure.question && checked.length === 1
+        && radioChoices(metadata).some(option=>option.el === checked[0] && !option.disabled && disclosureOption(option.textContent,rule));
+    }
     if (el.tagName === 'SELECT') return !placeholderOption(el.selectedOptions[0]) && optionMatches(el.selectedOptions[0].textContent,rule,profile);
     if (combo(el)) return el.getAttribute('aria-expanded')!=='true' && optionMatches(selectedCombo(el) || (!reactControl(el) ? el.value || el.textContent : ''),rule,profile);
     return el.value === String(rule.value);
   }
   // Re-injecting the script must not let a second click race an existing run.
   const runtime = globalThis.__jobpilotAutofillRuntime ||= {running:false};
-  globalThis.__jobpilotRun = async ({action='inspect',profile={},resume=null,requireVisible=false,expectedWorkdayStep=''}={}) => {
+  globalThis.__jobpilotRun = async ({action='inspect',profile={},resume=null,requireVisible=false,expectedWorkdayStep='',disclosureOnly=false}={}) => {
     if (!['inspect','details','resume'].includes(action)) throw new Error('Unknown JobPilot action');
     const workday = workdayPage();
     const report = {action,status:'complete',warnings:[],filled:[],skipped:[],failed:[],required:[],resume:{status:'not-requested',message:''},provider:workday ? 'Workday' : location.hostname.includes('greenhouse') ? 'Greenhouse' : location.hostname.includes('lever') ? 'Lever' : location.hostname.includes('ashby') ? 'Ashby' : 'Unsupported',pageUrl:location.href};
     if ((!hosts.has(location.hostname) && !workday) || location.protocol !== 'https:') { report.skipped.push({label:'Page',reason:'This frame is outside the supported application hosts'}); return report; }
     const warn = message => { if (!report.warnings.includes(message)) report.warnings.push(message); };
     const initialWorkday = workday ? workdayState() : null;
-    if (initialWorkday && (!initialWorkday.hasForm || action === 'details' && !initialWorkday.canFillDetails || action === 'resume' && !initialWorkday.canAttachResume
+    const onlyDisclosures=disclosureOnly || !!initialWorkday && !initialWorkday.canFillDetails && initialWorkday.canFillDisclosures;
+    if (initialWorkday && (!initialWorkday.hasForm || action === 'details' && !(initialWorkday.canFillDetails || initialWorkday.canFillDisclosures && disclosuresEnabled(profile)) || action === 'resume' && !initialWorkday.canAttachResume
       || expectedWorkdayStep && expectedWorkdayStep !== initialWorkday.stepKey)) {
       report.status='interrupted'; warn(expectedWorkdayStep && expectedWorkdayStep !== initialWorkday.stepKey
         ? 'The Workday application step changed. Inspect the current step before retrying.' : initialWorkday.message); return report;
@@ -540,38 +636,58 @@
             await pause(100); continue;
           }
           quietSince=Date.now();
-          const {entry,token}=pending, {label,type}=entry;
+          const {entry,token}=pending, {type}=entry;
+          let label=entry.label;
           attempts.set(token,(attempts.get(token)||0)+1);
           try {
             // Resolve immediately before writing: React can replace any input.
             const live=inventory(warn).filter(item => fieldToken(item,profile)===token);
             if (live.length !== 1) { record(token,'failed',{label,reason:'This field changed or is ambiguous. Review it manually.'}); continue; }
-            const {el}=live[0];
-            if (['radio','checkbox','choice','file','password'].includes(type)) { record(token,'skipped',{label,reason:type==='file' ? 'Use Attach résumé separately' : 'Answer this question yourself'}); continue; }
+            const current=live[0], {el}=current, disclosure=disclosureRule(current,profile);
+            if (disclosure?.label) label=disclosure.label;
+            if (['checkbox','choice','file','password'].includes(type) || type === 'radio' && !disclosure?.disclosure) { record(token,'skipped',{label,reason:disclosure?.reason || (type==='file' ? 'Use Attach résumé separately' : 'Answer this question yourself')}); continue; }
             const prompt=workdayMultiSelect(el);
             if (prompt) { record(token,'skipped',{label,reason:prompt.selected ? 'Your existing answer was preserved' : 'This Workday multi-select needs a manual choice. Review it on the application page.'}); continue; }
-            if (answered(el)) { record(token,'skipped',{label,reason:'Your existing answer was preserved'}); continue; }
+            if (el.tagName === 'SELECT' && el.multiple) { record(token,'skipped',{label,reason:DISCLOSURE_MANUAL}); continue; }
+            if (type === 'radio' ? current.answered : answered(el)) { record(token,'skipped',{label,reason:'Your existing answer was preserved'}); continue; }
             if (combo(el) && !workdaySelect(el) && String(el.value || '').trim()) { record(token,'skipped',{label,reason:'An existing dropdown search was preserved. Choose its option on the page.'}); continue; }
-            const rule=ruleFor(el,profile);
+            if (onlyDisclosures && !disclosure) { record(token,'skipped',{label,reason:DISCLOSURE_MANUAL}); continue; }
+            const rule=disclosure || ruleFor(el,profile);
             if (rule.reason) { record(token,'skipped',{label,reason:rule.reason}); continue; }
             if (!rule.value) { record(token,'skipped',{label,reason:'No saved profile value'}); continue; }
+            const mutationGuard=rule.disclosure ? () => {
+              if (!guard()) return false;
+              const question=fixedDisclosureQuestion({...current,radioQuestion:el.type === 'radio' ? disclosureRadioQuestion(el) : null});
+              if (!el.isConnected || disclosureText(question) !== rule.disclosure.question) { cancelled=true; return guard(); }
+              return true;
+            } : guard;
             if (el.tagName==='SELECT') {
               const option=exactOption([...el.options].filter(o => !placeholderOption(o)),rule,profile);
+              // Assigning .value chooses the first option with that value. A
+              // duplicate value could commit a different disclosure before
+              // post-event validation, so leave the whole question manual.
+              if (rule.disclosure && (!option || [...el.options].filter(other=>other.value === option.value).length !== 1)) { record(token,'skipped',{label,reason:DISCLOSURE_MATCH}); continue; }
               if (option) {
-                if (!guard()) break;
+                if (!mutationGuard()) break;
                 el.value=option.value;
-                if (!guard()) break;
+                if (!mutationGuard()) break;
                 el.dispatchEvent(new Event('input',{bubbles:true}));
-                if (!guard()) break;
+                if (!mutationGuard()) break;
                 el.dispatchEvent(new Event('change',{bubbles:true})); await pause(100);
               }
+            } else if (type === 'radio' && rule.disclosure) {
+              const option=exactOption(radioChoices(current.radioQuestion),rule,profile);
+              if (!option) { record(token,'skipped',{label,reason:DISCLOSURE_MATCH}); continue; }
+              if (!mutationGuard()) break;
+              option.el.click(); await pause(100);
             } else if (type==='combobox') {
-              const result=await fillCombo(el,rule,profile,guard);
+              const result=await fillCombo(el,rule,profile,mutationGuard);
               if (result==='interrupted') break;
               if (result==='preserved') { record(token,'skipped',{label,reason:'Your dropdown answer or search changed during autofill and was preserved.'}); continue; }
+              if (!result && rule.disclosure) { record(token,'skipped',{label,reason:DISCLOSURE_MATCH}); continue; }
             }
-            else { setText(el,rule.value,guard); await pause(100); }
-            if (!guard()) break;
+            else { setText(el,rule.value,mutationGuard); await pause(100); }
+            if (!mutationGuard()) break;
             const after=inventory(warn).filter(item => fieldToken(item,profile)===token);
             if (after.length===1 && acceptedValue(after[0].el,rule,profile)) record(token,'filled',{label,key:rule.key},rule);
             else record(token,'failed',{label,reason:'The form did not retain a valid, unambiguous match. Review this field.'},rule,!el.isConnected && after.length===1 && !after[0].answered);

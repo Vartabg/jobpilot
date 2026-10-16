@@ -1,4 +1,4 @@
-# Button and page audit — 0.11.4
+# Button and page audit — 0.12.0
 
 This release tests the outcome of each control group with synthetic data and
 isolated browser profiles. It does not submit applications or certify every
@@ -21,6 +21,7 @@ a guarantee of universal autofill support.
 | Save as started/I submitted this | Update one role record; retain progressed outcomes; never submit an employer form |
 | View applications/Go to Apply, status/filter/refresh | Open the intended panel, show the requested subset, preserve notes and role identity |
 | Profile Edit/Save/Add/Remove | Save intended structured fields and remaining history rows; preserve edits on failure; prevent edits during an in-flight save |
+| Disclosure preferences | Blank by default; saved choices persist locally and in profile backups. Fill details uses only an unambiguous offered veteran/decline choice and preserves existing answers. Agreements, signatures and final submission remain manual. |
 | Résumé add/choose/delete | Persist the chosen file, require deliberate deletion, allow retrying the same invalid file after an error |
 | Profile backup export/import/confirm/cancel | Preview before import; cancel clears the pending file; reject invalid input without changing existing state |
 | Memory New/Edit/Save/Cancel/Delete/Search | Correct story and review state; lock editable controls during save; reject stale edits |
@@ -140,3 +141,22 @@ required transparent native agreement checkbox, using its exact visible local
 label. Privacy identifies gender, ethnicity and veteran requests. Fill/Attach
 preserved every disclosure and agreement control. Consent and personal choices
 remain with the user; the extension does not accept agreements.
+
+## Saved disclosure preferences (0.12.0)
+
+Automated checks cover blank defaults, strict preference validation, saving,
+reload, clearing, and profile backup/import. Fill details applies only saved
+preferences to an exact offered choice on supported forms. Tests distinguish
+general and protected veteran questions, reject subtype and negative-wording
+inferences, and prefer a specific protected category when one is offered.
+Nondisclosure choices never become a negative disability or veteran assertion.
+
+Workday question, disclosure, and self-identification steps receive only the
+disclosure preferences. Contact data, names, signatures, dates, agreement
+checkboxes, uploads, and navigation remain untouched on those steps. Review,
+availability, and sign-in steps remain blocked. Fixtures cover native selects,
+bounded native radio groups, and Workiva's listbox association that appears only
+after opening. Existing selections, multiple selects, disabled or duplicate
+choices, duplicate native select values, ambiguous radio groups, and changes to
+the current question or step all preserve manual control. Diagnostic checks
+exclude preference values and selected option text.

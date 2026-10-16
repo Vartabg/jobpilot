@@ -10,10 +10,14 @@ const RUNS_STORAGE = "jobpilot_runs_v1";
 const MAX_RESUME_BYTES = 10 * 1024 * 1024;
 const PROFILE_FIELDS = ["first_name", "last_name", "preferred_name", "email", "phone", "address_line1", "address_line2", "city", "state", "country", "postal_code", "linkedin_url", "github_url", "portfolio_url", "current_title", "selected_resume_id"];
 const MIME_TYPES = { pdf: "application/pdf" };
+const DISCLOSURE_CHOICES = {
+  veteran_status: ["", "protected_veteran", "veteran", "not_veteran", "decline"],
+  other_demographics: ["", "decline"],
+};
 
 export function emptyProfile() {
   return { ...Object.fromEntries(PROFILE_FIELDS.map((key) => [key, ""])), work_authorized: null,
-    requires_sponsorship: null, work_history: [], education: [] };
+    requires_sponsorship: null, disclosure_preferences: { veteran_status: "", other_demographics: "" }, work_history: [], education: [] };
 }
 
 const uid = () => crypto.randomUUID();
@@ -65,6 +69,14 @@ function profileData(value) {
   }
   result.work_authorized = nullableBoolean(value.work_authorized);
   result.requires_sponsorship = nullableBoolean(value.requires_sponsorship);
+  if (value.disclosure_preferences !== undefined) {
+    const preferences = object(value.disclosure_preferences, "Disclosure preferences");
+    for (const [key, choices] of Object.entries(DISCLOSURE_CHOICES)) {
+      const choice = preferences[key] === undefined ? "" : preferences[key];
+      if (typeof choice !== "string" || !choices.includes(choice)) throw new Error("Choose a supported voluntary disclosure preference or leave it unanswered.");
+      result.disclosure_preferences[key] = choice;
+    }
+  }
   result.work_history = rows(value.work_history, "Work history", (row) => ({
     id: identifier(row.id), company: string(row.company), title: string(row.title),
     start_date: date(row.start_date), end_date: date(row.end_date), current: row.current === true,
@@ -78,7 +90,7 @@ function profileData(value) {
 }
 function hasProfile(profile) {
   return PROFILE_FIELDS.some((key) => Boolean(profile[key])) || profile.work_authorized !== null ||
-    profile.requires_sponsorship !== null || profile.work_history.length > 0 || profile.education.length > 0;
+    profile.requires_sponsorship !== null || Object.values(profile.disclosure_preferences).some(Boolean) || profile.work_history.length > 0 || profile.education.length > 0;
 }
 function safeUrl(value) {
   let url;
