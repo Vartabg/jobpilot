@@ -489,7 +489,7 @@ test('real isolated MV3 broker permits workspace tabs and persists memory across
     await second.goto(`chrome-extension://${extensionId}/sidepanel.html`);
     assert.equal((await call(second, 'listStories'))[0].title, saved[0].title);
     const opened = context.waitForEvent('page'); await second.locator('#open-workspace').click(); const careerPage = await opened;
-    await expect(careerPage).toHaveURL(`chrome-extension://${extensionId}/workspace.html`);
+    await expect(careerPage).toHaveURL(`chrome-extension://${extensionId}/workspace.html#memory`);
     await expect(careerPage.getByRole('heading', {name: 'Story Vault', exact: true})).toBeVisible();
     await expect(careerPage.locator('#memory article')).toContainText('Real broker synthetic account');
     assert.deepEqual(errors, []); assert.deepEqual(external, [], 'real extension smoke must not access employer sites or external services');
