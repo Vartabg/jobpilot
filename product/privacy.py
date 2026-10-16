@@ -242,7 +242,7 @@ def analyze_fields(
             matches.append(("precise_address", "review", "Requests a street, legal, home, or full address rather than only a work location."))
         elif _COORDINATES.search(label):
             matches.append(("precise_location", "review", "Requests precise location coordinates."))
-        elif _COARSE_LOCATION.search(re.sub(r"\bunited states(?: of america)?\b", "", label, flags=re.I)) and not re.search(r"\b(?:state your|country of (?:citizenship|birth))\b", label, re.I):
+        elif _COARSE_LOCATION.search(re.sub(r"\bunited states(?: of america)?\b", "", label, flags=re.I)) and not re.search(r"\b(?:state your|country of (?:citizenship|birth))\b|^\s*(?:country\s*(?:phone|calling|diall?ing)|(?:phone|calling|diall?ing)\s*country)\s*code\s*[:*]?\s*$", label, re.I):
             matches.append(("coarse_location", "notice", "Requests a city, region, postal code, country, or general location; no street address is established by this label."))
         matches.extend((category, level, explanation) for category, pattern, level, explanation in _COMPILED_RULES if pattern.search(label) and not _occupational_reference(category, label))
         for category, level, explanation in matches:

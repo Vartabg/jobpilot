@@ -60,6 +60,50 @@ test('URL diagnostics retain public requisitions but omit unrelated paths and al
   ]) assert.equal(sanitizeRun({report: {pageUrl: url}}).url, expected);
 });
 
+test('Workday run links retain the public requisition without application, account or token paths', () => {
+  for (const [source, expected] of [
+    ['https://workiva.wd503.myworkdayjobs.com/en-US/careers/job/USA---Remote/Software-Support-Engineer_R12637/apply/autofillWithResume?token=PRIVATE#PRIVATE',
+      'https://workiva.wd503.myworkdayjobs.com/careers/job/USA---Remote/Software-Support-Engineer_R12637'],
+    ['https://wd3.myworkdaysite.com/en-GB/recruiting/example/External/job/Austin/Engineer_R123/apply/PRIVATE?token=PRIVATE',
+      'https://wd3.myworkdaysite.com/recruiting/example/External/job/Austin/Engineer_R123'],
+    ['https://example.wd5.myworkdayjobs.com/External/job/Engineer_R123',
+      'https://example.wd5.myworkdayjobs.com/External/job/Engineer_R123'],
+  ]) {
+    const result = sanitizeRun({report:{pageUrl:source}});
+    assert.equal(result.url,expected); assert.equal(result.provider,'Workday');
+    assert.doesNotMatch(JSON.stringify(result),/PRIVATE|autofillWithResume|\/apply\//);
+  }
+  for (const source of [
+    'https://workiva.wd503.myworkdayjobs.com/careers/passwordreset/PRIVATE',
+    'https://workiva.wd503.myworkdayjobs.com/careers/job/Austin/Engineer_R123/PRIVATE',
+    'https://wd3.myworkdaysite.com/recruiting/example/External/login/PRIVATE',
+    'https://employee.workday.com/External/job/Engineer_R123',
+    'https://example.wd5.myworkdayjobs.com.evil.test/External/job/Engineer_R123',
+    'https://user:password@example.wd5.myworkdayjobs.com/External/job/Engineer_R123',
+    'https://example.wd5.myworkdayjobs.com:8443/External/job/Engineer_R123',
+  ]) {
+    const result = sanitizeRun({report:{pageUrl:source}});
+    assert.equal(result.provider,'Manual');
+    assert.equal(new URL(result.url).pathname,'/');
+    assert.doesNotMatch(result.url,/PRIVATE|password|Engineer_R123/);
+  }
+});
+
+test('a known Workday manual-step guard remains explanatory in saved history', () => {
+  const result = sanitizeRun({report:{status:'interrupted',warnings:[
+    'Only the current visible Workday step is supported. Review it and move to the next step yourself.',
+  ]}});
+  assert.deepEqual(result.warnings,['workday_step']);
+  assert.equal(result.health,'problem');
+});
+
+test('a split phone field is saved as a manual format check rather than an unexpected failure', () => {
+  const result = sanitizeRun({report:{status:'complete',frames:[{skipped:[{label:'Phone Number',
+    reason:'This phone field has a separate country code. Review its format and enter it yourself.'}]}]}});
+  assert.equal(result.frames[0].skipped[0].reason,'phone_format');
+  assert.equal(result.health,'manual');
+});
+
 test('checkpoints replace their run, retain review state, and new attempts keep the last 50', async () => {
   const first = input(); first.report.status = 'running';
   await run('saveRun', [first]);

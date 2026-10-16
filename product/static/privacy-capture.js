@@ -3,10 +3,13 @@ function captureApplicationFields() {
   if (previous) { previous.showModal(); return; }
   const clean = (text) => String(text || "").replace(/\s+/g, " ").trim();
   const answerWidgets = "input, textarea, select, [contenteditable], [role=combobox], [role=textbox], [role=searchbox], [role=listbox], [role=option], [role=spinbutton]";
+  // Workday may describe an empty search input with its current selection.
+  // These announcements and tokens are answer state, not employer help text.
+  const answerState = "[role=alert], [aria-live], [data-automation-id=promptAriaInstruction], [data-automation-id=selectedItemList], [data-automation-id=selectedItem]";
   const textOf = (element) => {
-    if (!element || element.matches(answerWidgets) || element.closest("[role=combobox], [role=listbox], [role=option], [role=textbox], [role=alert], [aria-live]")) return "";
+    if (!element || element.closest(answerWidgets + ", " + answerState)) return "";
     const clone = element.cloneNode(true);
-    clone.querySelectorAll(answerWidgets + ", script, style, [data-jobpilot-private]").forEach((n) => n.remove());
+    clone.querySelectorAll(answerWidgets + ", " + answerState + ", script, style, [data-jobpilot-private]").forEach((n) => n.remove());
     return clean(clone.textContent);
   };
   const labelled = (element) => {
@@ -54,7 +57,7 @@ function captureApplicationFields() {
         .map((id) => {
           const target = doc.getElementById(id);
           return target && target !== control && !control.contains(target) ? textOf(target) : "";
-        }).join(" ").slice(0, 8000);
+        }).filter(Boolean).join(" ").slice(0, 8000);
       const signature = JSON.stringify([label, required, options]);
       if (!seen.has(signature) && fields.length < 500) {
         fields.push({label, required, options: options.slice(0, 500), description});

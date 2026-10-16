@@ -58,6 +58,8 @@ Version 0.10.0 supports public candidate job routes on `tenant.wdN.myworkdayjobs
 
 Version 0.11.1 fixes the toolbar invocation so it grants temporary access before opening the panel. Clicking the icon again on another tab grants access to that tab. Opening JobPilot through Chrome's side-panel menu alone still requires a toolbar click before page actions.
 
+Version 0.11.2 incorporates live Workiva fixes: accepted résumés remain recognized after the upload input disappears, selected phone-code tokens count as answered, required Yes/No questions are reported without answering them, and new History links open the public requisition. Privacy scans omit selected-answer announcements from field help and distinguish a dialing prefix from a residence question.
+
 Capture the job before opening its application. After you sign in or choose to apply manually, use **Inspect fields**, **Fill details**, and **Attach selected résumé** on the current step. My Information and My Experience use verified contact and existing history controls; the résumé step supports an explicit local PDF upload. Review every result, advance the step yourself, and inspect again. Workday may replace the form without changing the URL; JobPilot stops an in-flight action when the step changes.
 
 Sign-in, account creation, verification, application questions, disclosures, demographic answers, attestations, and final submission stay under your control. Unknown or translated labels, ambiguous history rows, and unsupported date/phone formats remain manual. Existing answers and attachments stay intact. The report distinguishes a selected file from a résumé that the page displays as accepted.

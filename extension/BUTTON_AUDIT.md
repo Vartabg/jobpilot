@@ -1,4 +1,4 @@
-# Button and page audit — 0.11.1
+# Button and page audit — 0.11.2
 
 This release tests the outcome of each control group with synthetic data and
 isolated browser profiles. It does not submit applications or certify every
@@ -81,3 +81,23 @@ python3 -m unittest tests/test_extension_package.py
 Browser tests include a real isolated MV3 installation, responsive layouts,
 keyboard interaction, and automated accessibility checks. They do not use the
 owner's active browser, profile storage, résumé, or employer applications.
+
+## Live Workiva verification (October 16, 2026)
+
+The signed-in Software Support Engineer R12637 application was used with explicit
+permission for contact details and the selected local PDF. The toolbar grant,
+Capture (role/company), Inspect, Fill, accepted PDF upload, privacy scan/filter,
+Save as started and duplicate prevention, application filters/refresh, run
+history/reporting and diagnostic exports were exercised through the installed
+extension. An empty first name was filled; a repeated Fill preserved existing
+answers. Street address and ZIP remained blank. Workiva's own validation requires
+both fields, preventing access to later steps. No employer submission, consent,
+or demographic answer was made. Destructive library/profile operations and submission-status
+changes remain covered by isolated tests rather than mutations of real records.
+
+Live findings fixed in 0.11.2: repeated upload recognizes an accepted résumé when
+Workday removes the file input; inspection recognizes a selected phone-code token
+and required radio-question container; new History job links retain the public
+requisition while stripping application suffixes and tokens. Privacy collection
+excludes selection announcements from field help, and dialing-country-code labels
+are distinguished from questions about residence or location.

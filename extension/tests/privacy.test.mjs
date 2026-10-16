@@ -73,6 +73,78 @@ test('metadata collector excludes applicant widgets, values, selections and DOM 
   assert.equal(/navigator|fetch\(|chrome\.|\.showModal\(|\.append\(|\.value\b|\.checked\b|\.files\b/.test(source), false);
 });
 
+test('Workday selection announcements never become help, findings, or exported scan metadata', async () => {
+  // A minimal DOM implements the selector/clone APIs used by the real collector,
+  // including descendant removal and ancestor checks. No browser or user data.
+  let document;
+  function element(tag, attrs = {}, text = '', children = []) {
+    const node = {tagName: tag.toUpperCase(), attrs: {...attrs}, text, children, parentElement: null,
+      get ownerDocument() { return document; },
+      get textContent() { return this.text + this.children.map(child => child.textContent).join(''); },
+      get type() { return this.attrs.type || (this.tagName === 'INPUT' ? 'text' : ''); },
+      getAttribute(name) { return this.attrs[name] ?? null; }, hasAttribute(name) { return Object.hasOwn(this.attrs, name); },
+      getClientRects() { return [{}]; },
+      matches(selectors) {
+        return selectors.split(',').some(selector => {
+          const match = /^\s*([\w-]+)?(?:\[([\w-]+)(?:=["']?([^\]"']+)["']?)?\])?\s*$/.exec(selector);
+          return !!match && (!match[1] || this.tagName === match[1].toUpperCase())
+            && (!match[2] || this.hasAttribute(match[2]) && (match[3] === undefined || this.getAttribute(match[2]) === match[3]));
+        });
+      },
+      closest(selectors) { for (let current = this; current; current = current.parentElement) if (current.matches(selectors)) return current; return null; },
+      contains(target) { for (let current = target; current; current = current.parentElement) if (current === this) return true; return false; },
+      querySelectorAll(selectors) { return this.children.flatMap(child => [...(child.matches(selectors) ? [child] : []), ...child.querySelectorAll(selectors)]); },
+      querySelector(selectors) { return this.querySelectorAll(selectors)[0] || null; },
+      cloneNode() { return element(this.tagName, this.attrs, this.text, this.children.map(child => child.cloneNode(true))); },
+      remove() { this.parentElement.children = this.parentElement.children.filter(child => child !== this); },
+    };
+    for (const child of children) child.parentElement = node;
+    return node;
+  }
+  const privateChoices = ['ApplicantChoice-Z9 (+321)', 'PrivateSelection-K4', 'ApplicantSelection-Q7'];
+  const announcement = element('span', {id:'announcement', 'data-automation-id':'promptAriaInstruction'},
+    `1 item selected, ${privateChoices[0]}`, [element('span', {id:'announcement-child'}, privateChoices[0])]);
+  const selected = element('div', {id:'selected', 'data-automation-id':'selectedItem'}, privateChoices[1]);
+  const selectedList = element('ul', {'data-automation-id':'selectedItemList'}, '', [selected]);
+  const publicHelp = 'Used only to route application follow-up.';
+  const mixedHelp = element('div', {id:'help'}, publicHelp, [announcement, selectedList,
+    element('span', {'aria-live':'polite'}, privateChoices[2]), element('span', {role:'alert'}, privateChoices[2])]);
+  const label = element('label', {id:'code-label'}, 'Country Phone Code', [
+    element('span', {'data-automation-id':'promptAriaInstruction'}, privateChoices[0])]);
+  const control = element('input', {id:'phoneNumber--countryPhoneCode', required:'',
+    'aria-labelledby':'code-label', 'aria-describedby':'announcement announcement-child selected help'});
+  const address = element('input', {'aria-label':'Street address', 'aria-describedby':'help'});
+  for (const input of [control, address]) for (const key of ['value', 'checked', 'files']) Object.defineProperty(input, key, {
+    get() { throw new Error(`Applicant ${key} must not be read`); },
+  });
+  const body = element('body', {}, '', [label, control, address, mixedHelp]);
+  document = {contentType:'text/html', defaultView:{getComputedStyle:() => ({display:'block', visibility:'visible'})},
+    querySelectorAll: selector => body.querySelectorAll(selector),
+    getElementById: id => body.querySelectorAll('[id]').find(node => node.getAttribute('id') === id) || null};
+  const context = vm.createContext({document, location:{origin:'https://fixture.test', pathname:'/apply'}, Set});
+  vm.runInContext(await readFile(new URL('../privacy-content.js', import.meta.url), 'utf8'), context);
+  const payload = JSON.parse(JSON.stringify(context.__jobpilotPrivacyCapture()));
+  assert.deepEqual(payload.fields, [field('Country Phone Code', true, [], publicHelp), field('Street address', null, [], publicHelp)]);
+  chromeMock({payloads:{top:{payload, document_type:'text/html', parent_visibility:'visible', visible_embeds:0}}});
+  const report = await scanCurrentPrivacy();
+  assert.ok(report.findings.length > 0, 'Actual address requests must still be reported');
+  assert.ok(report.findings.every(finding => finding.employer_stated_purpose === publicHelp));
+  const exported = JSON.stringify(report, null, 2);
+  for (const privateChoice of privateChoices) {
+    assert.equal(JSON.stringify(payload).includes(privateChoice), false, 'Raw field metadata excludes selected state');
+    assert.equal(exported.includes(privateChoice), false, 'The exported report excludes selected state');
+  }
+  assert.equal(exported.includes('1 item selected'), false);
+});
+
+test('telephone country-code labels do not imply location but residence and postal requests still do', () => {
+  const labels = ['Country Phone Code', 'Phone Country Code *', 'Country Calling Code', 'CountryPhoneCode',
+    'Country', 'Country of residence', 'Country code', 'Postal Code', 'Country phone code and country of residence'];
+  const report = analyzeFields(labels.map(label => field(label, true)));
+  assert.deepEqual(report.findings.map(finding => finding.label), labels.slice(4));
+  assert.ok(report.findings.every(finding => finding.category === 'coarse_location'));
+});
+
 function chromeMock({frames = [{frameId: 0, documentId: 'top', result: {source_url: 'https://fixture.test/apply', document_type: 'text/html'}}],
   payloads = {}, afterQuery = null, injectionError = false} = {}) {
   const calls = [], tab = {id: 42, url: 'https://fixture.test/apply?session=SECRET', status: 'complete'};

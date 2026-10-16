@@ -9,6 +9,7 @@ export const REASONS = {
   missing_history: 'No saved history for this row',
   current_job: 'Current job: leave end date to you',
   date_format: 'Saved date does not match this field format',
+  phone_format: 'This phone field has a separate country code. Review its format and enter it yourself.',
   authorization_country: 'Authorization country does not match your saved profile',
   sponsorship_country: 'Sponsorship country does not match your saved profile',
   unmapped_question: 'No verified mapping for this question',
@@ -34,6 +35,12 @@ export const REASONS = {
   unidentified_field: 'A field could not be identified. Review the page.',
   ambiguous_form: 'Several visible application forms match this job. Open the intended application in its own tab before autofilling or attaching a résumé.',
   missing_form: 'A unique visible application form for this job could not be verified. Open the application form in its own tab, then inspect it again.',
+  workday_step: 'Only the current visible Workday step is supported. Review it and move to the next step yourself.',
+  workday_signin: 'Complete Workday sign-in or account steps yourself, then inspect the visible application step.',
+  workday_manual: 'Complete Workday questions, disclosures, availability and final review yourself.',
+  workday_unverified: 'The current Workday application step could not be verified. Wait for it to load and inspect again.',
+  workday_missing: 'Open one visible Workday application step before using autofill.',
+  workday_changed: 'The Workday application step changed. Inspect the current step before retrying.',
   page_access: 'Open a job page, then click the JobPilot toolbar icon to grant page access.',
   ordinary_page: 'Open an ordinary job webpage first.',
   unsupported_host: 'Autofill supports Greenhouse, Lever, and Ashby application hosts. You can still capture and track this job.',
@@ -71,6 +78,22 @@ function jobUrl(value) {
     if (!['http:', 'https:'].includes(url.protocol)) return {url: '', provider: 'Manual'};
     const path = url.pathname.split('/').filter(Boolean);
     let parts = [], provider = 'Manual';
+    // Workday's application suffix can contain step/account state. Retain only
+    // the bounded public candidate requisition, never that suffix or its query.
+    const candidate = path.slice();
+    if (/^[a-z]{2,3}(?:-[a-z0-9]{2,8}){1,2}$/i.test(candidate[0] || '')) candidate.shift();
+    const workdayIndex = /^[a-z0-9][a-z0-9-]*\.wd\d+\.myworkdayjobs\.com$/.test(url.hostname) ? 1
+      : /^wd\d+\.myworkdaysite\.com$/.test(url.hostname) && candidate[0] === 'recruiting' ? 3 : -1;
+    if (url.protocol === 'https:' && !url.username && !url.password && !url.port
+      && workdayIndex >= 0 && candidate[workdayIndex] === 'job') {
+      const end = candidate.indexOf('apply', workdayIndex + 1);
+      const publicParts = candidate.slice(0, end < 0 ? undefined : end);
+      const requisition = publicParts.slice(workdayIndex + 1);
+      if (requisition.length >= 1 && requisition.length <= 2
+        && publicParts.every(part => /^[a-zA-Z0-9_-]{1,100}$/.test(part))) {
+        parts = publicParts; provider = 'Workday';
+      }
+    }
     if (url.hostname === 'jobs.ashbyhq.com' && path.length >= 2) { parts = path.slice(0, 2); provider = 'Ashby'; }
     else if (['jobs.lever.co', 'jobs.eu.lever.co'].includes(url.hostname) && path.length >= 2) { parts = path.slice(0, 2); provider = 'Lever'; }
     else if (['boards.greenhouse.io', 'job-boards.greenhouse.io', 'boards-eu.greenhouse.io', 'job-boards.eu.greenhouse.io'].includes(url.hostname)) {
@@ -110,7 +133,7 @@ export function sanitizeRun(input, previous = null, version = '') {
     frame.error || frame.failed.length || frame.warnings.length || ['partial', 'interrupted'].includes(frame.status)
     || ['failed', 'no-target', 'prepared'].includes(frame.resume.status)
     || frame.skipped.some(row => ['unmapped_question', 'history_mapping', 'history_context', 'unknown'].includes(row.reason))));
-  const manual = frames.some(frame => frame.required.length || frame.skipped.some(row => ['missing_profile', 'missing_history', 'manual_answer', 'date_format'].includes(row.reason)));
+  const manual = frames.some(frame => frame.required.length || frame.skipped.some(row => ['missing_profile', 'missing_history', 'manual_answer', 'date_format', 'phone_format'].includes(row.reason)));
   const page = jobUrl(report.pageUrl || input.job?.url);
   return {
     id: previous?.id || input.id, action: choices(input.action, ['inspect', 'details', 'resume'], 'inspect'),

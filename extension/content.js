@@ -92,12 +92,48 @@
   const attachedText = container => workdayPage()
     ? [...(container?.querySelectorAll('[data-automation-id="file-upload-item-name"]') || [])].some(el => visible(el) && el.textContent.trim())
     : /\b[^\s]+\.(pdf|docx?|rtf)\b|remove (file|resume)|replace (file|resume)|resume.*uploaded/i.test((container?.innerText || '').replace(/Accepted file types:[^\n]*/gi, ''));
+  function selectedWorkdayCountryCode(el) {
+    if (!workdayPage()) return false;
+    // Workday can keep the selected phone code in a token beside an empty search input.
+    const field = el.closest('[data-automation-id="formField-countryPhoneCode"], [data-automation-id="formField-phoneNumber--countryPhoneCode"]');
+    if (!field) return false;
+    return [...field.querySelectorAll('[data-automation-id="selectedItemList"][role="listbox"]')].some(list => visible(list)
+      && list.closest('[data-automation-id^="formField-"]') === field
+      && [...list.querySelectorAll('[data-automation-id="selectedItem"][role="option"]')].some(item => visible(item)
+        && [...item.querySelectorAll('[data-automation-id="promptOption"]')].some(option => visible(option) && option.textContent.trim())));
+  }
   function answered(el) {
+    if (selectedWorkdayCountryCode(el)) return true;
     if (['checkbox','radio'].includes(el.type)) return el.checked;
     if (el.type === 'file') return !!el.files?.length || attachedText(wrapper(el));
     if (el.tagName === 'SELECT') return !placeholderOption(el.selectedOptions[0]);
     if (combo(el)) return !!selectedCombo(el) || (!workdaySelect(el) && !reactControl(el) && !!el.value && el.getAttribute('aria-expanded') !== 'true');
     return !!String(el.value || '').trim();
+  }
+  function workdayRadioQuestion(el) {
+    if (!workdayPage() || !el.name) return null;
+    const field = el.closest('[data-automation-id^="formField-"]');
+    const question = el.closest('[aria-required][aria-labelledby]');
+    if (!field || question?.closest('[data-automation-id^="formField-"]') !== field) return null;
+    const radios = [...question.querySelectorAll('input[type="radio"]')];
+    if (!radios.length || radios.some(other => other.name !== el.name || other.form !== el.form
+      || other.closest('[data-automation-id^="formField-"]') !== field
+      || other.closest('[aria-required][aria-labelledby]') !== question)) return null;
+    const references = question.getAttribute('aria-labelledby').trim().split(/\s+/).map(id => document.getElementById(id));
+    if (!references.length || references.some(node => !node || !field.contains(node))) return null;
+    const label = references.map(labelText).join(' ').trim();
+    return label ? {label,required:question.getAttribute('aria-required') === 'true',radios,question,references} : null;
+  }
+  function workdayRadioProxy(el, metadata) {
+    if (!metadata || !el.getClientRects().length || getComputedStyle(el).opacity !== '0') return false;
+    // Workday paints the radio beside a transparent native input. Allow only
+    // this input's opacity; hidden questions, labels and ancestors stay hidden.
+    for (let node=el; node?.nodeType===1; node=node.parentElement) {
+      const style=getComputedStyle(node);
+      if (style.display==='none' || style.visibility==='hidden' || node!==el && style.opacity==='0') return false;
+    }
+    return visible(metadata.question) && metadata.references.every(visible)
+      && [...(el.labels || [])].some(label => metadata.question.contains(label) && visible(label) && labelText(label).trim());
   }
   function inventory(onError = () => {}) {
     const scopes = applicationScopes();
@@ -105,15 +141,19 @@
       .filter(el => (!scopes.length || scopes.some(scope => scope.contains(el))) && !unrelatedControl(el));
     const seenRadio = new Set();
     return controls.flatMap(el => { try {
-      const choiceProxy=['radio','checkbox'].includes(el.type) && visible(el.closest('.ashby-application-form-input-radio-group-option, .ashby-application-form-input-checkbox-group-option'));
+      const metadata=el.type === 'radio' ? workdayRadioQuestion(el) : null;
+      const choiceProxy=['radio','checkbox'].includes(el.type) && visible(el.closest('.ashby-application-form-input-radio-group-option, .ashby-application-form-input-checkbox-group-option'))
+        || workdayRadioProxy(el,metadata);
       if (el.disabled || el.matches(':disabled') || el.readOnly || ['hidden','submit','reset'].includes(el.type) || el.type === 'button' && !workdaySelect(el) || !(visible(el) || choiceProxy || (el.type === 'file' && visible(wrapper(el))))) return [];
       if (el.matches('.ashby-application-form-input-yesno')) return [{el,label:labelOf(el),type:'choice',required:required(el),answered:!!el.querySelector("button[aria-pressed='true']")}];
       if (el.type === 'radio') {
         if (seenRadio.has(el)) return [];
-        const group = el.name ? controls.filter(other => other.type === 'radio' && other.name === el.name && other.form === el.form) : [el];
+        const workday = workdayPage(), field = workday ? el.closest('[data-automation-id^="formField-"]') : null;
+        const group = (metadata ? metadata.radios.filter(other => controls.includes(other)) : el.name ? controls.filter(other => other.type === 'radio' && other.name === el.name && other.form === el.form
+          && (!workday || other.closest('[data-automation-id^="formField-"]') === field)) : [el]);
         group.forEach(radio=>seenRadio.add(radio));
-        const question = labelText(ashbyQuestion(el)) || el.closest('fieldset')?.querySelector('legend')?.textContent;
-        return [{el,label:(question || labelOf(el)).trim().slice(0,180),type:'radio',required:group.some(required),answered:group.some(r => r.checked)}];
+        const question = metadata?.label || labelText(ashbyQuestion(el)) || el.closest('fieldset')?.querySelector('legend')?.textContent;
+        return [{el,label:(question || labelOf(el)).trim().slice(0,180),type:'radio',required:!!metadata?.required || group.some(required),answered:group.some(r => r.checked)}];
       }
       if (el.getAttribute('role') === 'radiogroup') {
         if (el.querySelector("input[type='radio']")) return [];
@@ -303,8 +343,20 @@
       && (!identifiers(el).some(id => /cover letter/.test(id)) || workdayPage() && identifiers(el).some(id => /\b(resume|cv|curriculum vitae)\b/.test(id))));
     return matches.length === 1 ? {el:matches[0],wrapper:wrapper(matches[0])} : null;
   }
+  function hasExistingWorkdayResume() {
+    const step = workdayState().step;
+    const scopes = [...(step?.querySelectorAll('[data-automation-id="resumeUpload"]') || [])].filter(visible);
+    if (scopes.length !== 1) return false;
+    const scope = scopes[0];
+    if ([...scope.querySelectorAll('[data-automation-id="file-upload-failed"], [data-automation-id="file-loading-dots"]')].some(visible)) return false;
+    return [...scope.querySelectorAll('[data-automation-id="file-upload-item"]')].some(item => visible(item)
+      && [...item.querySelectorAll('[data-automation-id="file-upload-item-name"]')].some(el => visible(el) && el.textContent.trim())
+      && [...item.querySelectorAll('[data-automation-id="file-upload-successful"]')].some(visible));
+  }
   async function attachResume(resume, guard) {
     if (!guard()) return {status:'not-requested',message:'No file was selected because the active application changed.'};
+    // Workday can remove its file input once the explicit résumé item succeeds.
+    if (workdayPage() && hasExistingWorkdayResume()) return {status:'already-attached',message:'An existing attachment was preserved.'};
     const target = resumeTarget();
     if (!target) return {status:'no-target',message:'No unique résumé upload field found. Attach the file manually.'};
     if (target.el.files?.length || target.el.value || attachedText(target.wrapper)) return {status:'already-attached',message:'An existing attachment was preserved.'};

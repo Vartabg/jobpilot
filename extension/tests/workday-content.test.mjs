@@ -10,6 +10,8 @@ import {chromium} from '@playwright/test';
 // button aria-haspopup=listbox, resumeUpload/file-upload-*, numbered role=group
 // panels with aria-labelledby. Employer documentation describes the step flow:
 // https://hr.psu.edu/sites/hr/files/Application_Process_for_External_Applications_Non-Penn_State_Employees_.pdf
+// The selected country-code token and removal of a successful résumé's file
+// input also reproduce read-only Workiva DOM observations from 2026-10-16.
 const script = await readFile(new URL('../content.js', import.meta.url), 'utf8');
 const standard = 'https://fixture.wd1.myworkdayjobs.com/en-US/External/job/City/Engineer_R123/apply/applyManually';
 const site = 'https://wd5.myworkdaysite.com/recruiting/fixture/External/job/City/Engineer_R123/apply/applyManually';
@@ -106,6 +108,100 @@ test('Workday preserves existing contact answers and leaves split phone, attesta
   });
 });
 
+const countryCodeToken = `<div data-automation-id="selectedItemList" role="listbox"><div data-automation-id="menuItem" role="presentation">
+  <div data-automation-id="selectedItem" role="option" aria-label="USA (+1), press delete to remove"><span data-automation-id="promptOption">USA (+1)</span>
+  <button type="button" aria-label="Remove USA (+1)">Remove</button></div></div></div>`;
+const countryCodeField = (evidence,field='countryPhoneCode') => `<div data-automation-id="formField-${field}"><label id="country-code-label">Country Phone Code *</label>
+  <div data-automation-id="multiSelectContainer"><input id="phoneNumber--countryPhoneCode" aria-labelledby="country-code-label" aria-expanded="false" required>${evidence}</div></div>`;
+
+test('Workday selected country-code tokens count as answered without filling their empty search input or national phone field',async t=>{
+  for(const field of ['countryPhoneCode','phoneNumber--countryPhoneCode']) await t.test(field,async()=>{
+    await fixture(flow(countryCodeField(countryCodeToken,field)+input('phone','Phone Number','','phoneNumber'))+
+      '<script>window.countryClicks=0;document.querySelector("[data-automation-id=multiSelectContainer]").onclick=()=>countryClicks++;</script>',async page=>{
+      assert.equal(await page.locator('[id="phoneNumber--countryPhoneCode"]').getAttribute('role'),null,'The live Workiva search input has no explicit combobox role');
+      const before=await page.locator('[data-automation-id="multiSelectContainer"]').innerHTML();
+      const inspect=await execute(page,'inspect');assert.equal(inspect.required.some(field=>/Country Phone Code/.test(field.label)),false);
+      const details=await execute(page);assert.ok(details.skipped.some(field=>/Country Phone Code/.test(field.label)&&/existing answer was preserved/.test(field.reason)));
+      assert.equal(await page.locator('[data-automation-id="multiSelectContainer"]').innerHTML(),before);
+      assert.equal(await page.locator('[id="phoneNumber--countryPhoneCode"]').inputValue(),'');assert.equal(await page.locator('#phone').inputValue(),'');
+      assert.equal(await page.evaluate(()=>countryClicks),0);assert.equal(await page.evaluate(()=>navigationClicks),0);
+    });
+  });
+});
+
+test('Workday country-code answered evidence excludes hidden tokens, announcements, open options and neighboring fields',async t=>{
+  for(const [label,evidence,extra] of [
+    ['announcement only','<div data-automation-id="promptAriaInstruction">1 item selected</div>',''],
+    ['hidden selected item',countryCodeToken.replace('data-automation-id="selectedItem"','style="display:none" data-automation-id="selectedItem"'),''],
+    ['empty prompt option',countryCodeToken.replace('>USA (+1)</span>','> </span>'),''],
+    ['unselected open dropdown option','<div role="listbox"><div role="option" data-automation-id="promptOption">USA (+1)</div></div>',''],
+    ['token in a neighboring field','','<div data-automation-id="formField-otherCountry">'+countryCodeToken+'</div>'],
+    ['hidden selected item list',countryCodeToken.replace('data-automation-id="selectedItemList"','style="display:none" data-automation-id="selectedItemList"'),''],
+  ]) await t.test(label,async()=>{
+    await fixture(flow(countryCodeField(evidence)+extra),async page=>{
+      const inspect=await execute(page,'inspect');assert.ok(inspect.required.some(field=>/Country Phone Code/.test(field.label)));
+      assert.equal(await page.locator('[id="phoneNumber--countryPhoneCode"]').inputValue(),'');
+    });
+  });
+  await t.test('the same tokens on another ATS do not establish a Workday answer',async()=>{
+    await fixture('<form id="application-form">'+countryCodeField(countryCodeToken)+'</form>',async page=>{
+      const inspect=await execute(page,'inspect');assert.ok(inspect.required.some(field=>/Country Phone Code/.test(field.label)));
+    },'https://boards.greenhouse.io/fixture/jobs/123');
+  });
+});
+
+const radioQuestion = (id,name,question,isRequired=true,checked='') => `<div data-automation-id="formField-${id}"><label id="${id}-label">${question}</label>
+  <div id="${id}-group" aria-required="${isRequired}" aria-labelledby="${id}-label"><label><input id="${id}-yes" type="radio" style="opacity:0" name="${name}" value="yes" ${checked==='yes'?'checked':''}>Yes</label>
+  <label><input id="${id}-no" type="radio" style="opacity:0" name="${name}" value="no" ${checked==='no'?'checked':''}>No</label></div></div>`;
+
+test('Workday required Yes/No radios report their labeled question once without answering it',async()=>{
+  const question='Have you worked at Workiva before? *';
+  await fixture(flow(radioQuestion('candidateIsPreviousWorker','candidateIsPreviousWorker',question))+
+    '<script>window.answerEvents=0;document.querySelectorAll("input[type=radio]").forEach(el=>["click","input","change"].forEach(type=>el.addEventListener(type,()=>answerEvents++)));</script>',async page=>{
+    assert.equal(await page.locator('#candidateIsPreviousWorker-group').getAttribute('role'),null,'The live question container has no radiogroup role');
+    assert.equal(await page.locator('#candidateIsPreviousWorker-yes').evaluate(el=>el.required),false,'Requiredness belongs to the question container');
+    assert.equal(await page.locator('#candidateIsPreviousWorker-yes').evaluate(el=>getComputedStyle(el).opacity),'0','The live native input is transparent beside its visible Yes/No label');
+    const inspect=await execute(page,'inspect');assert.deepEqual(inspect.required,[{label:question,type:'radio'}]);
+    const details=await execute(page);assert.deepEqual(details.required,[{label:question,type:'radio'}]);
+    assert.ok(details.skipped.some(field=>field.label===question&&/yourself/.test(field.reason)));
+    assert.equal(await page.locator('input[type="radio"]:checked').count(),0);assert.equal(await page.evaluate(()=>answerEvents),0);
+    assert.equal(await page.evaluate(()=>navigationClicks),0);
+  });
+});
+
+test('Workday transparent radios require a visible question and local associated option labels',async t=>{
+  const question=radioQuestion('visibility','visibility','Required question? *');
+  for(const [label,html] of [
+    ['hidden question text',question.replace('id="visibility-label"','style="display:none" id="visibility-label"')],
+    ['hidden question container',question.replace('id="visibility-group"','style="display:none" id="visibility-group"')],
+    ['hidden option labels',question.replaceAll('<label><input','<label style="opacity:0"><input')],
+    ['no associated option labels',question.replaceAll('<label><input','<span><input').replaceAll('>Yes</label>','>Yes</span>').replaceAll('>No</label>','>No</span>')],
+    ['inputs without layout',question.replaceAll('style="opacity:0"','style="opacity:0;display:none"')],
+  ]) await t.test(label,async()=>{
+    await fixture(flow(html),async page=>{
+      const inspect=await execute(page,'inspect');assert.equal(inspect.required.some(field=>field.type==='radio'),false);
+      assert.equal(await page.locator('input[type="radio"]:checked').count(),0);
+    });
+  });
+});
+
+test('Workday radio question requiredness and selected answers stay within the labeled field and native group',async t=>{
+  for(const [label,html,missing] of [
+    ['optional unanswered question',radioQuestion('optional','optional','Optional preference?',false),[]],
+    ['required question with a manual answer',radioQuestion('answered','answered','Have you worked here? *',true,'no'),[]],
+    ['same-name neighbor cannot answer another question',radioQuestion('required','shared','Required employment question? *')+radioQuestion('neighbor','shared','Optional neighboring question?',false,'yes'),['Required employment question? *']],
+    ['required parent outside the field cannot make radios required','<div aria-required="true" aria-labelledby="external-label"><div id="external-label">Unrelated required question *</div><div data-automation-id="formField-optional"><label><input type="radio" name="optional" value="yes">Yes</label><label><input type="radio" name="optional" value="no">No</label></div></div>',[]],
+    ['a container spanning different native names is not one required group','<div data-automation-id="formField-mixed"><div id="mixed-label">Ambiguous required question *</div><div aria-required="true" aria-labelledby="mixed-label"><label><input type="radio" name="first" value="yes">Yes</label><label><input type="radio" name="second" value="no">No</label></div></div>',[]],
+  ]) await t.test(label,async()=>{
+    await fixture(flow('<form>'+html+'</form>'),async page=>{
+      const before=await page.locator('input[type="radio"]').evaluateAll(inputs=>inputs.map(el=>el.checked));
+      const inspect=await execute(page,'inspect');assert.deepEqual(inspect.required.filter(field=>field.type==='radio').map(field=>field.label),missing);
+      await execute(page);assert.deepEqual(await page.locator('input[type="radio"]').evaluateAll(inputs=>inputs.map(el=>el.checked)),before);
+      assert.equal(await page.evaluate(()=>navigationClicks),0);
+    });
+  });
+});
+
 test('Workday exact resume upload uses its local evidence and preserves an existing upload',async()=>{
   await fixture(flow(uploader,'applyFlowAutoFillPage')+`<script>document.querySelector('#resume').onchange=e=>{
     const name=e.target.files[0].name;e.target.value='';document.querySelector('#uploaded').innerHTML='<span data-automation-id="file-upload-item-name">'+name+'</span><span data-automation-id="file-upload-successful">Successfully uploaded</span>';};</script>`,async page=>{
@@ -113,6 +209,47 @@ test('Workday exact resume upload uses its local evidence and preserves an exist
     const report=await execute(page,'resume');assert.equal(report.resume.status,'accepted');
     assert.equal((await execute(page,'resume')).resume.status,'already-attached');
     assert.equal(await page.locator('[data-automation-id="file-upload-item-name"]').textContent(),'Exact.pdf');assert.equal(await page.evaluate(()=>navigationClicks),0);
+  });
+});
+
+test('Workday repeat attachment preserves the successful résumé after the uploader removes its input',async()=>{
+  await fixture(flow(uploader,'applyFlowAutoFillPage')+`<script>window.uploadChanges=0;window.deleteClicks=0;
+    document.querySelector('#resume').onchange=e=>{
+      uploadChanges++;const name=e.target.files[0].name;
+      document.querySelector('[data-automation-id="file-upload-drop-zone"]').remove();
+      document.querySelector('#uploaded').innerHTML='<div data-automation-id="file-upload-item"><div data-automation-id="file-upload-item-name">'+name+'</div><div data-automation-id="file-upload-successful">Successfully uploaded</div><button type="button" data-automation-id="delete-file">Delete</button></div>';
+      document.querySelector('[data-automation-id="delete-file"]').onclick=()=>deleteClicks++;
+    };</script>`,async page=>{
+    assert.equal((await execute(page,'resume')).resume.status,'accepted');
+    assert.equal(await page.locator('input[type="file"]').count(),0,'Workday removes the upload input after success');
+    const before=await page.locator('[data-automation-id="resumeUpload"]').innerHTML();
+    const report=await execute(page,'resume');
+    assert.equal(report.resume.status,'already-attached');assert.equal(report.status,'complete');
+    assert.equal(await page.locator('[data-automation-id="resumeUpload"]').innerHTML(),before);
+    assert.equal(await page.evaluate(()=>uploadChanges),1);assert.equal(await page.evaluate(()=>deleteClicks),0);
+    assert.equal(await page.evaluate(()=>navigationClicks),0);
+  });
+});
+
+test('Workday upload evidence without an input must be successful and local to the explicit résumé item',async t=>{
+  const name='<div data-automation-id="file-upload-item-name">Existing.pdf</div>';
+  const success='<div data-automation-id="file-upload-successful">Successfully uploaded</div>';
+  const item=html=>`<div data-automation-id="file-upload-item">${html}<button type="button" data-automation-id="delete-file">Delete</button></div>`;
+  for(const [label,html] of [
+    ['existing different résumé is preserved',`<div data-automation-id="resumeUpload">${item(name+success)}</div>`],
+    ['filename alone is insufficient',`<div data-automation-id="resumeUpload">${item(name)}</div>`],
+    ['failed upload cannot reuse a stale success marker',`<div data-automation-id="resumeUpload">${item(name+success+'<div data-automation-id="file-upload-failed">Upload failed</div>')}</div>`],
+    ['pending upload cannot reuse a stale success marker',`<div data-automation-id="resumeUpload">${item(name+success+'<div data-automation-id="file-loading-dots" style="width:8px;height:8px"></div>')}</div>`],
+    ['another upload section is not the résumé',`<div data-automation-id="resumeUpload"><h3>Resume/CV</h3></div><div data-automation-id="additionalAttachments">${item(name+success)}</div>`],
+    ['success outside the named item is insufficient',`<div data-automation-id="resumeUpload">${item(name)}${success}</div>`],
+  ]) await t.test(label,async()=>{
+    await fixture(flow(html,'applyFlowMyExpPage'),async page=>{
+      const before=await page.locator('[data-automation-id="applyFlowMyExpPage"]').innerHTML();
+      const report=await execute(page,'resume');
+      assert.equal(report.resume.status,label==='existing different résumé is preserved'?'already-attached':'no-target');
+      assert.equal(await page.locator('[data-automation-id="applyFlowMyExpPage"]').innerHTML(),before);
+      assert.equal(await page.evaluate(()=>navigationClicks),0);
+    });
   });
 });
 
