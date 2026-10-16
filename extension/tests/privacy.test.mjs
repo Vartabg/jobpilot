@@ -287,6 +287,48 @@ test('Workday radio metadata never borrows a hidden, neighboring, mixed-name or 
   });
 });
 
+const disabilityHeading='Voluntary Self-Identification of Disability';
+const disabilityPrompt='Please check one of the boxes below:*';
+const disabilityChoices=['Yes, I have a disability, or have had one in the past',
+  'No, I do not have a disability and have not had one in the past','I do not want to answer'];
+async function captureDisability(variant='') {
+  const {element,capture}=metadataDOM();
+  const inputs=disabilityChoices.map((choice,index)=>element('input',{type:'checkbox',id:`disability-${index}`,style:'opacity:0',value:'PRIVATE ANSWER'}));
+  for(const input of inputs) for(const key of ['checked','value','files','selected']) Object.defineProperty(input,key,{get() { throw new Error(`Applicant ${key} was read`); }});
+  const labels=inputs.map((input,index)=>{const label=element('label',{for:input.getAttribute('id')},disabilityChoices[index]); input.labels=[label]; return label;});
+  if(variant==='hidden choice label') labels[1].attrs.style='opacity:0';
+  if(variant==='unmatched choice label') labels[1].attrs.for='different-input';
+  if(variant==='hidden input') inputs[1].attrs.hidden='';
+  const makeGroup=()=>element('fieldset',{'data-automation-id':'disabilityStatus-CheckboxGroup',id:'selfIdentifiedDisabilityData--disabilityStatus','aria-required':'true'},'',inputs.flatMap((input,index)=>[input,labels[index]]));
+  const group=makeGroup(),outer=element('fieldset',{},'',[element('legend',{},disabilityPrompt),group]);
+  if(variant==='multiple choice groups') { const duplicate=element('fieldset',{'data-automation-id':'disabilityStatus-CheckboxGroup'},''); duplicate.parentElement=outer; outer.children.push(duplicate); }
+  const fieldNode=element('div',{'data-automation-id':variant==='wrong field'?'formField-other':'formField-disabilityStatus'},'',[outer]);
+  const heading=element('h3',variant==='hidden heading'?{hidden:''}:{},disabilityHeading);
+  const step=element('div',{'data-automation-id':variant==='wrong step'?'applyFlowMyInfoPage':'applyFlowSelfIdentifyPage'},'',[heading,fieldNode]);
+  if(variant==='multiple headings') { const duplicate=element('h2',{},disabilityHeading); duplicate.parentElement=step; step.children.push(duplicate); }
+  if(variant==='multiple fields') { const duplicate=element('div',{'data-automation-id':'formField-disabilityStatus'},''); duplicate.parentElement=step; step.children.push(duplicate); }
+  return capture([step]);
+}
+
+test('Workday CC-305 boxes become one required disability question with an offered decline choice and no answer state', async () => {
+  const payload=await captureDisability();
+  const question=`${disabilityHeading} — ${disabilityPrompt}`;
+  assert.deepEqual(payload.fields,[field(question,true,disabilityChoices)]);
+  const report=analyzeFields(payload.fields);
+  assert.equal(report.findings.length,1); assert.equal(report.findings[0].category,'health_disability');
+  assert.equal(report.findings[0].optionality,'response_required_disclosure_optional');
+  assert.equal(JSON.stringify({payload,report}).includes('PRIVATE'),false);
+});
+
+test('CC-305 grouping requires the unique visible self-identification context and matching native choice labels', async t=>{
+  for(const variant of ['wrong step','wrong field','hidden heading','hidden choice label','hidden input','multiple headings','multiple fields','multiple choice groups','unmatched choice label']) await t.test(variant,async()=>{
+    const payload=await captureDisability(variant);
+    assert.ok(payload.fields.every(item=>item.options.length===0));
+    assert.ok(payload.fields.every(item=>!item.label.includes(disabilityHeading)));
+    assert.equal(JSON.stringify(payload).includes('PRIVATE'),false);
+  });
+});
+
 test('telephone country-code labels do not imply location but residence and postal requests still do', () => {
   const labels = ['Country Phone Code', 'Phone Country Code *', 'Country Calling Code', 'CountryPhoneCode',
     'Country', 'Country of residence', 'Country code', 'Postal Code', 'Country phone code and country of residence'];

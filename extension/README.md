@@ -13,6 +13,19 @@ Missing or ambiguous choices stay manual. Agreements, signatures, and submission
 remain under your control. Preferences stay local and are included in profile
 backups; they are never included as answer values in diagnostic exports.
 
+Version **0.12.1** confirms Workday dropdown selections after their menus finish
+closing. A delayed selection counts as filled only when the expected answer is
+present and its associated menu is closed. Changes made during the wait remain
+under your control; a result that cannot be confirmed asks for review.
+On a verified Workday disability self-identification form, the three checkboxes
+are inspected as one question and the saved demographic decline preference may
+choose its offered nondisclosure answer. The required signed-date control is
+reported as one date and remains manual. Privacy scans recognize the group and
+its offered decline choice without reading answers.
+Workday Capture uses public job-description metadata only. It leaves the
+description blank when that metadata is unavailable, keeping application and
+review answers out of the captured job description.
+
 Version **0.11.0** adds **Scan privacy on this page** in Apply. Open the job's
 application step, click the JobPilot toolbar icon to grant page access, and scan
 before sharing answers. The report shows exact question wording, required or

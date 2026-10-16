@@ -64,12 +64,15 @@ export async function captureCurrentJob() {
       const title = typeof job?.title === 'string' ? job.title.trim() : '';
       const description = typeof job?.description === 'string' ? job.description : '';
       const text = html => new DOMParser().parseFromString(String(html || ""), "text/html").body.textContent.trim();
+      const workday = /^(?:[a-z0-9][a-z0-9-]*\.wd\d+\.myworkdayjobs\.com|wd\d+\.myworkdaysite\.com)$/.test(location.hostname);
+      const publicDescription = document.querySelector('[data-automation-id="jobPostingDescription"]')?.innerText || '';
       return {
         pageUrl: location.href, documentType: document.contentType,
         title: (title || document.querySelector('[data-automation-id="jobPostingHeader"], [data-automation-id="jobTitleHeading"]')?.textContent?.trim() || document.querySelector("h1")?.textContent?.trim() || document.title || "").slice(0, 300),
         company: (typeof job?.hiringOrganization?.name === "string" ? job.hiringOrganization.name
           : location.hostname === 'jobs.ashbyhq.com' ? document.title.split(' @ ').slice(1).join(' @ ').trim() : '').slice(0,200),
-        description: (description ? text(description) : (document.querySelector('[data-automation-id="jobPostingDescription"]')?.innerText || document.querySelector("main, article, #content")?.innerText || "")).slice(0, 40000),
+        // A Workday application/review body may contain private answers.
+        description: (description ? text(description) : publicDescription || (!workday ? document.querySelector("main, article, #content")?.innerText || "" : "")).slice(0, 40000),
         request_id: ['string', 'number'].includes(typeof job?.identifier?.value) ? String(job.identifier.value).slice(0, 200) : '',
       };
     }});

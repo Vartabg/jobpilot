@@ -1,4 +1,4 @@
-# Button and page audit — 0.12.0
+# Button and page audit — 0.12.1
 
 This release tests the outcome of each control group with synthetic data and
 isolated browser profiles. It does not submit applications or certify every
@@ -160,3 +160,27 @@ after opening. Existing selections, multiple selects, disabled or duplicate
 choices, duplicate native select values, ambiguous radio groups, and changes to
 the current question or step all preserve manual control. Diagnostic checks
 exclude preference values and selected option text.
+
+Live 0.12.0 Workiva testing selected the correct race nondisclosure and protected
+veteran choices, while its report incorrectly classified those changes as
+preserved answers. The fixed 100 ms confirmation check ran before Workday had
+finished closing its menus. Version 0.12.1 waits for the expected answer and the
+exact chosen menu to close, with a bounded wait and question/step guards. New
+regressions cover delayed text and closure, subsequent user edits, step changes,
+and a menu that stays open. An unconfirmed selection cannot count as filled.
+
+The live Self Identify step exposed a second case: the disability answers are
+three native checkboxes, while the required Date is split into three spinboxes.
+Version 0.12.1 recognizes only the verified disability field/group, heading,
+legend, and exact three offered labels as one question. With a saved decline
+preference, only its unique nondisclosure choice may be selected. Existing
+answers and all unrelated checkboxes are preserved. Date is inspected as one
+required manual control; names, employee IDs, dates, and signatures are not
+filled by this step's disclosure action. The privacy collector similarly emits
+one required disability request with its offered decline option, using only
+fixed public metadata. Hidden, ambiguous, altered, and incorrect-step structures
+remain outside this exception.
+
+Workday Capture also excludes the application/review body from its job-description
+fallback. A canary that throws on review-text access verifies this on both host
+families, while public posting-description and JobPosting metadata still capture.

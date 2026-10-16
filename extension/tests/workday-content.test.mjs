@@ -666,3 +666,142 @@ test('disclosure delayed menu stops if the fixed question or same-URL step chang
     });
   });
 });
+
+function delayedDisclosureChoice(id,value,{commit=0,close=450}={}) {
+  return `<script>document.querySelector('#${id}').onclick=()=>{
+    const control=document.querySelector('#${id}');control.setAttribute('aria-expanded','true');
+    const menu=document.createElement('ul');menu.id='${id}-list';menu.setAttribute('role','listbox');
+    const option=document.createElement('li');option.setAttribute('role','option');option.textContent=${JSON.stringify(value)};
+    menu.append(option);document.body.append(menu);control.setAttribute('aria-controls',menu.id);
+    option.onclick=()=>{window.ownOptionClicks=(window.ownOptionClicks||0)+1;
+      setTimeout(()=>{control.textContent=${JSON.stringify(value)};},${commit});
+      ${close===null?'':`setTimeout(()=>{control.removeAttribute('aria-expanded');control.removeAttribute('aria-controls');menu.remove();},${close});`}
+    };
+  };</script>`;
+}
+
+test('disclosure own selections wait for Workiva delayed commit and menu closure before reporting verified fills',async()=>{
+  const raceDecline='I do not wish to answer. (United States of America)';
+  await fixture(flow(button('veteran','Please confirm your veteran status')+button('race','What race or ethnicity do you most closely identify with?')+
+    button('gender','Gender','Male')+transparentAgreement(),'applyFlowVoluntaryDisclosuresPage')+
+    delayedDisclosureChoice('veteran',protectedChoice)+delayedDisclosureChoice('race',raceDecline,{commit:250,close:500}),async page=>{
+    const report=await execute(page,'details',savedDisclosures('protected_veteran','decline'));
+    assert.deepEqual(report.filled.map(row=>row.label),['Please confirm your veteran status','What race or ethnicity do you most closely identify with?']);
+    assert.equal(report.failed.length,0);assert.equal(await page.locator('#veteran').textContent(),protectedChoice);
+    assert.equal(await page.locator('#race').textContent(),raceDecline);assert.equal(await page.locator('[role=listbox]').count(),0);
+    assert.equal(await page.locator('#gender').textContent(),'Male');assert.equal(await page.locator('input[type=checkbox]').isChecked(),false);
+    assert.equal(await page.evaluate(()=>ownOptionClicks),2);assert.equal(await page.evaluate(()=>navigationClicks),0);
+    for(const secret of [protectedChoice,raceDecline,'protected_veteran']) assert.equal(JSON.stringify(report).includes(secret),false);
+  });
+});
+
+test('disclosure own-selection confirmation preserves a later applicant edit and stops on step replacement',async t=>{
+  for(const change of ['applicant-edit','step']) await t.test(change,async()=>{
+    await fixture(flow(button('gender','Gender'),'applyFlowVoluntaryDisclosuresPage')+delayedDisclosureChoice('gender','Wish to not disclose'),async page=>{
+      const running=execute(page,'details',savedDisclosures('','decline'));
+      await page.waitForFunction(()=>window.ownOptionClicks===1);
+      await page.evaluate(change=>setTimeout(()=>{
+        if(change==='applicant-edit') document.querySelector('#gender').textContent='Applicant choice';
+        else document.querySelector('[data-automation-id="applyFlowVoluntaryDisclosuresPage"]').outerHTML='<div data-automation-id="applyFlowSelfIdentifyPage"><label>Full Name<input id="next-name"></label></div>';
+      },150),change);
+      const report=await running;assert.equal(report.filled.length,0);assert.equal(await page.evaluate(()=>ownOptionClicks),1);
+      if(change==='applicant-edit') {
+        assert.equal(await page.locator('#gender').textContent(),'Applicant choice');
+        assert.ok(report.skipped.some(row=>row.label==='Gender'&&/changed during autofill and was preserved/.test(row.reason)));
+      } else {
+        assert.equal(report.status,'interrupted');assert.equal(await page.locator('#next-name').inputValue(),'');
+      }
+      assert.equal(await page.evaluate(()=>navigationClicks),0);
+    });
+  });
+});
+
+test('disclosure own-selection confirmation never counts an answer while its associated menu stays open',async()=>{
+  await fixture(flow(button('gender','Gender'),'applyFlowVoluntaryDisclosuresPage')+delayedDisclosureChoice('gender','Wish to not disclose',{close:null}),async page=>{
+    const report=await execute(page,'details',savedDisclosures('','decline'));
+    assert.equal(report.filled.length,0);assert.equal(report.failed.length,1);assert.equal(report.failed[0].label,'Gender');
+    assert.equal(await page.locator('#gender').textContent(),'Wish to not disclose');assert.equal(await page.locator('[role=listbox]').isVisible(),true);
+    assert.equal(await page.evaluate(()=>ownOptionClicks),1);assert.equal(await page.evaluate(()=>navigationClicks),0);
+  });
+});
+
+const disabilityHeading='<h3>Voluntary Self-Identification of Disability</h3>';
+const disabilityLabels=['Yes, I have a disability, or have had one in the past','No, I do not have a disability and have not had one in the past','I do not want to answer'];
+const disabilityCheckboxes=()=>`<div data-automation-id="formField-disabilityStatus"><fieldset><legend><label>Please check one of the boxes below:*</label></legend>
+  <fieldset data-automation-id="disabilityStatus-CheckboxGroup" id="selfIdentifiedDisabilityData--disabilityStatus" aria-required="true">${disabilityLabels.map((text,index)=>
+    `<div><input id="disability-${index}" type="checkbox" aria-required="true" style="opacity:0;width:24px;height:24px"><label for="disability-${index}">${text}</label></div>`).join('')}</fieldset></fieldset></div>`;
+const signedDate=()=>`<div data-automation-id="formField-dateSignedOn"><fieldset><legend><label>Date*</label></legend>
+  <div role="group" data-automation-id="dateInputWrapper" id="selfIdentifiedDisabilityData--dateSignedOn">${['Month','Day','Year'].map((section,index)=>
+    `<input id="date-${section}" type="text" role="spinbutton" data-automation-id="dateSection${section}-input" aria-label="${section}" aria-valuetext="${['MM','DD','YYYY'][index]}">`).join('')}<button type="button" id="calendar">Open calendar</button></div></fieldset></div>`;
+
+test('CC305 disability checkboxes inspect as one question and select only the saved decline while signature and date remain manual',async()=>{
+  await fixture(flow(disabilityHeading+disabilityCheckboxes()+signedDate()+input('signature','Name *','required')+transparentAgreement(),'applyFlowSelfIdentifyPage')+
+    '<script>window.checkboxClicks=[];document.querySelectorAll("input[type=checkbox]").forEach(el=>el.onclick=()=>checkboxClicks.push(el.id));window.calendarClicks=0;document.querySelector("#calendar").onclick=()=>calendarClicks++;</script>',async page=>{
+    const inspect=await execute(page,'inspect');
+    assert.deepEqual(inspect.required,[{label:'Disability status',type:'checkbox'},{label:'Date',type:'date'},{label:'Name *',type:'text'},{label:'I agree.*',type:'checkbox'}]);
+    const report=await execute(page,'details',savedDisclosures('','decline'));
+    assert.deepEqual(report.filled,[{label:'Disability status',key:'disclosure_preferences.other_demographics'}]);assert.equal(report.failed.length,0);
+    assert.deepEqual(await page.locator('[data-automation-id="disabilityStatus-CheckboxGroup"] input').evaluateAll(inputs=>inputs.map(input=>input.checked)),[false,false,true]);
+    assert.deepEqual(await page.evaluate(()=>checkboxClicks),['disability-2']);assert.equal(await page.evaluate(()=>calendarClicks),0);
+    assert.equal(await page.locator('#signature').inputValue(),'');assert.deepEqual(await page.locator('[data-automation-id="dateInputWrapper"] input').evaluateAll(inputs=>inputs.map(input=>input.value)),['','','']);
+    assert.equal(await page.locator('[id="termsAndConditions--acceptTermsAndAgreements"]').isChecked(),false);
+    assert.equal(report.required.filter(row=>row.label==='Disability status').length,0);assert.ok(report.required.some(row=>row.label==='Date'));
+    const repeat=await execute(page,'details',savedDisclosures('','decline'));assert.equal(repeat.filled.length,0);
+    assert.ok(repeat.skipped.some(row=>row.label==='Disability status'&&row.reason==='Your existing answer was preserved'));
+    assert.deepEqual(await page.evaluate(()=>checkboxClicks),['disability-2']);assert.equal(await page.evaluate(()=>navigationClicks),0);
+    for(const secret of ['I do not want to answer',...disabilityLabels,'decline']) assert.equal(JSON.stringify(report).includes(secret),false);
+  });
+});
+
+test('CC305 disability groups preserve any existing answer and never use veteran opt-in as demographic opt-in',async t=>{
+  for(const selected of [0,1,2]) await t.test('existing-'+selected,async()=>{
+    await fixture(flow(disabilityHeading+disabilityCheckboxes().replace(`id="disability-${selected}"`,`checked id="disability-${selected}"`),'applyFlowSelfIdentifyPage'),async page=>{
+      const before=await page.locator('[data-automation-id="disabilityStatus-CheckboxGroup"]').innerHTML();
+      const report=await execute(page,'details',savedDisclosures('','decline'));assert.equal(report.filled.length,0);
+      assert.equal(await page.locator('[data-automation-id="disabilityStatus-CheckboxGroup"]').innerHTML(),before);
+      assert.equal(await page.locator('input:checked').count(),1);assert.equal((await execute(page,'inspect')).required.length,0);
+    });
+  });
+  for(const saved of [profile,savedDisclosures('protected_veteran'),{...profile,disclosure_preferences:{veteran_status:'invalid',other_demographics:'decline'}}]) await t.test('no demographic opt-in '+JSON.stringify(saved.disclosure_preferences || {}),async()=>{
+    await fixture(flow(disabilityHeading+disabilityCheckboxes(),'applyFlowSelfIdentifyPage'),async page=>{
+      assert.equal((await execute(page,'details',saved)).filled.length,0);assert.equal(await page.locator('input:checked').count(),0);
+    });
+  });
+});
+
+test('CC305 checkbox support rejects hidden, ambiguous, mislabeled, unscoped and consent groups',async t=>{
+  const valid=disabilityCheckboxes();
+  for(const [name,markup,heading,step] of [
+    ['hidden option label',valid.replace('for="disability-2"','style="display:none" for="disability-2"'),disabilityHeading],
+    ['hidden option input',valid.replace('id="disability-2"','hidden id="disability-2"'),disabilityHeading],
+    ['ambiguous field',valid+valid.replaceAll('disability-','other-disability-'),disabilityHeading],
+    ['missing heading',valid,''],['hidden heading',valid,disabilityHeading.replace('<h3>','<h3 hidden>')],
+    ['wrong step',valid,disabilityHeading,'applyFlowVoluntaryDisclosuresPage'],
+    ['duplicate decline',valid.replace(disabilityLabels[0],disabilityLabels[2]),disabilityHeading],
+    ['missing decline',valid.replace(disabilityLabels[2],'I accept the disability policy'),disabilityHeading],
+    ['extra consent',valid.replace('</fieldset></fieldset>','<label><input type="checkbox">I agree</label></fieldset></fieldset>'),disabilityHeading],
+    ['generic consent field',valid.replace('formField-disabilityStatus','formField-consent'),disabilityHeading],
+    ['neighbor option label',valid.replace(`<label for="disability-2">${disabilityLabels[2]}</label>`,'')+`<label for="disability-2">${disabilityLabels[2]}</label>`,disabilityHeading],
+  ]) await t.test(name,async()=>{
+    await fixture(flow(heading+markup,step || 'applyFlowSelfIdentifyPage')+'<script>window.checkboxEvents=0;document.querySelectorAll("input").forEach(el=>el.onclick=()=>checkboxEvents++);</script>',async page=>{
+      const report=await execute(page,'details',savedDisclosures('','decline'));assert.equal(report.filled.length,0);
+      assert.equal(await page.locator('input:checked').count(),0);assert.equal(await page.evaluate(()=>checkboxEvents),0);
+      assert.equal(await page.evaluate(()=>navigationClicks),0);
+    });
+  });
+});
+
+test('CC305 signed date inspection groups only the exact current-step field and recognizes numeric sections without filling',async()=>{
+  await fixture(flow(disabilityHeading+signedDate(),'applyFlowSelfIdentifyPage'),async page=>{
+    assert.deepEqual((await execute(page,'inspect')).required,[{label:'Date',type:'date'}]);
+    await page.evaluate(()=>{for(const [id,value] of [['date-Month','10'],['date-Day','16'],['date-Year','2026']]) document.getElementById(id).setAttribute('aria-valuetext',value);});
+    assert.deepEqual((await execute(page,'inspect')).required,[]);
+    await page.locator('#date-Day').evaluate(input=>input.setAttribute('aria-valuetext','1 item selected'));
+    assert.deepEqual((await execute(page,'inspect')).required,[{label:'Date',type:'date'}]);
+    const report=await execute(page,'details',savedDisclosures('','decline'));assert.equal(report.filled.length,0);
+    assert.deepEqual(await page.locator('input').evaluateAll(inputs=>inputs.map(input=>input.value)),['','','']);
+  });
+  await fixture(flow(disabilityHeading+signedDate().replace('formField-dateSignedOn','formField-otherDate'),'applyFlowSelfIdentifyPage'),async page=>{
+    assert.deepEqual((await execute(page,'inspect')).required,[],'other date controls retain their existing individual inspection behavior');
+  });
+});

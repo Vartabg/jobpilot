@@ -117,6 +117,18 @@ test('capture on an opened Workday application uses jobTitleHeading ahead of the
   });
 });
 
+test('Workday review capture never reads application answers as a job description', async t => {
+  for (const url of [standard, recruiting]) await t.test(new URL(url).host, async () => {
+    await fixture({url: `${url}/apply/applyManually`, html: step('<p>PRIVATE_APPLICATION_ANSWER_CANARY</p>', 'applyFlowReviewPage')}, async ({page}) => {
+      await page.locator('main').evaluate(el => Object.defineProperty(el, 'innerText', {get() {throw new Error('Private application text was read');}}));
+      const captured = await captureCurrentJob();
+      assert.equal(captured.title, 'Customer engineer');
+      assert.equal(captured.description, '');
+      assert.doesNotMatch(JSON.stringify(captured), /PRIVATE_APPLICATION_ANSWER_CANARY/);
+    });
+  });
+});
+
 test('account, registration, chooser and job-search DOM never receive profile values or résumé bytes', async t => {
   const gates = [
     ['sign in', `<div role="dialog" data-automation-id="wd-popup-frame" aria-label="Sign In"><form><label>Email Address<input data-automation-id="email" type="email" id="email"></label><label>Password<input data-automation-id="password" type="password"></label><button data-automation-id="signInSubmitButton">Sign In</button></form></div>`],
