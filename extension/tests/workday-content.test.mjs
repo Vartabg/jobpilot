@@ -82,6 +82,47 @@ test('duplicate Workday options remain manual instead of choosing the first matc
   });
 });
 
+test('Workday listbox buttons expose their fixed question labels without selected answers',async()=>{
+  const choice=(id,associated=true)=>`<div data-automation-id="formField-degree"><label id="${id}-label" ${associated?`for="${id}"`:''}>Degree *</label>
+    <button id="${id}" type="button" aria-haspopup="listbox" aria-labelledby="${id}-label" aria-label="Degree PRIVATE_SELECTED_ANSWER Required">PRIVATE_SELECTED_ANSWER</button></div>`;
+  await fixture(flow(educationRow(1,choice('degree1'))+educationRow(2,choice('degree2',false))+
+    '<div data-automation-id="formField-degree"><button id="unlabeled-degree" type="button" aria-haspopup="listbox" aria-label="Degree PRIVATE_UNVERIFIED_ANSWER Required">PRIVATE_UNVERIFIED_ANSWER</button></div>','applyFlowMyExpPage'),async page=>{
+    const details=await execute(page);assert.equal(JSON.stringify(details).includes('PRIVATE_'),false);
+    assert.equal(details.skipped.filter(field=>field.label==='Degree *'&&/preserved/.test(field.reason)).length,2);
+    await page.locator('#degree1, #degree2').evaluateAll(buttons=>buttons.forEach(el=>el.textContent='Select One Required'));
+    const inspect=await execute(page,'inspect');assert.equal(JSON.stringify(inspect).includes('PRIVATE_'),false);
+    assert.deepEqual(inspect.required,[{label:'Degree *',type:'combobox'},{label:'Degree *',type:'combobox'}]);
+    assert.equal(await page.evaluate(()=>navigationClicks),0);
+  });
+});
+
+test('Workday Bachelor of Arts aliases match only a unique education degree option and preserve existing answers',async()=>{
+  const degrees=['BA','B.A.','Bachelor of Arts (B.A.)','BA','BA','BA'];
+  const saved={...profile,education:degrees.map(degree=>({...profile.education[0],degree})),work_history:[{company:'Example',title:'BA'}]};
+  const html=degrees.map((_,index)=>educationRow(index+1,button('degree-'+index,'Degree *',index===5?'Associates of Science (A.S)':'Select One Required'))).join('')+
+    '<div role="group" aria-labelledby="work-title"><h3 id="work-title">Work Experience 1</h3>'+button('job-title','Job Title *')+'</div>';
+  await fixture(flow(html,'applyFlowMyExpPage')+choices('degree-0',['Bachelor of Arts (B.A)'])+choices('degree-1',['Bachelor of Arts'])+choices('degree-2',['BA'])+
+    choices('degree-3',['BA','Bachelor of Arts (B.A)'])+choices('degree-4',['Bachelor of Fine Arts (B.F.A)','Bachelor of Science (B.S)','Bachelor of Business Administration (B.B.A)','Bachelor of Arts / Science'])+
+    choices('job-title',['Bachelor of Arts (B.A)'])+'<script>window.existingDegreeClicks=0;document.querySelector("#degree-5").onclick=()=>existingDegreeClicks++;</script>',async page=>{
+    const report=await execute(page,'details',saved);assert.equal(report.filled.length,3);assert.equal(report.failed.length,3);
+    for(const [id,value] of [['degree-0','Bachelor of Arts (B.A)'],['degree-1','Bachelor of Arts'],['degree-2','BA']]) assert.equal(await page.locator('#'+id).textContent(),value);
+    for(const id of ['degree-3','degree-4','job-title']) assert.match(await page.locator('#'+id).textContent(),/^Select One/,'Ambiguous, unrelated and non-degree fields remain unselected');
+    assert.equal(await page.locator('#degree-5').textContent(),'Associates of Science (A.S)');assert.equal(await page.evaluate(()=>existingDegreeClicks),0);
+    assert.equal(await page.evaluate(()=>navigationClicks),0);
+  });
+});
+
+test('Workday exact LinkedIn question fills the verified URL and preserves existing or unrelated answers',async()=>{
+  const saved={...profile,linkedin_url:'https://www.linkedin.com/in/synthetic-profile'};
+  await fixture(flow(input('linkedin-empty','Please provide your Linkedin profile:')+input('linkedin-existing','Please provide your Linkedin profile:','value="https://www.linkedin.com/in/applicant-edit"')+
+    input('headline','Please provide your LinkedIn headline:')+input('other-profile','Please provide your professional profile:'),'applyFlowMyExpPage'),async page=>{
+    const report=await execute(page,'details',saved);assert.equal(report.filled.length,1);assert.equal(report.filled[0].key,'linkedin_url');
+    assert.equal(await page.locator('#linkedin-empty').inputValue(),saved.linkedin_url);assert.equal(await page.locator('#linkedin-existing').inputValue(),'https://www.linkedin.com/in/applicant-edit');
+    assert.equal(await page.locator('#headline').inputValue(),'');assert.equal(await page.locator('#other-profile').inputValue(),'');
+    assert.equal(await page.evaluate(()=>navigationClicks),0);
+  });
+});
+
 test('Workday visible repeated history rows use explicit row numbers without shifting across a hidden gap',async()=>{
   const row=(n,hidden=false)=>`<div role="group" aria-labelledby="work-${n}" ${hidden?'style="display:none"':''}><h3 id="work-${n}">Work Experience ${n}</h3>
     ${input(`company${n}`,'Company','', 'companyName')}${input(`title${n}`,'Job Title','', 'jobTitle')}${input(`end${n}`,'End Date','type="month"','endDate')}</div>`;
@@ -147,6 +188,61 @@ test('Workday country-code answered evidence excludes hidden tokens, announcemen
     await fixture('<form id="application-form">'+countryCodeField(countryCodeToken)+'</form>',async page=>{
       const inspect=await execute(page,'inspect');assert.ok(inspect.required.some(field=>/Country Phone Code/.test(field.label)));
     },'https://boards.greenhouse.io/fixture/jobs/123');
+  });
+});
+
+const studyToken = value => `<ul data-automation-id="selectedItemList" role="listbox">${(Array.isArray(value)?value:[value]).map(text=>`<li data-automation-id="menuItem" role="presentation">
+  <div data-automation-id="selectedItem" role="option"><p data-automation-id="promptOption">${text}</p><button type="button">Remove</button></div></li>`).join('')}</ul>`;
+const studyPrompt = (id,evidence='',search='') => `<div data-automation-id="formField-fieldOfStudy"><label for="${id}">Field of Study *</label>
+  <div data-automation-id="multiSelectContainer"><div data-automation-id="multiselectInputContainer"><input id="${id}" type="text" value="${search}" required></div>${evidence}</div></div>`;
+const educationRow = (n,html) => `<div role="group" aria-labelledby="study-row-${n}"><h3 id="study-row-${n}">Education ${n}</h3>${html}</div>`;
+const trackStudyEvents = '<script>window.studyEvents=0;document.querySelectorAll("[data-automation-id=multiSelectContainer]").forEach(el=>["click","input","change"].forEach(type=>el.addEventListener(type,()=>studyEvents++)));</script>';
+const manualMultiSelect = 'This Workday multi-select needs a manual choice. Review it on the application page.';
+
+test('Workday existing study tokens preserve different saved choices and both empty and nonempty native searches',async()=>{
+  await fixture(flow(educationRow(1,studyPrompt('study1',studyToken('Business Administration')))+
+    educationRow(2,studyPrompt('study2',studyToken(['Economics','Finance']),'Applicant draft search')),'applyFlowMyExpPage')+trackStudyEvents,async page=>{
+    assert.equal(await page.locator('#study1').getAttribute('role'),null,'The live Field of Study input is a plain native text input');
+    const before=await page.locator('[data-automation-id="applyFlowMyExpPage"]').innerHTML();
+    const inspect=await execute(page,'inspect');
+    const details=await execute(page);assert.equal(details.filled.length,0);assert.equal(details.failed.length,0);
+    assert.equal(inspect.required.length,0);
+    assert.equal(details.skipped.filter(field=>/Field of Study/.test(field.label)&&/existing answer was preserved/.test(field.reason)).length,2);
+    assert.equal(await page.locator('[data-automation-id="applyFlowMyExpPage"]').innerHTML(),before);
+    assert.equal(await page.locator('#study1').inputValue(),'');assert.equal(await page.locator('#study2').inputValue(),'Applicant draft search');
+    assert.equal(await page.evaluate(()=>studyEvents),0);assert.equal(await page.evaluate(()=>navigationClicks),0);
+  });
+});
+
+test('Workday empty multi-select prompts and draft searches stay manual instead of becoming typed selections',async()=>{
+  await fixture(flow(educationRow(1,studyPrompt('empty-no-list'))+educationRow(2,studyPrompt('empty-list','<ul data-automation-id="selectedItemList" role="listbox"></ul>'))+
+    educationRow(3,studyPrompt('draft-search','','Unselected search text')),'applyFlowMyExpPage')+trackStudyEvents,async page=>{
+    const before=await page.locator('[data-automation-id="applyFlowMyExpPage"]').innerHTML();
+    const inspect=await execute(page,'inspect');assert.equal(inspect.required.filter(field=>/Field of Study/.test(field.label)).length,3);
+    const details=await execute(page);assert.equal(details.filled.length,0);assert.equal(details.failed.length,0);
+    assert.equal(details.skipped.filter(field=>field.reason===manualMultiSelect).length,3);
+    assert.equal(await page.locator('[data-automation-id="applyFlowMyExpPage"]').innerHTML(),before);
+    assert.equal(await page.locator('#empty-no-list').inputValue(),'');assert.equal(await page.locator('#empty-list').inputValue(),'');
+    assert.equal(await page.locator('#draft-search').inputValue(),'Unselected search text');assert.equal(await page.evaluate(()=>studyEvents),0);
+  });
+});
+
+test('Workday study selections reject hidden, neighboring, ambiguous and ordinary dropdown-option evidence',async()=>{
+  const token=studyToken('Computer Science');
+  const cases=[
+    token.replace('data-automation-id="selectedItem"','style="display:none" data-automation-id="selectedItem"'),
+    `<div data-automation-id="formField-neighbor">${token}</div>`,
+    '<ul role="listbox"><li role="option" data-automation-id="promptOption">Computer Science</li></ul>',
+    studyToken(' '),
+    token.replace('data-automation-id="selectedItemList"','style="display:none" data-automation-id="selectedItemList"'),
+    token+token,
+  ];
+  await fixture(flow(cases.map((evidence,index)=>educationRow(index+1,studyPrompt('negative-study-'+index,evidence))).join(''),'applyFlowMyExpPage')+trackStudyEvents,async page=>{
+    const before=await page.locator('[data-automation-id="applyFlowMyExpPage"]').innerHTML();
+    const inspect=await execute(page,'inspect');assert.equal(inspect.required.filter(field=>/Field of Study/.test(field.label)).length,cases.length);
+    const details=await execute(page);assert.equal(details.filled.length,0);assert.equal(details.failed.length,0);
+    assert.equal(details.skipped.filter(field=>field.reason===manualMultiSelect).length,cases.length);
+    assert.equal(await page.locator('[data-automation-id="applyFlowMyExpPage"]').innerHTML(),before);assert.equal(await page.evaluate(()=>studyEvents),0);
   });
 });
 
@@ -248,6 +344,54 @@ test('Workday upload evidence without an input must be successful and local to t
       const report=await execute(page,'resume');
       assert.equal(report.resume.status,label==='existing different résumé is preserved'?'already-attached':'no-target');
       assert.equal(await page.locator('[data-automation-id="applyFlowMyExpPage"]').innerHTML(),before);
+      assert.equal(await page.evaluate(()=>navigationClicks),0);
+    });
+  });
+});
+
+const experienceUpload = (id,title='Resume/CV',evidence='',withInput=true) => `<div role="group" aria-labelledby="${id}-section"><h4 id="${id}-section">${title}</h4>
+  <div><div data-automation-id="formField-"><label id="${id}-file-label">Upload a file (5MB max)*</label><div><div>
+  <div data-automation-id="attachments-FileUpload" aria-labelledby="${id}-file-label"><div><button type="button">Select files</button>${withInput?'<input type="file" data-automation-id="file-upload-input-ref" style="display:none">':''}</div>${evidence}</div>
+  </div></div></div></div></div>`;
+const acceptedExperienceFile = `<div data-automation-id="file-upload-item"><div data-automation-id="file-upload-item-name">SoftwareEngineer.pdf</div><span>5.5KB</span>
+  <div data-automation-id="file-upload-successful">Successfully Uploaded!</div><button type="button" data-automation-id="delete-file">Delete</button></div>`;
+
+test('Workday My Experience preserves an existing PDF inside the named Resume/CV section and generic upload field',async()=>{
+  await fixture(flow(experienceUpload('resume','Resume/CV',acceptedExperienceFile),'applyFlowMyExpPage')+
+    '<script>window.uploadEvents=0;document.querySelector("[data-automation-id=attachments-FileUpload]").addEventListener("change",()=>uploadEvents++);document.querySelector("[data-automation-id=delete-file]").onclick=()=>uploadEvents++;</script>',async page=>{
+    const section=page.locator('[role="group"][aria-labelledby="resume-section"]');
+    const before=await section.innerHTML();const report=await execute(page,'resume');assert.equal(report.resume.status,'already-attached');
+    assert.equal(await section.innerHTML(),before);assert.equal(await section.locator('input[type=file]').evaluate(el=>el.files.length),0);
+    await section.locator('input[type=file]').evaluate(el=>el.remove());
+    assert.equal((await execute(page,'resume')).resume.status,'already-attached');
+    assert.equal(await page.evaluate(()=>uploadEvents),0);assert.equal(await page.evaluate(()=>navigationClicks),0);
+  });
+});
+
+test('Workday My Experience targets only the unique Resume/CV local uploader when another section already has a PDF',async()=>{
+  await fixture(flow(experienceUpload('resume')+experienceUpload('supporting','Supporting Documents',acceptedExperienceFile),'applyFlowMyExpPage')+
+    `<script>document.querySelector('[aria-labelledby="resume-section"] input[type=file]').onchange=e=>{
+      const scope=e.target.closest('[data-automation-id="attachments-FileUpload"]');
+      scope.insertAdjacentHTML('beforeend','<div data-automation-id="file-upload-item"><div data-automation-id="file-upload-item-name">'+e.target.files[0].name+'</div><div data-automation-id="file-upload-successful">Successfully Uploaded!</div></div>');};</script>`,async page=>{
+    const report=await execute(page,'resume');assert.equal(report.resume.status,'accepted');
+    assert.equal(await page.locator('[aria-labelledby="resume-section"] input[type=file]').evaluate(el=>el.files[0].name),'Exact.pdf');
+    assert.equal(await page.locator('[aria-labelledby="supporting-section"] input[type=file]').evaluate(el=>el.files.length),0);
+    assert.equal(await page.locator('[aria-labelledby="supporting-section"] [data-automation-id="file-upload-item-name"]').textContent(),'SoftwareEngineer.pdf');
+  });
+});
+
+test('Workday My Experience résumé association refuses unrelated, multiple, and nonlocal upload evidence',async t=>{
+  for(const [label,html] of [
+    ['unrelated upload section',experienceUpload('other','Supporting Documents',acceptedExperienceFile)],
+    ['two Resume/CV sections',experienceUpload('first','Resume/CV',acceptedExperienceFile)+experienceUpload('second')],
+    ['competing uploaders in one section',experienceUpload('resume','Resume/CV',acceptedExperienceFile).replace('</h4>','</h4><div data-automation-id="attachments-FileUpload"><input type="file"></div>')],
+    ['success elsewhere in the section',experienceUpload('resume','Resume/CV','',false).replace('</h4>','</h4>'+acceptedExperienceFile)],
+  ]) await t.test(label,async()=>{
+    await fixture(flow(html,'applyFlowMyExpPage'),async page=>{
+      const before=await page.locator('[data-automation-id="applyFlowMyExpPage"]').innerHTML();
+      const report=await execute(page,'resume');assert.equal(report.resume.status,'no-target');
+      assert.equal(await page.locator('[data-automation-id="applyFlowMyExpPage"]').innerHTML(),before);
+      assert.ok((await page.locator('input[type=file]').evaluateAll(inputs=>inputs.map(el=>el.files.length))).every(count=>count===0));
       assert.equal(await page.evaluate(()=>navigationClicks),0);
     });
   });

@@ -58,6 +58,16 @@
     return copy.textContent;
   }
   function labels(el) {
+    if (workdayPage() && el.matches('button[aria-haspopup="listbox"]')) {
+      const field = el.closest('[data-automation-id^="formField-"]');
+      const local = node => !!field && field.contains(node) && node.closest('[data-automation-id^="formField-"]') === field;
+      const associated = el.id ? [...(field?.querySelectorAll('label') || [])].filter(node => local(node) && node.htmlFor === el.id) : [];
+      const references = (el.getAttribute('aria-labelledby') || '').split(/\s+/).map(id => document.getElementById(id))
+        .filter(node => node && node.matches('label, legend') && local(node));
+      // Workday's button aria-label includes its selected answer. Keep only a
+      // verified fixed question label in reports and field matching.
+      return (associated.length === 1 ? associated : associated.length ? [] : references).map(labelText).map(text => text.trim()).filter(Boolean);
+    }
     const items = [el.getAttribute('aria-label')];
     for (const id of (el.getAttribute('aria-labelledby') || '').split(/\s+/)) if (id) items.push(labelText(document.getElementById(id)));
     for (const label of el.labels || []) items.push(labelText(label));
@@ -73,6 +83,7 @@
     if (!workdayPage()) return [...labels(el), el.name, el.id, el.placeholder, el.getAttribute('autocomplete')].filter(Boolean).map(norm);
     const named = labels(el);
     if (named.length) return named.map(norm); // A custom question must never inherit an unrelated technical ID.
+    if (el.matches('button[aria-haspopup="listbox"]')) return []; // An unlabeled choice needs manual review.
     const field = el.getAttribute('data-automation-id') || wrapper(el)?.getAttribute('data-automation-id')?.replace(/^formField-/, '');
     return WORKDAY_FIELDS[field] ? [norm(WORKDAY_FIELDS[field])] : [];
   };
@@ -92,18 +103,31 @@
   const attachedText = container => workdayPage()
     ? [...(container?.querySelectorAll('[data-automation-id="file-upload-item-name"]') || [])].some(el => visible(el) && el.textContent.trim())
     : /\b[^\s]+\.(pdf|docx?|rtf)\b|remove (file|resume)|replace (file|resume)|resume.*uploaded/i.test((container?.innerText || '').replace(/Accepted file types:[^\n]*/gi, ''));
-  function selectedWorkdayCountryCode(el) {
-    if (!workdayPage()) return false;
-    // Workday can keep the selected phone code in a token beside an empty search input.
-    const field = el.closest('[data-automation-id="formField-countryPhoneCode"], [data-automation-id="formField-phoneNumber--countryPhoneCode"]');
-    if (!field) return false;
-    return [...field.querySelectorAll('[data-automation-id="selectedItemList"][role="listbox"]')].some(list => visible(list)
-      && list.closest('[data-automation-id^="formField-"]') === field
-      && [...list.querySelectorAll('[data-automation-id="selectedItem"][role="option"]')].some(item => visible(item)
-        && [...item.querySelectorAll('[data-automation-id="promptOption"]')].some(option => visible(option) && option.textContent.trim())));
+  function workdayMultiSelect(el) {
+    if (!workdayPage() || el.tagName !== 'INPUT' || ['hidden','file','radio','checkbox','password','submit','button','reset'].includes(el.type)) return null;
+    const promptSelector = '[data-automation-id="multiSelectContainer"]', fieldSelector = '[data-automation-id^="formField-"]';
+    const prompt = el.closest(promptSelector);
+    if (!prompt || !workdayState().step?.contains(prompt)) return null;
+    // Search text is not a selected answer. Ambiguous or empty prompts stay manual.
+    const manual = {selected:false}, field = el.closest(fieldSelector);
+    if (!field || !field.contains(prompt) || prompt.closest(fieldSelector) !== field || !visible(prompt)) return manual;
+    const prompts = [...field.querySelectorAll(promptSelector)].filter(node => visible(node) && node.closest(fieldSelector) === field);
+    const inputs = [...prompt.querySelectorAll('input')].filter(node => visible(node) && !node.disabled && node.closest(promptSelector) === prompt && node.closest(fieldSelector) === field);
+    if (prompts.length !== 1 || prompts[0] !== prompt || inputs.length !== 1 || inputs[0] !== el) return manual;
+    const listSelector = '[data-automation-id="selectedItemList"][role="listbox"]', itemSelector = '[data-automation-id="selectedItem"][role="option"]';
+    const lists = [...prompt.querySelectorAll(listSelector)].filter(node => visible(node) && node.closest(fieldSelector) === field && node.closest(promptSelector) === prompt);
+    if (lists.length !== 1) return manual;
+    const selected = [...lists[0].querySelectorAll(itemSelector)].some(item => {
+      if (!visible(item) || item.closest(listSelector) !== lists[0] || item.closest(fieldSelector) !== field || item.closest(promptSelector) !== prompt) return false;
+      const options = [...item.querySelectorAll('[data-automation-id="promptOption"]')].filter(node => visible(node)
+        && node.closest(itemSelector) === item && node.closest(fieldSelector) === field && node.closest(promptSelector) === prompt);
+      return options.length === 1 && !!options[0].textContent.trim();
+    });
+    return {selected};
   }
   function answered(el) {
-    if (selectedWorkdayCountryCode(el)) return true;
+    const prompt = workdayMultiSelect(el);
+    if (prompt) return prompt.selected;
     if (['checkbox','radio'].includes(el.type)) return el.checked;
     if (el.type === 'file') return !!el.files?.length || attachedText(wrapper(el));
     if (el.tagName === 'SELECT') return !placeholderOption(el.selectedOptions[0]);
@@ -226,7 +250,7 @@
       ['address_line2',/^(address line 2|address line2|address line two|what is the second line of your address( if relevant)?)$/,profile.address_line2],
       ['city',/^(city|current city|address level2)$/,profile.city],['state',/^(state|state region|state province|province|address level1)$/,profile.state],['postal_code',/^(zip|zip code|postal code|post code|postcode|zipcode)$/,profile.postal_code],
       ['country',/^(country|country of residence|residence country|country name)$/,profile.country],['location',/^(current location|location|location city|your location|what is your current location city state)$/,[profile.city,profile.state].filter(Boolean).join(', ')],
-      ['linkedin_url',/^(linkedin|linkedin profile|linkedin url|linkedin profile url)$/,profile.linkedin_url],['github_url',/^(github|github profile|github url)$/,profile.github_url],['portfolio_url',/^(portfolio|portfolio url|website|personal website|personal site)$/,profile.portfolio_url],['current_title',/^(current title|current job title|current role)$/,profile.current_title],
+      ['linkedin_url',/^(linkedin|linkedin profile|linkedin url|linkedin profile url|please provide your linkedin profile)$/,profile.linkedin_url],['github_url',/^(github|github profile|github url)$/,profile.github_url],['portfolio_url',/^(portfolio|portfolio url|website|personal website|personal site)$/,profile.portfolio_url],['current_title',/^(current title|current job title|current role)$/,profile.current_title],
     ];
     const found = rules.find(([,re]) => exact(re));
     return found ? {key:found[0],value:found[2] || ''} : {reason:'No verified mapping for this question'};
@@ -235,9 +259,11 @@
   const usCountry = value => /^(us|u s|usa|united states|united states of america)$/.test(norm(value));
   const sameCountry = (a,b) => norm(a) === norm(b) || (usCountry(a) && usCountry(b));
   const stateValue = value => norm(stateNames[String(value || '').toUpperCase()] || value);
+  const bachelorOfArts = new Set(['ba','b a','bachelor of arts','bachelor of arts ba','bachelor of arts b a']);
   function optionMatches(text, rule, profile) {
     if (rule.key === 'country') return sameCountry(text.replace(/\s*\+\s*\d+\s*$/, ''),rule.value);
     if (rule.key === 'state') return stateValue(text) === stateValue(rule.value);
+    if (workdayPage() && /^education\.\d+\.degree$/.test(rule.key) && bachelorOfArts.has(norm(rule.value))) return bachelorOfArts.has(norm(text));
     if (rule.key === 'location') {
       const parts = text.split(',').map(s => s.trim());
       if (norm(parts[0]) !== norm(profile.city)) return false;
@@ -335,7 +361,34 @@
         && !['hidden', 'submit', 'button', 'reset'].includes(el.type) && (visible(el) || el.type === 'file' && visible(wrapper(el)))));
     return matches.filter(scope => !matches.some(other => other !== scope && other.contains(scope)));
   }
+  function workdayResumeScopes() {
+    const state = workdayState(), step = state.step;
+    if (!step || !state.canAttachResume) return [];
+    const scopes = [...step.querySelectorAll('[data-automation-id="resumeUpload"]')].filter(visible);
+    if (step.getAttribute('data-automation-id') === 'applyFlowMyExpPage') {
+      const groupSelector = '[role="group"][aria-labelledby]';
+      const sections = [...step.querySelectorAll(groupSelector)].filter(group => {
+        if (!visible(group)) return false;
+        const references = group.getAttribute('aria-labelledby').trim().split(/\s+/).map(id => document.getElementById(id));
+        if (!references.length || references.some(node => !node || !group.contains(node))) return false;
+        const title = norm(references.map(labelText).join(' ')), heading = group.querySelector(':scope > h4');
+        return /^(resume(?: cv)?|cv|curriculum vitae)$/.test(title) && !!heading && norm(labelText(heading)) === title;
+      });
+      if (sections.length > 1) return [];
+      if (sections.length === 1) scopes.push(...[...sections[0].querySelectorAll('[data-automation-id="attachments-FileUpload"]')]
+        .filter(scope => visible(scope) && scope.closest(groupSelector) === sections[0]));
+    }
+    const unique = [...new Set(scopes)];
+    return unique.filter(scope => !unique.some(other => other !== scope && scope.contains(other)));
+  }
   function resumeTarget() {
+    if (workdayPage()) {
+      const scopes = workdayResumeScopes();
+      if (scopes.length !== 1) return null;
+      const matches = [...scopes[0].querySelectorAll('input[type="file"]')].filter(el => !el.disabled && !el.matches(':disabled') && !unrelatedControl(el) && (visible(el) || visible(wrapper(el)))
+        && (!identifiers(el).some(id => /cover letter/.test(id)) || identifiers(el).some(id => /\b(resume|cv|curriculum vitae)\b/.test(id))));
+      return matches.length === 1 ? {el:matches[0],wrapper:scopes[0]} : null;
+    }
     const scopes = applicationScopes();
     const matches = [...document.querySelectorAll("input[type='file']")].filter(el => !el.disabled && !unrelatedControl(el)
       && (!scopes.length || scopes.some(scope => scope.contains(el))) && (visible(el) || visible(wrapper(el)))
@@ -344,8 +397,7 @@
     return matches.length === 1 ? {el:matches[0],wrapper:wrapper(matches[0])} : null;
   }
   function hasExistingWorkdayResume() {
-    const step = workdayState().step;
-    const scopes = [...(step?.querySelectorAll('[data-automation-id="resumeUpload"]') || [])].filter(visible);
+    const scopes = workdayResumeScopes();
     if (scopes.length !== 1) return false;
     const scope = scopes[0];
     if ([...scope.querySelectorAll('[data-automation-id="file-upload-failed"], [data-automation-id="file-loading-dots"]')].some(visible)) return false;
@@ -474,6 +526,8 @@
             if (live.length !== 1) { record(token,'failed',{label,reason:'This field changed or is ambiguous. Review it manually.'}); continue; }
             const {el}=live[0];
             if (['radio','checkbox','choice','file','password'].includes(type)) { record(token,'skipped',{label,reason:type==='file' ? 'Use Attach résumé separately' : 'Answer this question yourself'}); continue; }
+            const prompt=workdayMultiSelect(el);
+            if (prompt) { record(token,'skipped',{label,reason:prompt.selected ? 'Your existing answer was preserved' : 'This Workday multi-select needs a manual choice. Review it on the application page.'}); continue; }
             if (answered(el)) { record(token,'skipped',{label,reason:'Your existing answer was preserved'}); continue; }
             if (combo(el) && !workdaySelect(el) && String(el.value || '').trim()) { record(token,'skipped',{label,reason:'An existing dropdown search was preserved. Choose its option on the page.'}); continue; }
             const rule=ruleFor(el,profile);

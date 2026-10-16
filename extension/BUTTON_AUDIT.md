@@ -1,4 +1,4 @@
-# Button and page audit — 0.11.2
+# Button and page audit — 0.11.3
 
 This release tests the outcome of each control group with synthetic data and
 isolated browser profiles. It does not submit applications or certify every
@@ -90,8 +90,9 @@ Capture (role/company), Inspect, Fill, accepted PDF upload, privacy scan/filter,
 Save as started and duplicate prevention, application filters/refresh, run
 history/reporting and diagnostic exports were exercised through the installed
 extension. An empty first name was filled; a repeated Fill preserved existing
-answers. Street address and ZIP remained blank. Workiva's own validation requires
-both fields, preventing access to later steps. No employer submission, consent,
+answers. Street address and ZIP initially remained blank. Workiva's own validation
+required both fields; the user later entered them for this application and
+authorized continuing to My Experience. No employer submission, consent,
 or demographic answer was made. Destructive library/profile operations and submission-status
 changes remain covered by isolated tests rather than mutations of real records.
 
@@ -101,3 +102,25 @@ and required radio-question container; new History job links retain the public
 requisition while stripping application suffixes and tokens. Privacy collection
 excludes selection announcements from field help, and dialing-country-code labels
 are distinguished from questions about residence or location.
+
+Live findings fixed in 0.11.3: My Experience's generic upload field is associated
+only with its verified local Resume/CV section; existing successful attachments
+are preserved. Selected field-of-study tokens remain answered even beside empty
+search inputs; unselected searches require a manual option choice. Workday
+dropdown reports and privacy scans use fixed question labels rather than
+answer-bearing button names. Privacy scans also recognize the role-less required
+radio-question containers. Regression cases reject hidden, neighboring and
+ambiguous evidence and assert that answer-state getters are never read by the
+privacy collector.
+
+My Experience Fill added three missing verified work-history facts and the saved
+LinkedIn URL. Exact Bachelor of Arts/BA equivalence is restricted to verified
+Workday education degree fields and a unique offered option; unrelated degrees
+and duplicate equivalents are rejected. The correct degree was visible on the
+live form. Repeat Fill preserved all 67 observed controls and reported zero
+filled, 43 skipped, zero failed. Inspect found no empty visible required fields.
+Workiva's own Save and Continue returned nine generic Page Error entries on both
+attempts without identifying an invalid control. Later application questions,
+disclosures, self-identification, and review could not be reached live. The
+application remains unsubmitted, with the user's application-only address kept
+out of the local profile.

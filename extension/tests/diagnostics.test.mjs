@@ -104,6 +104,13 @@ test('a split phone field is saved as a manual format check rather than an unexp
   assert.equal(result.health,'manual');
 });
 
+test('an unselected Workday multi-select remains an explanatory manual choice in saved history', () => {
+  const result = sanitizeRun({report:{status:'complete',frames:[{skipped:[{label:'Field of Study',
+    reason:'This Workday multi-select needs a manual choice. Review it on the application page.'}]}]}});
+  assert.equal(result.frames[0].skipped[0].reason,'workday_multiselect');
+  assert.equal(result.health,'manual');
+});
+
 test('checkpoints replace their run, retain review state, and new attempts keep the last 50', async () => {
   const first = input(); first.report.status = 'running';
   await run('saveRun', [first]);

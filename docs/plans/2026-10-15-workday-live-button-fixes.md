@@ -27,10 +27,11 @@ actionable issues. Chrome was reloaded and the toolbar grant and Capture were
 verified on the real signed-in Workiva application on October 16.
 
 Live testing is limited to the approved Workiva role and saved contact details
-and Software Engineer PDF. Street address and ZIP stay blank. No employer
-submission, consent, account creation, or demographic answer is authorized by
-this testing task. Any mandatory address gate limits which later steps can be
-tested live.
+and Software Engineer PDF. The initial tests kept street address and ZIP blank.
+The user later entered them specifically for this Workiva application and
+authorized continuing into My Experience. Those entries are not reused or
+copied into the local profile. No employer submission, consent, account creation,
+or demographic answer is authorized by this testing task.
 
 ## Live follow-up: 0.11.2
 
@@ -45,7 +46,8 @@ all existing answers on repeat. Street and ZIP remained empty. Inspection missed
 the selected phone-code token and the radio question's required container; both
 use the explicit Workday structures now. Radio answers remain manual. Workiva's
 own Save and Continue validation required street and ZIP, along with two manual
-questions, so later steps cannot be tested under this task's restriction.
+questions, so the initial test stopped there. The user's later application-only
+address entry allowed the follow-up below.
 
 Final installed-build checks recognize the transparent native radio controls
 behind Workday's visible option labels. The live inspection now matches all four
@@ -68,3 +70,37 @@ single-run and open-problems export, and the career-workspace link. The workspac
 opened memory, capsules and inbox, and its tracker showed the shared Workiva
 Started record. Submission status and destructive library/profile operations
 stay covered by isolated tests rather than falsifying or deleting real data.
+
+## My Experience follow-up: 0.11.3
+
+The user completed the address gate for this application and authorized further
+testing. Selected Field of Study pills beside plain empty search inputs exposed
+an overwrite risk. The collector now requires visible selection evidence within
+the same current step, field, prompt, input, list, and item. Existing tokens are
+preserved; empty or draft-only searches require a manual choice and have an
+explanatory diagnostic reason code.
+
+My Experience uses a generic file field inside a labelled Resume/CV group,
+rather than `resumeUpload`. Detection now binds the unique local uploader to that
+verified section, including its successful file item. The installed button now
+reports Existing attachment preserved, with no duplicate upload or deletion.
+Fixed local labels also replace answer-bearing Workday dropdown button names in
+reports, history, and privacy metadata. Privacy capture includes closed dropdown
+questions and role-less required radio groups, with no reads of answer state.
+
+Live Fill confirmed three missing work-history facts, preserving all previous
+values and selected studies. The precise Workiva LinkedIn question now maps to
+the saved URL. BA/B.A/Bachelor of Arts equivalence is limited to verified Workday
+education degree fields and a unique exact alias; Science, Fine Arts, Business
+Administration, combined degrees and duplicate equivalents remain rejected.
+The correct degree was observed on the live form; the live action classified
+that changing selection as preserved. Repeat Fill left all 67 observed controls
+unchanged and reported zero filled, 43 skipped, zero failed. Inspect found no
+empty visible required field.
+
+Workiva's Save and Continue returned nine generic Page Error entries, including
+after one retry. No native-invalid or ARIA-invalid control was identified. This
+prevents live testing of Application Questions and later steps; the application
+stays on My Experience and is unsubmitted. Existing manual-step safeguards remain
+covered by isolated browser tests. The user's street/ZIP entries are specific to
+this application and are not copied to the extension profile.

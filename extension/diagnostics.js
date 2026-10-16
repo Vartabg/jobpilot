@@ -10,6 +10,7 @@ export const REASONS = {
   current_job: 'Current job: leave end date to you',
   date_format: 'Saved date does not match this field format',
   phone_format: 'This phone field has a separate country code. Review its format and enter it yourself.',
+  workday_multiselect: 'This Workday multi-select needs a manual choice. Review it on the application page.',
   authorization_country: 'Authorization country does not match your saved profile',
   sponsorship_country: 'Sponsorship country does not match your saved profile',
   unmapped_question: 'No verified mapping for this question',
@@ -133,7 +134,7 @@ export function sanitizeRun(input, previous = null, version = '') {
     frame.error || frame.failed.length || frame.warnings.length || ['partial', 'interrupted'].includes(frame.status)
     || ['failed', 'no-target', 'prepared'].includes(frame.resume.status)
     || frame.skipped.some(row => ['unmapped_question', 'history_mapping', 'history_context', 'unknown'].includes(row.reason))));
-  const manual = frames.some(frame => frame.required.length || frame.skipped.some(row => ['missing_profile', 'missing_history', 'manual_answer', 'date_format', 'phone_format'].includes(row.reason)));
+  const manual = frames.some(frame => frame.required.length || frame.skipped.some(row => ['missing_profile', 'missing_history', 'manual_answer', 'date_format', 'phone_format', 'workday_multiselect'].includes(row.reason)));
   const page = jobUrl(report.pageUrl || input.job?.url);
   return {
     id: previous?.id || input.id, action: choices(input.action, ['inspect', 'details', 'resume'], 'inspect'),
