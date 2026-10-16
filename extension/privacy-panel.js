@@ -113,15 +113,20 @@ export async function setupPrivacyPanel({perform, showNotice}) {
     link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
     $('privacy-status').textContent = 'Report exported. It contains question metadata and coverage limits.';
   });
-  try {
-    const saved = (await chrome.storage.local.get(STORAGE_NAMESPACE))[STORAGE_NAMESPACE];
-    if (saved && Array.isArray(saved.fields)) {
-      report = restorePrivacyReport(saved);
-      $('privacy-status').textContent = 'Showing your last saved scan. Rescan the current application step for fresh results.';
+  // Share the application-action lock during initialization, then set the final
+  // privacy states after its snapshot is restored. Otherwise a concurrent action
+  // can restore Scan's initial disabled state after this saved-report read.
+  await perform(async () => {
+    try {
+      const saved = (await chrome.storage.local.get(STORAGE_NAMESPACE))[STORAGE_NAMESPACE];
+      if (saved && Array.isArray(saved.fields)) {
+        report = restorePrivacyReport(saved);
+        $('privacy-status').textContent = 'Showing your last saved scan. Rescan the current application step for fresh results.';
+      }
+    } catch {
+      $('privacy-status').textContent = 'The saved scan could not load. You can scan the current application again.';
     }
-  } catch {
-    $('privacy-status').textContent = 'The saved scan could not load. You can scan the current application again.';
-  }
+  });
   render();
   $('scan-privacy').disabled = false;
 }

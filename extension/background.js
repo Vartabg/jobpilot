@@ -6,8 +6,20 @@ let operations = Promise.resolve();
 
 async function configure() {
   await chrome.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" });
-  await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+  // Reset the persisted automatic toggle so the action invokes our listener.
+  await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false });
 }
+
+chrome.action.onClicked.addListener((tab) => {
+  // Open directly in the action gesture: this invocation grants activeTab on
+  // the clicked tab, including employers without persistent host permission.
+  try {
+    chrome.sidePanel.open({ windowId: tab.windowId })
+      .catch(() => console.error("JobPilot could not open the panel. Click its toolbar icon again."));
+  } catch {
+    console.error("JobPilot could not open the panel. Click its toolbar icon again.");
+  }
+});
 
 function queue(operation) {
   const result = operations.catch(() => {}).then(operation);

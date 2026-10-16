@@ -12,6 +12,7 @@ function worker(execute) {
   const context = createContext({
     console, executeModelOperation: execute, initializeLocalData: async () => ({ seeded: false }),
     chrome: {
+      action: { onClicked: noopEvent },
       storage: { local: { setAccessLevel: async () => {} } },
       sidePanel: { setPanelBehavior: async () => {} },
       runtime: {

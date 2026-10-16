@@ -1,4 +1,4 @@
-# Button and page audit — 0.10.0
+# Button and page audit — 0.11.1
 
 This release tests the outcome of each control group with synthetic data and
 isolated browser profiles. It does not submit applications or certify every
@@ -41,6 +41,13 @@ variants, arbitrary employer sites, browser-internal URLs, and file/PDF
 documents do not receive unsupported autofill injections. The local profile,
 tracker, exports, and career workspace remain available independently of page
 autofill access. Capture needs an ordinary job webpage and valid page access.
+
+The toolbar explicitly invokes the extension action before opening the side
+panel. Chrome's automatic side-panel toggle did not grant `activeTab` in the
+live Workiva test, leaving the URL unavailable even after a toolbar click.
+Opening the panel from Chrome's side-panel menu alone still requires clicking
+the JobPilot toolbar icon on the intended application tab. No persistent
+Workday permission is added.
 
 The checks include plain listings, native inputs, React-controlled fields,
 delayed location dropdowns, dependent fields, existing answers, multiple or
