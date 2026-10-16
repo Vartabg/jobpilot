@@ -151,7 +151,7 @@ def _optionality(field: FieldMetadata) -> Optionality:
 # Detection is confined to question labels. A job description or a purpose
 # mentioning demographic information does not create a request on its own.
 _RULES: tuple[tuple[str, str, str, str], ...] = (
-    ("gender_identity", r"\b(?:gender|sex|transgender|nonbinary|non-binary|(?:your|preferred) pronouns)\b|^pronouns\s*[:*]?$", "review", "Requests sex, gender, gender identity, or pronoun information."),
+    ("gender_identity", r"\b(?:gender|sex|transgender|nonbinary|non-binary|(?:your|preferred) pronouns)\b|\b(?:your|preferred) pronoun\(s\)(?!\w)|^pronoun(?:s|\(s\))\s*[:*]?$", "review", "Requests sex, gender, gender identity, or pronoun information."),
     ("sexual_orientation", r"\b(?:sexual (?:orientation|preferences?)|sexuality|lgbtq?\+?)\b", "review", "Requests sexual orientation information."),
     ("race_ethnicity", r"\b(?:race|racial|ethnicity|ethnic|hispanic|latino|latina)\b", "review", "Requests race or ethnicity information."),
     ("health_disability", r"\b(?:disabilit\w*|disabled|medical (?:condition|history|record)|health (?:condition|history|record)|mental health|pregnan\w*|diagnosis|diagnoses)\b", "review", "Requests health or disability information."),

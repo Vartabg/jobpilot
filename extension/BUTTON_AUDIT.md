@@ -1,4 +1,4 @@
-# Button and page audit — 0.11.3
+# Button and page audit — 0.11.4
 
 This release tests the outcome of each control group with synthetic data and
 isolated browser profiles. It does not submit applications or certify every
@@ -119,8 +119,24 @@ Workday education degree fields and a unique offered option; unrelated degrees
 and duplicate equivalents are rejected. The correct degree was visible on the
 live form. Repeat Fill preserved all 67 observed controls and reported zero
 filled, 43 skipped, zero failed. Inspect found no empty visible required fields.
-Workiva's own Save and Continue returned nine generic Page Error entries on both
-attempts without identifying an invalid control. Later application questions,
-disclosures, self-identification, and review could not be reached live. The
-application remains unsubmitted, with the user's application-only address kept
-out of the local profile.
+During the 0.11.3 pass, Workiva's own Save and Continue returned nine generic
+Page Error entries on both attempts without identifying an invalid control.
+Later steps were not reached in that pass. The application remained unsubmitted,
+with the user's application-only address kept out of the local profile.
+
+The 0.11.4 investigation identified HTTP 400 authorization failures in Workiva's
+Network response. Restoring the expired account session in another tab allowed
+the preserved My Experience form to save and reach Application Questions. No
+answers or history rows were cleared to recover the draft.
+
+Application Questions inspection now detects all three required choices using
+their own fixed fieldset legends. Privacy captures all five question labels and
+flags the optional pronoun(s) request. Scan metadata and findings were identical
+before and after the user-approved answers were entered. Fill/Attach guarded the
+step without changing any control, and Workiva saved it successfully.
+
+Voluntary Disclosures inspection recognizes three demographic choices and the
+required transparent native agreement checkbox, using its exact visible local
+label. Privacy identifies gender, ethnicity and veteran requests. Fill/Attach
+preserved every disclosure and agreement control. Consent and personal choices
+remain with the user; the extension does not accept agreements.

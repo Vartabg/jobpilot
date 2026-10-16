@@ -34,12 +34,21 @@ function captureApplicationFields() {
     return true;
   };
   const fieldSelector = '[data-automation-id^="formField-"]';
+  const fieldsetQuestion = (control) => {
+    const field = control.closest(fieldSelector), fieldset = control.closest("fieldset");
+    if (!field || !fieldset || fieldset.closest(fieldSelector) !== field || !visibleText(fieldset)) return "";
+    const legends = Array.from(fieldset.children).filter(node => node.tagName === "LEGEND");
+    if (legends.length !== 1 || legends[0].closest(fieldSelector) !== field || !visibleText(legends[0])) return "";
+    const controls = Array.from(fieldset.querySelectorAll("input, textarea, select, button[aria-haspopup=listbox], [role=combobox]"))
+      .filter(node => node.type !== "hidden" && visibleText(node));
+    return controls.length === 1 && controls[0] === control ? textOf(legends[0]) : "";
+  };
   const dropdownQuestion = (control) => {
     const field = control.closest(fieldSelector), id = control.getAttribute("id");
     if (!field || !id) return "";
     const labels = Array.from(field.querySelectorAll("label")).filter(label => label.getAttribute("for") === id
       && label.closest(fieldSelector) === field && visibleText(label));
-    return labels.length === 1 ? textOf(labels[0]) : "";
+    return labels.length ? labels.length === 1 ? textOf(labels[0]) : "" : fieldsetQuestion(control);
   };
   const radioQuestion = (control) => {
     if (control.type !== "radio" || !control.name) return null;
@@ -77,7 +86,7 @@ function captureApplicationFields() {
       const questionLabel = dropdown ? dropdownQuestion(control) : "";
       if (dropdown && !questionLabel) notices.push("A dropdown question could not be linked to a visible local label. Its current selection was not collected; inspect this question on the form.");
       // A Workday button's accessible name can contain the selected answer.
-      const label = (dropdown ? questionLabel || "Unlabelled field" : (radio && groupLabel) || labelled(control) || labels.join(" ") || control.getAttribute("placeholder") || control.getAttribute("name") || "Unlabelled field").slice(0, 2000);
+      const label = (dropdown ? questionLabel || "Unlabelled field" : (radio && groupLabel) || labelled(control) || labels.join(" ") || control.getAttribute("placeholder") || control.getAttribute("name") || (!radio && fieldsetQuestion(control)) || "Unlabelled field").slice(0, 2000);
       const options = [];
       if (metadata) options.push(...metadata.options.map(option => option.slice(0, 500)));
       else if (control.tagName === "SELECT") {

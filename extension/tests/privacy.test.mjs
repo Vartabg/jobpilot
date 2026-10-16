@@ -174,6 +174,84 @@ test('Workday button dropdowns expose only their local question, including when 
   assert.equal(JSON.stringify({payload,report}).includes('PRIVATE'),false);
 });
 
+test('Workday questionnaire dropdowns use their direct local legend without reading selected button answers', async () => {
+  const {element,capture}=metadataDOM();
+  const questions=['Are you authorized to work here?','Do you require sponsorship?','Gender identity','How did you hear about this role? (optional)'];
+  const fields=questions.map((question,index)=>{
+    const button=element('button',{id:`primaryQuestionnaire--fixture-${index}`,type:'button','aria-haspopup':'listbox',
+      'aria-label':`PRIVATE-SELECTED-${index} Required`},`PRIVATE-SELECTED-${index}`);
+    const getAttribute=button.getAttribute;
+    button.getAttribute=function(name) { if(name==='aria-label') throw new Error('Selected questionnaire answer was read'); return getAttribute.call(this,name); };
+    Object.defineProperty(button,'textContent',{get() { throw new Error('Selected questionnaire text was read'); }});
+    const legend=element('legend',{},'',[element('p',{},question),...(index<3?[element('span',{},' *')]:[])]);
+    const fieldset=element('fieldset',{},'',[legend,element('div',{},'',[element('div',{},'',[element('div',{},'',[button])])])]);
+    return element('div',{'data-automation-id':`formField-fixture-${index}`},'',[fieldset]);
+  });
+  const payload=await capture([element('div',{'data-automation-id':'applyFlowPrimaryQuestionsPage'},'',fields)]);
+  assert.deepEqual(payload.fields,questions.map((question,index)=>field(question+(index<3?' *':''),index<3)));
+  assert.equal(payload.fields.filter(item=>item.required).length,3);
+  assert.equal(payload.notices.some(notice=>/dropdown.*label/i.test(notice)),false);
+  const report=analyzeFields(payload.fields);
+  assert.deepEqual(report.findings.map(finding=>finding.label),['Gender identity *']);
+  assert.equal(JSON.stringify({payload,report}).includes('PRIVATE'),false);
+});
+
+test('Workday step-four legends retain all five public questions and three required markers without textarea answers', async () => {
+  const {element,capture}=metadataDOM();
+  const questions=[
+    'Are you currently authorized to work in the U.S. for any employer?*',
+    'Do you now or will you in the future require employer sponsorship for U.S. work authorization (e.g., H-1B, TN, O-1, green card, STEM OPT training plan, etc.)?*',
+    'Does your work authorization now, or will it in the future, involve CPT or OPT?*',
+    'What are your compensation expectations for this role?',
+    'Please provide your preferred pronoun(s):',
+  ];
+  const fields=questions.map((question,index)=>{
+    const control=element(index<3?'button':'textarea',{id:`primaryQuestionnaire--question-${index}`,
+      ...(index<3?{type:'button','aria-haspopup':'listbox','aria-label':'PRIVATE SELECTED Required'}:{})},'PRIVATE APPLICANT ANSWER');
+    for(const key of ['value','textContent','checked','selected']) Object.defineProperty(control,key,{get() { throw new Error(`Applicant ${key} was read`); }});
+    const legend=element('legend',{},'',[element('p',{},question)]);
+    const mirror=element('input',{type:'hidden',name:`mirror-${index}`},'PRIVATE MIRROR');
+    return element('div',{'data-automation-id':`formField-question-${index}`},'',[element('fieldset',{},'',[legend,control,mirror])]);
+  });
+  const payload=await capture(fields);
+  assert.deepEqual(payload.fields,questions.map((question,index)=>field(question,index<3?true:null)));
+  assert.equal(payload.fields.filter(item=>item.required).length,3);
+  const report=analyzeFields(payload.fields);
+  assert.equal(report.findings.some(finding=>finding.label===questions[3]),false,'Desired compensation remains distinct from salary history');
+  assert.deepEqual(report.findings.map(finding=>[finding.label,finding.category]),[[questions[4],'gender_identity']]);
+  assert.equal(JSON.stringify({payload,report}).includes('PRIVATE'),false);
+});
+
+test('native field labels retain precedence over a surrounding questionnaire legend', async () => {
+  const {element,capture}=metadataDOM();
+  const input=element('textarea',{id:'answer'}),label=element('label',{for:'answer'},'Public associated label'); input.labels=[label];
+  const fieldNode=element('div',{'data-automation-id':'formField-native'},'',[element('fieldset',{},'',[element('legend',{},'Different public legend *'),label,input])]);
+  const payload=await capture([fieldNode]);
+  assert.deepEqual(payload.fields,[field('Public associated label')]);
+});
+
+test('Workday dropdown legend fallback refuses neighboring, nested, hidden and ambiguous questions or controls', async t=>{
+  for(const invalid of ['neighbor legend','nested legend','outer legend','hidden legend','multiple legends','multiple controls','neighbor field','nested control']) await t.test(invalid,async()=>{
+    const {element,capture}=metadataDOM();
+    const button=()=>element('button',{id:'primaryQuestionnaire--fixture',type:'button','aria-haspopup':'listbox','aria-label':'PRIVATE SELECTED'},'PRIVATE SELECTED');
+    const current=button(),legend=element('legend',invalid==='hidden legend'?{style:'display:none'}:{},'PRIVATE WRONG QUESTION *');
+    let contents=[legend,current],outside=[];
+    if(invalid==='neighbor legend') { contents=[current]; outside=[element('fieldset',{},'',[legend])]; }
+    if(invalid==='nested legend') contents=[element('div',{},'',[legend]),current];
+    if(invalid==='outer legend') contents=[legend,element('fieldset',{},'',[current])];
+    if(invalid==='multiple legends') contents=[legend,element('legend',{},'PRIVATE OTHER QUESTION *'),current];
+    if(invalid==='multiple controls') contents=[legend,current,button()];
+    if(invalid==='neighbor field') contents=[legend,element('div',{'data-automation-id':'formField-neighbor'},'',[current])];
+    if(invalid==='nested control') contents=[legend,current,element('fieldset',{},'',[button()])];
+    const scope=element('div',{'data-automation-id':'formField-fixture'},'',[element('fieldset',{},'',contents)]);
+    const payload=await capture([scope,...outside]);
+    assert.ok(payload.fields.length>0);
+    assert.ok(payload.fields.every(item=>item.label==='Unlabelled field'&&item.required===null));
+    assert.ok(payload.notices.some(notice=>/dropdown.*label/i.test(notice)));
+    assert.equal(JSON.stringify(payload).includes('PRIVATE'),false);
+  });
+});
+
 test('Workday role-less required radio questions are captured once with offered choices, without reading answers', async () => {
   const {element, capture} = metadataDOM();
   const question = 'Do you have a disability? *', help = 'The employer offers a separate decline choice.';

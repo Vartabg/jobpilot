@@ -104,3 +104,39 @@ prevents live testing of Application Questions and later steps; the application
 stays on My Experience and is unsubmitted. Existing manual-step safeguards remain
 covered by isolated browser tests. The user's street/ZIP entries are specific to
 this application and are not copied to the extension profile.
+
+## Authorization recovery and questionnaire labels: 0.11.4
+
+Chrome's native Network response view established the cause of the nine generic
+Page Errors: Workiva returned HTTP 400 with “You are not authorized to this job
+application.” Validation and all section saves failed, including untouched
+sections. A fresh same-job tab showed Sign In while the preserved application
+still displayed the signed-in header. Restoring the existing account with
+Chrome's saved credential, then returning to the original tab, let Save and
+Continue save My Experience and advance to Application Questions. No application
+answers needed to be cleared or recreated. The recovery tab was closed after
+authentication; the original draft stayed open.
+
+The real questionnaire then exposed a label boundary missing from 0.11.3: its
+three required dropdowns and two optional textareas use a direct fieldset legend
+inside their local formField, with no associated label/ARIA question. Inspection
+now recognizes a unique visible choice's own direct legend. Privacy capture
+uses the same bounded question evidence for dropdowns and otherwise-unlabelled
+native controls, without reading entered answers. Exact pronoun(s) spelling is
+recognized by the canonical classifier and regenerated JavaScript; desired
+compensation remains distinct from salary history.
+
+The installed 0.11.4 build detected all three required questionnaire choices and
+recognized them as answered after the user's approved selections. Before/after
+privacy exports contained identical fields and findings: the selected answers
+were not collected. Workiva saved the questions and advanced to Voluntary
+Disclosures. Its three demographic choices were visible to inspection, but the
+required agreement used an opacity-zero native checkbox. A current-Workday-only
+visibility proxy now requires a positive input rectangle, visible ancestors,
+and one exact visible native LABEL-for in the same formField. It exposes the
+fourth required control without clicking, changing or accepting it. Hidden,
+neighboring, ambiguous, zero-layout and non-Workday cases remain excluded.
+
+Both Fill and Attach returned the existing manual-step guard on Application
+Questions and Voluntary Disclosures; before/after control snapshots were
+identical. Personal disclosure and agreement choices are left to the user.

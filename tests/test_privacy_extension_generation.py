@@ -26,7 +26,9 @@ def test_native_classifier_matches_product_findings_and_validation():
         "Email Address", "Website address", "IP address", "Latitude", "GPS coordinates", "Precise location",
         "Location (City)", "State", "Postal Code", "Where do you live?", "United States work authorization",
         "State your salary expectations", "Country of citizenship", "Country of birth", "Place of birth",
-        "Gender identity", "Sex", "Sexual orientation", "Sexual preference", "Race and ethnicity", "Hispanic or Latino",
+        "Gender identity", "Please provide your preferred pronoun(s):", "Pronoun(s)",
+        "What are your compensation expectations for this role?",
+        "Sex", "Sexual orientation", "Sexual preference", "Race and ethnicity", "Hispanic or Latino",
         "Disability", "Medical history", "Are you pregnant?", "Religion", "Political party affiliation",
         "Trade union membership", "Veteran status", "Social Security number", "Driver's License", "Passport",
         "Date of birth", "Age", "Current salary", "Previous base compensation", "Desired compensation",
@@ -55,6 +57,10 @@ def test_native_classifier_matches_product_findings_and_validation():
     options = {"source_url": "https://example.test/apply?token=SECRET#SECRET", "coverage": "visible_form",
                "notices": ["Visible form", "Visible form"]}
     expected = analyze_fields(fields, **options)
+    assert any(finding["label"] == "Please provide your preferred pronoun(s):"
+               and finding["category"] == "gender_identity" for finding in expected["findings"])
+    assert not any(finding["label"] == "What are your compensation expectations for this role?"
+                   for finding in expected["findings"])
     script = """
       import {readFileSync} from 'node:fs';
       import {analyzeFields} from './extension/privacy-analyzer.js';

@@ -1,4 +1,4 @@
-# Career workspace — extension 0.11.3
+# Career workspace — extension 0.11.4
 
 Open **Career memory, time capsules, and unified inbox** from the extension's
 side panel. The workspace opens in its own extension tab and uses the same

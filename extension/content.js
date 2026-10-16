@@ -66,7 +66,16 @@
         .filter(node => node && node.matches('label, legend') && local(node));
       // Workday's button aria-label includes its selected answer. Keep only a
       // verified fixed question label in reports and field matching.
-      return (associated.length === 1 ? associated : associated.length ? [] : references).map(labelText).map(text => text.trim()).filter(Boolean);
+      if (associated.length > 1) return [];
+      const fixed = associated.length ? associated : references;
+      if (fixed.length) return fixed.map(labelText).map(text => text.trim()).filter(Boolean);
+      const fieldset = el.closest('fieldset');
+      if (!fieldset || !local(fieldset)) return [];
+      const choices = [...fieldset.querySelectorAll('input, textarea, select, button[aria-haspopup="listbox"], [role="combobox"]')]
+        .filter(node => visible(node) && local(node) && node.closest('fieldset') === fieldset);
+      const legends = [...fieldset.querySelectorAll(':scope > legend')].filter(visible);
+      if (choices.length !== 1 || choices[0] !== el || legends.length !== 1) return [];
+      return [labelText(legends[0]).trim()].filter(Boolean);
     }
     const items = [el.getAttribute('aria-label')];
     for (const id of (el.getAttribute('aria-labelledby') || '').split(/\s+/)) if (id) items.push(labelText(document.getElementById(id)));
@@ -159,6 +168,19 @@
     return visible(metadata.question) && metadata.references.every(visible)
       && [...(el.labels || [])].some(label => metadata.question.contains(label) && visible(label) && labelText(label).trim());
   }
+  function workdayCheckboxProxy(el) {
+    if (el.type !== 'checkbox' || !workdayPage() || !el.id || getComputedStyle(el).opacity !== '0'
+      || ![...el.getClientRects()].some(rect => rect.width > 0 && rect.height > 0)) return false;
+    const field = el.closest('[data-automation-id^="formField-"]');
+    if (!field || !workdayState().step?.contains(el)) return false;
+    for (let node=el; node?.nodeType===1; node=node.parentElement) {
+      const style=getComputedStyle(node);
+      if (style.display==='none' || style.visibility==='hidden' || node!==el && style.opacity==='0') return false;
+    }
+    const associated = [...(el.labels || [])].filter(visible);
+    return associated.length === 1 && associated[0].htmlFor === el.id && field.contains(associated[0])
+      && associated[0].closest('[data-automation-id^="formField-"]') === field && !!labelText(associated[0]).trim();
+  }
   function inventory(onError = () => {}) {
     const scopes = applicationScopes();
     const controls = [...document.querySelectorAll("input, textarea, select, [role='combobox']:not(input), button[aria-haspopup='listbox'], [role='checkbox']:not(input), [role='radiogroup'], .ashby-application-form-input-yesno")]
@@ -167,7 +189,7 @@
     return controls.flatMap(el => { try {
       const metadata=el.type === 'radio' ? workdayRadioQuestion(el) : null;
       const choiceProxy=['radio','checkbox'].includes(el.type) && visible(el.closest('.ashby-application-form-input-radio-group-option, .ashby-application-form-input-checkbox-group-option'))
-        || workdayRadioProxy(el,metadata);
+        || workdayRadioProxy(el,metadata) || workdayCheckboxProxy(el);
       if (el.disabled || el.matches(':disabled') || el.readOnly || ['hidden','submit','reset'].includes(el.type) || el.type === 'button' && !workdaySelect(el) || !(visible(el) || choiceProxy || (el.type === 'file' && visible(wrapper(el))))) return [];
       if (el.matches('.ashby-application-form-input-yesno')) return [{el,label:labelOf(el),type:'choice',required:required(el),answered:!!el.querySelector("button[aria-pressed='true']")}];
       if (el.type === 'radio') {

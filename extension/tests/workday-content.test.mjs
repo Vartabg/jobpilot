@@ -427,6 +427,78 @@ test('Workday manual questionnaire/disclosure/review steps can be inspected but 
   });
 });
 
+const questionnaireChoice = (id,question) => `<div data-automation-id="formField-${id}"><fieldset><legend><p>${question} <span>*</span></p></legend>
+  <div><div><div><button id="primaryQuestionnaire--${id}" type="button" aria-haspopup="listbox" aria-label=" Select One Required">Select One</button></div></div></div></fieldset></div>`;
+
+test('Workday questionnaire choices use their visible direct legends while Fill and Attach remain manual',async()=>{
+  const questions=['Can you meet the published role schedule?','Are you authorized to work in the listed country?','Will you require employment sponsorship?'];
+  await fixture(flow(questions.map((question,index)=>questionnaireChoice('question-'+index,question)).join('')+input('manual-first','First Name')+uploader,'applyFlowPrimaryQuestionsPage')+
+    '<script>window.questionClicks=0;document.querySelectorAll("button[aria-haspopup=listbox]").forEach(el=>el.onclick=()=>questionClicks++);</script>',async page=>{
+    const first=page.locator('#primaryQuestionnaire--question-0');
+    assert.equal(await first.getAttribute('aria-labelledby'),null);assert.equal(await first.getAttribute('aria-required'),null);
+    const before=await page.locator('[data-automation-id="applyFlowPrimaryQuestionsPage"]').innerHTML();
+    const report=await execute(page,'inspect');assert.deepEqual(report.required,questions.map(question=>({label:question+' *',type:'combobox'})));
+    assert.equal(JSON.stringify(report).includes('Select One Required'),false);
+    for(const action of ['details','resume']) assert.equal((await execute(page,action)).status,'interrupted');
+    assert.equal(await page.locator('[data-automation-id="applyFlowPrimaryQuestionsPage"]').innerHTML(),before);
+    assert.equal(await page.locator('#manual-first').inputValue(),'');assert.equal(await page.locator('#resume').evaluate(el=>el.files.length),0);
+    assert.equal(await page.evaluate(()=>questionClicks),0);assert.equal(await page.evaluate(()=>navigationClicks),0);
+  });
+});
+
+test('Workday questionnaire legend fallback refuses hidden, neighboring, nested and ambiguous questions',async()=>{
+  const choice=id=>`<button id="${id}" type="button" aria-haspopup="listbox" aria-label=" Select One Required">Select One</button>`;
+  const cases=[
+    questionnaireChoice('hidden','Hidden question?').replace('<legend>','<legend style="display:none">'),
+    '<div data-automation-id="formField-neighbor"><fieldset><legend>Neighbor question? *</legend></fieldset></div><div data-automation-id="formField-target"><fieldset>'+choice('neighbor-target')+'</fieldset></div>',
+    '<div data-automation-id="formField-nested"><fieldset><legend>Outer question? *</legend><fieldset>'+choice('nested-target')+'</fieldset></fieldset></div>',
+    '<div data-automation-id="formField-shared"><fieldset><legend>Ambiguous shared question? *</legend>'+choice('shared-first')+choice('shared-second')+'</fieldset></div>',
+    '<div data-automation-id="formField-legends"><fieldset><legend>First question? *</legend><legend>Second question? *</legend>'+choice('two-legends')+'</fieldset></div>',
+    '<fieldset><legend>Outside-field question? *</legend><div data-automation-id="formField-inner">'+choice('outside-target')+'</div></fieldset>',
+  ];
+  await fixture(flow(cases.join(''),'applyFlowPrimaryQuestionsPage'),async page=>{
+    const report=await execute(page,'inspect');assert.deepEqual(report.required,[]);
+    assert.equal(await page.evaluate(()=>navigationClicks),0);
+  });
+});
+
+const transparentAgreement = (id='termsAndConditions--acceptTermsAndAgreements') => `<div data-automation-id="formField-acceptTermsAndAgreements"><div><div><div><div>
+  <input id="${id}" type="checkbox" aria-required="true" style="opacity:0;width:24px;height:24px"><label for="${id}">I agree.*</label></div></div></div></div></div>`;
+
+test('Workday transparent agreement checkbox appears as required without accepting it or changing the manual step',async()=>{
+  const demographics=['Gender','Race/Ethnicity','Veteran Status'];
+  await fixture(flow(demographics.map((question,index)=>questionnaireChoice('demographic-'+index,question)).join('')+transparentAgreement()+input('manual-first','First Name')+uploader,'applyFlowVoluntaryDisclosuresPage')+
+    '<script>window.agreementEvents=0;document.querySelectorAll("input[type=checkbox]").forEach(el=>["click","input","change"].forEach(type=>el.addEventListener(type,()=>agreementEvents++)));</script>',async page=>{
+    const agreement=page.locator('[id="termsAndConditions--acceptTermsAndAgreements"]');
+    assert.equal(await agreement.evaluate(el=>el.required),false);assert.equal(await agreement.evaluate(el=>getComputedStyle(el).opacity),'0');
+    const before=await page.locator('[data-automation-id="applyFlowVoluntaryDisclosuresPage"]').innerHTML();
+    const report=await execute(page,'inspect');assert.deepEqual(report.required,[...demographics.map(question=>({label:question+' *',type:'combobox'})),{label:'I agree.*',type:'checkbox'}]);
+    for(const action of ['details','resume']) assert.equal((await execute(page,action)).status,'interrupted');
+    assert.equal(await agreement.isChecked(),false);assert.equal(await page.locator('#manual-first').inputValue(),'');assert.equal(await page.locator('#resume').evaluate(el=>el.files.length),0);
+    assert.equal(await page.locator('[data-automation-id="applyFlowVoluntaryDisclosuresPage"]').innerHTML(),before);
+    assert.equal(await page.evaluate(()=>agreementEvents),0);assert.equal(await page.evaluate(()=>navigationClicks),0);
+  });
+});
+
+test('Workday transparent checkbox inspection rejects hidden, off-field, absent and ambiguous labels or inputs without layout',async()=>{
+  const cases=[
+    transparentAgreement('hidden-label').replace('<label ','<label style="display:none" '),
+    '<div data-automation-id="formField-checkbox"><input id="off-field" type="checkbox" aria-required="true" style="opacity:0;width:24px;height:24px"></div><div data-automation-id="formField-other"><label for="off-field">Other field agreement *</label></div>',
+    transparentAgreement('no-label').replace('<label for="no-label">I agree.*</label>',''),
+    transparentAgreement('ambiguous').replace('<label for="ambiguous">','<label for="ambiguous">Second agreement *</label><label for="ambiguous">'),
+    '<div data-automation-id="formField-hidden"><div style="opacity:0"><input id="hidden-parent" type="checkbox" aria-required="true" style="opacity:0;width:24px;height:24px"></div><label for="hidden-parent">Hidden parent agreement *</label></div>',
+    transparentAgreement('no-layout').replace('opacity:0;','display:none;opacity:0;'),
+    transparentAgreement('zero-layout').replace('width:24px;height:24px','width:0;height:0;padding:0;border:0'),
+    transparentAgreement('hidden-input').replace('opacity:0;','visibility:hidden;opacity:0;'),
+  ];
+  await fixture(flow(cases.join(''),'applyFlowVoluntaryDisclosuresPage'),async page=>{
+    assert.deepEqual((await execute(page,'inspect')).required,[]);assert.equal(await page.locator('input[type=checkbox]:checked').count(),0);
+  });
+  await fixture('<form id="application-form">'+transparentAgreement('generic-checkbox')+'</form>',async page=>{
+    assert.deepEqual((await execute(page,'inspect')).required,[]);
+  },'https://boards.greenhouse.io/fixture/jobs/123');
+});
+
 test('Workday stops on same-URL step replacement and never fills the next visible step',async()=>{
   await fixture(flow(input('first','First Name')+input('last','Last Name'))+`<script>document.querySelector('#first').oninput=()=>{
     document.querySelector('[data-automation-id="applyFlowMyInfoPage"]').outerHTML='<div data-automation-id="applyFlowMyExpPage"><label>Last Name<input id="next-last"></label></div>';};</script>`,async page=>{
