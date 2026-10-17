@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "JobPilot",
-  "version": "0.12.1",
+  "version": "0.12.2",
   "minimum_chrome_version": "116",
   "description": "Your local job workspace: privacy scans, profile, résumé library, reviewed autofill, and application tracking.",
   "action": {

@@ -26,6 +26,11 @@ Workday Capture uses public job-description metadata only. It leaves the
 description blank when that metadata is unavailable, keeping application and
 review answers out of the captured job description.
 
+Version **0.12.2** confirms the disability decline after Workday disables the
+other two checkboxes. That normal change now remains one answered question;
+existing answers stay preserved. Filling an empty question still requires all
+three offered choices to be enabled.
+
 Version **0.11.0** adds **Scan privacy on this page** in Apply. Open the job's
 application step, click the JobPilot toolbar icon to grant page access, and scan
 before sharing answers. The report shows exact question wording, required or

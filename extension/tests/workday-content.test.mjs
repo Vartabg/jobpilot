@@ -805,3 +805,103 @@ test('CC305 signed date inspection groups only the exact current-step field and 
     assert.deepEqual((await execute(page,'inspect')).required,[],'other date controls retain their existing individual inspection behavior');
   });
 });
+
+test('CC305 disconnected input or group still interrupts instead of rebinding a medical question',async t=>{
+  for(const replacement of ['first-input','group']) await t.test(replacement,async()=>{
+    await fixture(flow(disabilityHeading+disabilityCheckboxes()+signedDate()+input('signature','Name','value="Applicant name"')+transparentAgreement(),'applyFlowSelfIdentifyPage')+
+      `<script>window.medicalClicks=[];document.querySelector('[data-automation-id=applyFlowPage]').addEventListener('click',event=>{
+        if(event.target.matches('[data-automation-id="disabilityStatus-CheckboxGroup"] input'))medicalClicks.push(event.target.id);
+      });document.querySelector('#disability-2').addEventListener('click',()=>{
+        window.originalAnchor=document.querySelector('#disability-0');
+        if(${JSON.stringify(replacement)}==='first-input')originalAnchor.replaceWith(originalAnchor.cloneNode(true));
+        else {const group=document.querySelector('[data-automation-id="disabilityStatus-CheckboxGroup"]'),copy=group.cloneNode(true);copy.querySelector('#disability-2').checked=true;group.replaceWith(copy);}
+      });</script>`,async page=>{
+      const originalScope=await page.evaluate(()=>__jobpilotWorkdayScope().stepKey),report=await execute(page,'details',savedDisclosures('','decline'));
+      assert.equal(await page.evaluate(()=>originalAnchor.isConnected),false,'fixture actually replaced the old logical anchor');
+      assert.equal(await page.evaluate(()=>__jobpilotWorkdayScope().stepKey),originalScope);
+      assert.equal(report.status,'interrupted');assert.deepEqual(report.filled,[]);
+      assert.equal(report.failed.length,0);assert.equal(report.warnings.length,1);assert.deepEqual(await page.evaluate(()=>medicalClicks),['disability-2']);
+      assert.deepEqual(await page.locator('[data-automation-id="disabilityStatus-CheckboxGroup"] input').evaluateAll(inputs=>inputs.map(input=>input.checked)),[false,false,true]);
+      assert.equal(await page.locator('#signature').inputValue(),'Applicant name');assert.equal(await page.locator('input[type=checkbox]').last().isChecked(),false);
+      assert.deepEqual(await page.locator('[data-automation-id="dateInputWrapper"] input').evaluateAll(inputs=>inputs.map(input=>input.value)),['','','']);
+      assert.equal(await page.evaluate(()=>navigationClicks),0);
+      assert.equal(JSON.stringify(report).includes('I do not want to answer'),false);
+      assert.equal((await execute(page,'details',savedDisclosures('','decline'))).filled.length,0);assert.deepEqual(await page.evaluate(()=>medicalClicks),['disability-2']);
+    });
+  });
+});
+
+test('CC305 own decline disables unchecked Workiva siblings without losing verified fill or repeat preservation',async()=>{
+  await fixture(flow(disabilityHeading+disabilityCheckboxes()+signedDate()+input('signature','Name','value="Applicant name"')+transparentAgreement(),'applyFlowSelfIdentifyPage')+
+    `<script>window.medicalClicks=[];window.originalAnchor=document.querySelector('#disability-0');
+    document.querySelector('[data-automation-id=applyFlowPage]').addEventListener('click',event=>{
+      if(event.target.matches('[data-automation-id="disabilityStatus-CheckboxGroup"] input'))medicalClicks.push(event.target.id);
+    });document.querySelector('#disability-2').onclick=()=>document.querySelectorAll('[data-automation-id="disabilityStatus-CheckboxGroup"] input').forEach(input=>{if(!input.checked)input.disabled=true;});</script>`,async page=>{
+    const report=await execute(page,'details',savedDisclosures('','decline'));
+    assert.equal(await page.evaluate(()=>originalAnchor.isConnected),true,'actual disabled-sibling reproduction does not replace an input');
+    assert.equal(report.status,'complete');assert.deepEqual(report.filled,[{label:'Disability status',key:'disclosure_preferences.other_demographics'}]);
+    assert.equal(report.failed.length,0);assert.equal(report.warnings.length,0);
+    assert.deepEqual(await page.locator('[data-automation-id="disabilityStatus-CheckboxGroup"] input').evaluateAll(inputs=>inputs.map(input=>[input.checked,input.disabled])),[[false,true],[false,true],[true,false]]);
+    assert.deepEqual(await page.evaluate(()=>medicalClicks),['disability-2']);
+    const inspect=await execute(page,'inspect');assert.equal(inspect.required.some(row=>row.label==='Disability status'),false);
+    const repeat=await execute(page,'details',savedDisclosures('','decline'));assert.equal(repeat.status,'complete');assert.equal(repeat.filled.length,0);
+    assert.ok(repeat.skipped.some(row=>row.label==='Disability status'&&row.reason==='Your existing answer was preserved'));
+    assert.deepEqual(await page.evaluate(()=>medicalClicks),['disability-2']);
+    assert.equal(await page.locator('#signature').inputValue(),'Applicant name');assert.equal(await page.locator('input[type=checkbox]').last().isChecked(),false);
+    assert.deepEqual(await page.locator('[data-automation-id="dateInputWrapper"] input').evaluateAll(inputs=>inputs.map(input=>input.value)),['','','']);
+    assert.equal(await page.evaluate(()=>navigationClicks),0);
+    for(const secret of ['I do not want to answer',...disabilityLabels,'decline','Applicant name']) assert.equal(JSON.stringify(report).includes(secret),false);
+  });
+});
+
+test('CC305 existing checked answers with disabled siblings stay preserved and empty disabled groups never fill',async t=>{
+  for(const selected of [0,1,2,-1]) await t.test('checked-'+selected,async()=>{
+    await fixture(flow(disabilityHeading+disabilityCheckboxes(),'applyFlowSelfIdentifyPage')+
+      `<script>document.querySelectorAll('[data-automation-id="disabilityStatus-CheckboxGroup"] input').forEach((input,index)=>{
+        input.checked=index===${selected};input.disabled=${selected}===-1?index===0:index!==${selected};
+      });window.medicalClicks=0;document.querySelector('[data-automation-id=applyFlowPage]').addEventListener('click',event=>{if(event.target.type==='checkbox')medicalClicks++;});</script>`,async page=>{
+      const before=await page.locator('[data-automation-id="disabilityStatus-CheckboxGroup"] input').evaluateAll(inputs=>inputs.map(input=>[input.checked,input.disabled]));
+      const report=await execute(page,'details',savedDisclosures('','decline'));assert.equal(report.status,'complete');assert.equal(report.filled.length,0);
+      assert.deepEqual(await page.locator('[data-automation-id="disabilityStatus-CheckboxGroup"] input').evaluateAll(inputs=>inputs.map(input=>[input.checked,input.disabled])),before);
+      assert.equal(await page.evaluate(()=>medicalClicks),0);
+      if(selected>=0) {
+        assert.ok(report.skipped.some(row=>row.label==='Disability status'&&row.reason==='Your existing answer was preserved'));
+        assert.deepEqual((await execute(page,'inspect')).required,[]);
+      }
+    });
+  });
+});
+
+test('CC305 changed answer or disabled selected decline cannot be counted or retried after its own click',async t=>{
+  for(const change of ['different-answer','disabled-decline']) await t.test(change,async()=>{
+    await fixture(flow(disabilityHeading+disabilityCheckboxes(),'applyFlowSelfIdentifyPage')+
+      `<script>window.medicalClicks=0;document.querySelector('[data-automation-id=applyFlowPage]').addEventListener('click',event=>{if(event.target.type==='checkbox')medicalClicks++;});
+      document.querySelector('#disability-2').onclick=()=>{
+        if(${JSON.stringify(change)}==='different-answer'){document.querySelector('#disability-2').checked=false;document.querySelector('#disability-0').checked=true;}
+        document.querySelectorAll('[data-automation-id="disabilityStatus-CheckboxGroup"] input').forEach(input=>input.disabled=${JSON.stringify(change)}==='disabled-decline'?input.checked:!input.checked);
+      };</script>`,async page=>{
+      const report=await execute(page,'details',savedDisclosures('','decline'));assert.equal(report.filled.length,0);assert.equal(report.failed.length,1);
+      assert.equal(await page.evaluate(()=>medicalClicks),1,'unexpected state is preserved without another checkbox click');
+      assert.deepEqual(await page.locator('[data-automation-id="disabilityStatus-CheckboxGroup"] input').evaluateAll(inputs=>inputs.map(input=>input.checked)),change==='different-answer'?[true,false,false]:[false,false,true]);
+      assert.equal(await page.evaluate(()=>navigationClicks),0);
+    });
+  });
+});
+
+test('CC305 own click still stops on changed question, root, step, URL or sticky visibility',async t=>{
+  for(const change of ['question','root','step','url','visibility']) await t.test(change,async()=>{
+    await fixture(flow(disabilityHeading+disabilityCheckboxes(),'applyFlowSelfIdentifyPage')+
+      `<script>window.medicalClicks=0;document.querySelector('#disability-2').onclick=()=>{medicalClicks++;
+        document.querySelectorAll('[data-automation-id="disabilityStatus-CheckboxGroup"] input').forEach(input=>{if(!input.checked)input.disabled=true;});
+        const change=${JSON.stringify(change)};
+        if(change==='question')document.querySelector('h3').textContent='Different question';
+        if(change==='root'){const root=document.querySelector('[data-automation-id=applyFlowPage]');root.replaceWith(root.cloneNode(true));}
+        if(change==='step'){const step=document.querySelector('[data-automation-id=applyFlowSelfIdentifyPage]');step.replaceWith(step.cloneNode(true));}
+        if(change==='url')history.replaceState(null,'',location.href+'#different');
+        if(change==='visibility'){Object.defineProperty(document,'visibilityState',{configurable:true,value:'hidden'});document.dispatchEvent(new Event('visibilitychange'));Object.defineProperty(document,'visibilityState',{configurable:true,value:'visible'});document.dispatchEvent(new Event('visibilitychange'));}
+      };</script>`,async page=>{
+      const report=await execute(page,'details',savedDisclosures('','decline'));assert.equal(report.status,'interrupted');assert.equal(report.filled.length,0);
+      assert.equal(await page.evaluate(()=>medicalClicks),1);assert.equal(await page.evaluate(()=>navigationClicks),0);
+    });
+  });
+});

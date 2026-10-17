@@ -1,4 +1,4 @@
-# Button and page audit — 0.12.1
+# Button and page audit — 0.12.2
 
 This release tests the outcome of each control group with synthetic data and
 isolated browser profiles. It does not submit applications or certify every
@@ -184,3 +184,18 @@ remain outside this exception.
 Workday Capture also excludes the application/review body from its job-description
 fallback. A canary that throws on review-text access verifies this on both host
 families, while public posting-description and JobPosting metadata still capture.
+
+Live 0.12.1 testing reached Workiva's final Review without submitting. The
+disability decline was selected while Name, Date, and Employee ID stayed
+untouched by autofill. Inspection grouped the required Name, Date, and Disability
+status correctly; after manual Name/Date entry it found no empty required fields.
+The privacy scan reported one disability request with disclosure optional.
+Capture and Inspect worked on Review; Fill and Attach stopped there without
+changing the form. The Review scan explicitly retained incomplete coverage.
+
+That pass found a final reporting edge case: Workiva disables the two unchecked
+disability answers after a choice is selected. The earlier strict enabled-choice
+check then rejected its own successful decline. Version 0.12.2 recognizes that
+verified answered group for inspection and preservation, while keeping the
+all-enabled requirement before any new selection. URL, visibility, current-step,
+question, and disconnected-control guards remain in place.

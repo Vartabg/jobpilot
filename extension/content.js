@@ -222,15 +222,20 @@
       || field.querySelectorAll(selector).length !== 1 || document.querySelectorAll('[id="selfIdentifiedDisabilityData--disabilityStatus"]').length !== 1) return null;
     const inputs=[...group.querySelectorAll('input')];
     if (inputs.length !== 3 || field.querySelectorAll('input').length !== 3) return null;
+    // Workday disables the other two choices after an answer. Recognize that
+    // answered group for inspection/preservation; an empty group must still
+    // offer all three enabled choices before it can be filled.
+    const hasAnswer=inputs.some(input=>input.checked);
     const options=inputs.map(input=>{
       const labels=[...(input.labels || [])].filter(visible);
+      const disabled=input.disabled || input.matches(':disabled') || input.getAttribute('aria-disabled') === 'true';
       if (input.type !== 'checkbox' || input.name || input.form !== el.form || input.getAttribute('aria-required') !== 'true'
         || input.closest(selector) !== group || input.closest('[data-automation-id^="formField-"]') !== field
-        || input.disabled || input.matches(':disabled') || input.getAttribute('aria-disabled') === 'true'
+        || disabled && !hasAnswer
         || !(visible(input) || workdayCheckboxProxy(input)) || ![...input.getClientRects()].some(rect=>rect.width>0 && rect.height>0)
         || labels.length !== 1 || !input.id || labels[0].htmlFor !== input.id || !group.contains(labels[0])
         || labels[0].closest(selector) !== group) return null;
-      return {el:input,textContent:labelText(labels[0]).trim(),getAttribute:key=>input.getAttribute(key)};
+      return {el:input,textContent:labelText(labels[0]).trim(),disabled,getAttribute:key=>input.getAttribute(key)};
     });
     if (options.some(option=>!option || !disabilityChoices.has(norm(option.textContent)))
       || new Set(options.map(option=>norm(option.textContent))).size !== 3) return null;
@@ -649,7 +654,7 @@
     if ((el.validity && !el.validity.valid) || el.getAttribute('aria-invalid') === 'true') return false;
     if (rule.disclosure && el.type === 'checkbox') {
       const metadata=workdayDisabilityQuestion(el),checked=metadata?.inputs.filter(input=>input.checked) || [];
-      return checked.length === 1 && metadata.options.some(option=>option.el === checked[0] && disclosureOption(option.textContent,rule));
+      return checked.length === 1 && metadata.options.some(option=>option.el === checked[0] && !option.disabled && disclosureOption(option.textContent,rule));
     }
     if (rule.disclosure && el.type === 'radio') {
       const metadata=disclosureRadioQuestion(el), checked=metadata?.radios.filter(radio=>radio.checked) || [];
@@ -767,9 +772,11 @@
                 el.dispatchEvent(new Event('change',{bubbles:true})); await pause(100);
               }
             } else if (current.disabilityQuestion && rule.disclosure) {
-              const metadata=workdayDisabilityQuestion(el),option=exactOption(metadata?.options || [],rule,profile);
-              if (!option) { record(token,'skipped',{label,reason:DISCLOSURE_MATCH}); continue; }
+              const metadata=workdayDisabilityQuestion(el);
+              if (!metadata) { record(token,'skipped',{label,reason:DISCLOSURE_MATCH}); continue; }
               if (metadata.inputs.some(input=>input.checked)) { record(token,'skipped',{label,reason:'Your existing answer was preserved'}); continue; }
+              const option=metadata.options.every(option=>!option.disabled) && exactOption(metadata.options,rule,profile);
+              if (!option) { record(token,'skipped',{label,reason:DISCLOSURE_MATCH}); continue; }
               if (!mutationGuard()) break;
               option.el.click(); await pause(100);
             } else if (type === 'radio' && rule.disclosure) {
