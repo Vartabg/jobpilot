@@ -31,22 +31,50 @@ def _is_header(raw: str, line: str) -> bool:
     if line.endswith(":"):
         return True
     short = len(line.split()) <= 8 and not line.endswith((".", "!", "?", ","))
-    return short and bool(_SECTION_WORDS.search(line))
+    letters = [char for char in line if char.isalpha()]
+    shouting = len(letters) >= 4 and all(char.isupper() for char in letters)
+    return short and (shouting or bool(_SECTION_WORDS.search(line)))
 
 
-def required_lines(text: str) -> Iterator[str]:
-    """Lines of a posting outside preferred sections and not self-described as optional."""
-    preferred_section = False
+_REQUIRED_HEADINGS = re.compile(
+    r"\b(requirements?|qualifications?|what you(?:'|\u2019)ll need|you have|you bring|who you are|"
+    r"must[- ]haves?|what we(?:'|\u2019)re looking for|about you|skills|experience)\b",
+    re.IGNORECASE,
+)
+
+
+def sections(text: str) -> Iterator[tuple[str, str]]:
+    """Each content line with the kind of section it sits in.
+
+    The kind is "required" under requirement-style headings, "preferred" under
+    preferred or bonus headings, and "other" everywhere else.
+    """
+    kind = "other"
     for raw in text.splitlines():
         line = raw.strip().lstrip("".join(_BULLETS)).strip()
         if not line:
             continue
         if _is_header(raw, line):
-            preferred_section = bool(_PREFERRED_WORDS.search(line))
+            if _PREFERRED_WORDS.search(line):
+                kind = "preferred"
+            elif _REQUIRED_HEADINGS.search(line):
+                kind = "required"
+            else:
+                kind = "other"
             continue
-        if preferred_section or _PREFERRED_WORDS.search(line):
-            continue
-        yield line
+        yield kind, line
+
+
+def is_optional(line: str) -> bool:
+    """A line that calls itself optional ("a plus", "preferred", "nice to have")."""
+    return bool(_PREFERRED_WORDS.search(line))
+
+
+def required_lines(text: str) -> Iterator[str]:
+    """Lines of a posting outside preferred sections and not self-described as optional."""
+    for kind, line in sections(text):
+        if kind != "preferred" and not is_optional(line):
+            yield line
 
 
 # ----- years -----------------------------------------------------------------

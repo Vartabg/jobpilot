@@ -6,6 +6,7 @@ from jobpilot.engine.domain.facts import (
     required_languages,
     required_lines,
     required_years,
+    sections,
     travel_percent,
 )
 
@@ -29,6 +30,12 @@ class TestRequiredLines:
     def test_short_bullets_are_content_not_headings(self):
         lines = list(required_lines("Requirements:\n- 5+ years of sales experience\n"))
         assert lines == ["5+ years of sales experience"]
+
+
+def test_all_caps_lines_are_headings_that_end_a_section():
+    text = "Nice to have:\n- Fintech experience\nWHY YOU\u2019LL LOVE WORKING HERE\n- Great team\n"
+    kinds = [(kind, line) for kind, line in sections(text)]
+    assert kinds == [("preferred", "Fintech experience"), ("other", "Great team")]
 
 
 class TestRequiredYears:

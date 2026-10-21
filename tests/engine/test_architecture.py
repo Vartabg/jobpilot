@@ -67,6 +67,10 @@ def test_domain_is_pure(path):
 @pytest.mark.parametrize("path", modules("service"), ids=lambda p: p.name)
 def test_services_depend_only_on_domain_and_ports(path):
     for name in imports(path):
+        top = name.split(".")[0]
+        assert top in {"jobpilot", "__future__"} or top in sys.stdlib_module_names, (
+            f"service {path.name} imports third-party {name}; that belongs in an adapter"
+        )
         if name.startswith("jobpilot."):
             assert name.startswith(
                 ("jobpilot.engine.domain", "jobpilot.engine.ports")

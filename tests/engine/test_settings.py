@@ -87,3 +87,23 @@ def test_unknown_keys_are_kept_and_flagged_not_dropped():
 def test_a_section_that_is_not_a_table():
     with pytest.raises(SettingsError, match="rules must be a table"):
         parse_settings({"rules": ["nope"]})
+
+
+class TestFitSettings:
+    def test_rules_by_default(self):
+        from jobpilot.engine.domain import FitEngine
+
+        settings, _ = parse_settings({})
+        assert settings.fit.engine is FitEngine.RULES and settings.fit.model == ""
+
+    def test_ollama_needs_a_model(self):
+        with pytest.raises(SettingsError, match=r"fit\.model is required"):
+            parse_settings({"fit": {"engine": "ollama"}})
+        settings, _ = parse_settings(
+            {"fit": {"engine": "Ollama", "model": "qwen3:14b"}}
+        )
+        assert settings.fit.model == "qwen3:14b"
+
+    def test_unknown_engines_are_rejected(self):
+        with pytest.raises(SettingsError, match=r"fit\.engine must be one of"):
+            parse_settings({"fit": {"engine": "magic"}})

@@ -14,7 +14,7 @@ import re
 from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 import requests
 
@@ -98,7 +98,7 @@ def parse_greenhouse(payload: Any, target: BoardTarget) -> list[Posting]:
         job_id, title = str(job.get("id") or "").strip(), _text(job.get("title"))
         if not job_id or not title:
             continue
-        token, safe_id = quote(target.token, safe=""), quote(job_id, safe="")
+        token, safe_id = quote(unquote(target.token), safe=""), quote(job_id, safe="")
         url = (
             _text(job.get("absolute_url"))
             or f"https://boards.greenhouse.io/{token}/jobs/{safe_id}"
@@ -141,7 +141,7 @@ def parse_lever(payload: Any, target: BoardTarget) -> list[Posting]:
         if not job_id or not title:
             continue
         url = _text(job.get("hostedUrl")) or (
-            f"https://jobs.lever.co/{quote(target.token, safe='')}/{quote(job_id, safe='')}"
+            f"https://jobs.lever.co/{quote(unquote(target.token), safe='')}/{quote(job_id, safe='')}"
         )
         categories = (
             job.get("categories") if isinstance(job.get("categories"), dict) else {}
@@ -194,7 +194,7 @@ def parse_ashby(payload: Any, target: BoardTarget) -> list[Posting]:
         if not job_id or not title or job.get("isListed") is False:
             continue
         url = _text(job.get("jobUrl")) or (
-            f"https://jobs.ashbyhq.com/{quote(target.token, safe='')}/{quote(job_id, safe='')}"
+            f"https://jobs.ashbyhq.com/{quote(unquote(target.token), safe='')}/{quote(job_id, safe='')}"
         )
         location = _text(job.get("location"))
         secondary = (
@@ -247,7 +247,7 @@ class HttpBoards:
             return BoardResult(
                 target, error=f"{target.provider} boards aren't supported yet"
             )
-        url = BOARD_URLS[target.provider].format(quote(target.token, safe=""))
+        url = BOARD_URLS[target.provider].format(quote(unquote(target.token), safe=""))
         try:
             postings = PARSERS[target.provider](self._get_json(url), target)
         except BoardError as exc:

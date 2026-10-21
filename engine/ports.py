@@ -6,7 +6,8 @@ storage or a job source can be swapped without touching the engine's logic.
 
 from __future__ import annotations
 
-from typing import Protocol
+from collections.abc import Mapping
+from typing import Any, Protocol
 
 from jobpilot.engine.domain import (
     Assessment,
@@ -20,6 +21,7 @@ from jobpilot.engine.domain import (
     Settings,
     Status,
 )
+from jobpilot.engine.domain.fit import Fit
 
 
 class Ledger(Protocol):
@@ -75,4 +77,22 @@ class SettingsSource(Protocol):
 
     def load(self) -> tuple[Settings, list[str]]:
         """The settings plus warnings. Raises SettingsError when they can't be used."""
+        ...
+
+
+class FitChecker(Protocol):
+    """Judges how well one posting fits the candidate."""
+
+    name: str
+
+    def assess(self, posting: Posting, settings: Settings) -> Fit: ...
+
+
+class LanguageModel(Protocol):
+    """A model that answers with JSON matching a schema."""
+
+    name: str
+
+    def generate_json(self, prompt: str, *, schema: Mapping[str, Any]) -> Any:
+        """The parsed JSON answer. Raises ModelError when there's no usable answer."""
         ...

@@ -87,6 +87,8 @@ def render_settings(settings: Settings) -> str:
         f"needs_sponsorship = {_value(profile.needs_sponsorship)}",
         "# Languages you can work in. Roles that require another language are skipped.",
         *_list("languages", profile.languages),
+        '# Degrees and certifications, e.g. "BA, Philosophy, Columbia University".',
+        *_list("education", profile.education),
         "",
         *_table("profile.links", profile.links),
         "",
@@ -124,6 +126,14 @@ def render_settings(settings: Settings) -> str:
         "[rules.travel]",
         "# The most travel you'll accept, as a percent of working time.",
         f"max_percent = {_value(rules.max_travel_percent)}",
+        "",
+        "[fit]",
+        '# How fit is judged: "rules" (fast, no AI, nothing leaves this computer) or',
+        '# "ollama" (a model on this computer through Ollama; models ending in ":cloud"',
+        "# run on someone else's servers).",
+        f"engine = {_value(settings.fit.engine.value)}",
+        '# The Ollama model to use, e.g. "qwen3:14b". Required when engine = "ollama".',
+        f"model = {_value(settings.fit.model)}",
         "",
     ]
     return "\n".join(lines)
