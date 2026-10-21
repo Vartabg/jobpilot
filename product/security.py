@@ -5,7 +5,7 @@ import secrets
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
-from .config import MAX_BODY
+from .config import IMPORT_MAX_BODY, MAX_BODY
 
 
 def error(message: str, action: str, status: int):
@@ -55,7 +55,14 @@ def install_security(app, token: str):
                     "Send a bounded JSON body with Content-Length.",
                     411,
                 )
-            if int(length) > MAX_BODY:
+            limit = IMPORT_MAX_BODY if request.url.path == "/api/import" else MAX_BODY
+            if int(length) > limit:
+                if request.url.path == "/api/import":
+                    return error(
+                        "This backup is larger than 16 MiB.",
+                        "Export fewer roles, or remove very long descriptions, then try again.",
+                        413,
+                    )
                 return error(
                     "This file or request is too large.",
                     "Use text or a PDF smaller than 2 MiB.",

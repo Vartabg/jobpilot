@@ -104,6 +104,77 @@ $("export").addEventListener("click", (event) =>
     );
   }),
 );
+function resetDetail() {
+  const detail = $("job-detail");
+  detail.replaceChildren(
+    node("h2", "Make room for your next move."),
+    node(
+      "p",
+      "Save your profile, then search hiring boards or add a posting. Choose a role to see the details.",
+    ),
+  );
+}
+function installRestore() {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.id = "restore-file";
+  input.accept = "application/json,.json";
+  input.hidden = true;
+  const restore = document.createElement("button");
+  restore.type = "button";
+  restore.id = "restore";
+  restore.textContent = "Restore a backup";
+  restore.addEventListener("click", () => {
+    if (!allowLeave()) return;
+    input.click();
+  });
+  input.addEventListener("change", () => {
+    const file = input.files && input.files[0];
+    input.value = "";
+    if (!file) return;
+    if (file.size > 16 * 1024 * 1024) {
+      tell(
+        "This backup is larger than 16 MiB. Export fewer roles, or remove very long descriptions, then try again.",
+        true,
+      );
+      return;
+    }
+    if (
+      !window.confirm(
+        "This replaces the profile, jobs, and drafts on this computer with the file. Work that is only on this computer is removed.",
+      )
+    ) {
+      tell("Restore cancelled. Your saved work is unchanged.");
+      return;
+    }
+    busy(restore, "Restoring your backup…", async () => {
+      let payload;
+      try {
+        payload = JSON.parse(await file.text());
+      } catch {
+        throw new Error(
+          "That file is not a JobPilot backup. Choose the JSON file from Export my data.",
+        );
+      }
+      const result = await api("import", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      state.profile = await api("profile");
+      await state.reload();
+      if (!state.jobs.some((job) => job.id === state.selected)) {
+        state.selected = null;
+        resetDetail();
+      }
+      if (state.view === "profile") showProfile(state.profile);
+      if (state.view === "helper") await showHelper();
+      await view("jobs", false);
+      tell(result.message);
+    });
+  });
+  $("export").after(restore, input);
+}
+installRestore();
 $("quit").addEventListener("click", (event) =>
   busy(event.target, "Closing JobPilot…", async () => {
     if (!allowLeave()) return;

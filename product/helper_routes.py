@@ -3,9 +3,16 @@
 import json
 from urllib.parse import quote
 
+from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
+from pydantic import ValidationError
 
 from .config import STATIC
+from .models import WorkspaceSnapshot
+
+
+def _amount(count: int, singular: str, plural: str) -> str:
+    return f"{count} {singular if count == 1 else plural}"
 
 
 def install_helpers(app, store, on_quit):
@@ -17,6 +24,38 @@ def install_helpers(app, store, on_quit):
                 "Content-Disposition": 'attachment; filename="jobpilot-data.json"'
             },
         )
+
+    @app.post("/api/import")
+    async def import_workspace(request: Request):
+        try:
+            payload = await request.json()
+        except json.JSONDecodeError:
+            raise HTTPException(
+                400,
+                "That file is not a JobPilot backup. Choose the JSON file from Export my data.",
+            ) from None
+        try:
+            snapshot = WorkspaceSnapshot.model_validate(payload)
+        except ValidationError:
+            raise HTTPException(
+                422,
+                "This file is not a complete JobPilot backup. Use a file from Export my data.",
+            ) from None
+        try:
+            store.replace(snapshot)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from None
+        return {
+            "jobs": len(snapshot.jobs),
+            "drafts": len(snapshot.drafts),
+            "message": (
+                "Backup restored. "
+                + _amount(len(snapshot.jobs), "role", "roles")
+                + " and "
+                + _amount(len(snapshot.drafts), "draft", "drafts")
+                + " are now on this computer."
+            ),
+        }
 
     @app.get("/api/fill")
     def fill():

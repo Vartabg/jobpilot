@@ -5,7 +5,7 @@ import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 
-from .models import Draft, JobUpdate, Listing, Profile, TrackedJob
+from .models import Draft, JobUpdate, Listing, Profile, TrackedJob, WorkspaceSnapshot
 
 
 class Store:
@@ -117,3 +117,44 @@ class Store:
             "jobs": [j.model_dump(exclude={"fit"}) for j in self.jobs()],
             "drafts": drafts,
         }
+
+    def replace(self, snapshot: WorkspaceSnapshot) -> None:
+        """Replace profile, jobs, and drafts. Invalid snapshots change nothing."""
+        ids = [job.id for job in snapshot.jobs]
+        if len(ids) != len(set(ids)):
+            raise ValueError("Each saved role in the backup needs its own id.")
+        draft_ids = [draft.job_id for draft in snapshot.drafts]
+        if len(draft_ids) != len(set(draft_ids)):
+            raise ValueError("Each role in the backup can have only one draft.")
+        if any(draft.job_id not in set(ids) for draft in snapshot.drafts):
+            raise ValueError(
+                "A draft in this backup refers to a role that is not included. Export again from JobPilot."
+            )
+        with self.connect() as db:
+            db.execute("DELETE FROM drafts")
+            db.execute("DELETE FROM jobs")
+            db.execute("DELETE FROM profile")
+            db.execute(
+                "INSERT INTO profile VALUES (1, ?)",
+                (snapshot.profile.model_dump_json(),),
+            )
+            # Export lists newest first. Insert oldest first so that order returns.
+            for job in reversed(snapshot.jobs):
+                listing = Listing.model_validate(
+                    job.model_dump(exclude={"status", "note", "follow_up", "fit"})
+                )
+                db.execute(
+                    "INSERT INTO jobs (id, payload, status, note, follow_up) VALUES (?, ?, ?, ?, ?)",
+                    (
+                        job.id,
+                        listing.model_dump_json(),
+                        job.status,
+                        job.note,
+                        job.follow_up,
+                    ),
+                )
+            for draft in snapshot.drafts:
+                db.execute(
+                    "INSERT INTO drafts VALUES (?, ?)",
+                    (draft.job_id, draft.model_dump_json()),
+                )

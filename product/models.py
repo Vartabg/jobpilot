@@ -141,3 +141,12 @@ class ManualJob(Model):
 
 class DraftEdit(Model):
     text: str = Field(min_length=1, max_length=100000)
+
+
+class WorkspaceSnapshot(Model):
+    """A portable export. Restoring one replaces the whole workspace."""
+
+    schema_version: Literal["jobpilot.product/v1"]
+    profile: Profile
+    jobs: list[TrackedJob] = Field(default_factory=list, max_length=500)
+    drafts: list[Draft] = Field(default_factory=list, max_length=500)

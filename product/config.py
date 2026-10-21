@@ -6,6 +6,7 @@ from pathlib import Path
 
 STATIC = Path(__file__).parent / "static"
 MAX_BODY = 2 * 1024 * 1024
+IMPORT_MAX_BODY = 16 * 1024 * 1024
 
 
 def data_path() -> Path:

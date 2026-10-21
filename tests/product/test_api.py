@@ -58,6 +58,13 @@ def test_profile_import_and_auth(client):
     for path in ["profile", "jobs", "export", "fill"]:
         assert client.get("/api/" + path).status_code == 401
     assert client.post("/api/quit").status_code == 401
+    assert (
+        client.post(
+            "/api/import",
+            json={"schema_version": "jobpilot.product/v1", "profile": {}},
+        ).status_code
+        == 401
+    )
     token = client.app.state.token
     assert (
         client.get(

@@ -208,6 +208,59 @@ try {
   await expect(fixture.locator("input[type=radio]:checked")).toHaveCount(0);
   assert.equal(await fixture.evaluate(() => window.__submitCount), 0);
   assert.ok((await fixture.evaluate(() => window.__inputEvents)) > 0);
+  const backup = {
+    schema_version: "jobpilot.product/v1",
+    profile: {
+      full_name: "Alex Example",
+      resume_text: "I helped a volunteer group.",
+    },
+    jobs: [
+      {
+        id: "restored-role",
+        company: "Northwind",
+        title: "Support",
+        url: "https://example.test/jobs/restored",
+        provider: "manual",
+        status: "interview",
+        note: "They wrote back.",
+        follow_up: "2026-10-28",
+      },
+    ],
+    drafts: [{ job_id: "restored-role", text: "Draft from the backup." }],
+  };
+  const file = {
+    name: "jobpilot-data.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify(backup)),
+  };
+  await page.getByRole("button", { name: /Find work 01/ }).click();
+  await page.getByRole("button", { name: "Restore a backup" }).focus();
+  await expect(
+    page.getByRole("button", { name: "Restore a backup" }),
+  ).toBeFocused();
+  page.once("dialog", (dialog) => dialog.dismiss());
+  let chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "Restore a backup" }).click();
+  await (await chooser).setFiles(file);
+  await expect(page.getByRole("status")).toContainText("Restore cancelled");
+  await expect(
+    page.getByRole("button", { name: /Example Co Support technician/ }),
+  ).toBeVisible();
+  page.once("dialog", (dialog) => {
+    assert.match(dialog.message(), /replaces the profile/);
+    return dialog.accept();
+  });
+  chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "Restore a backup" }).click();
+  await (await chooser).setFiles(file);
+  await expect(page.getByRole("status")).toContainText(
+    "Backup restored. 1 role and 1 draft are now on this computer.",
+  );
+  await expect(
+    page.getByRole("button", { name: /Northwind Support/ }),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: /Example Co/ })).toHaveCount(0);
+  await a11y("Restored workspace");
   await fixture.evaluate(
     (code) => (0, eval)(code),
     decodeURIComponent(bookmark.slice("javascript:".length)),
@@ -218,7 +271,7 @@ try {
     fullPage: true,
   });
   console.log(
-    "PASS: product profile, search, source failure, draft/edit/export, persistence, tracking, accessibility/reflow, privacy, and safe basic autofill.",
+    "PASS: product profile, search, source failure, draft/edit/export, persistence, tracking, backup restore, accessibility/reflow, privacy, and safe basic autofill.",
   );
 } finally {
   await browser.close();
