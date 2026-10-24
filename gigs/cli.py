@@ -243,6 +243,9 @@ def now(
         "--push",
         help="Also push a phone notification (off by default — you pull when ready)",
     ),
+    crib: bool = typer.Option(
+        False, "--crib", help="Also write a copy/paste crib sheet to iCloud"
+    ),
     contract_first: bool | None = typer.Option(
         None,
         "--contract-first/--no-contract-first",
@@ -254,9 +257,10 @@ def now(
         help="Override preferences.search.drop_rigid_schedule",
     ),
 ):
-    """On-demand pull: scan → rank by your criteria → update pipeline + crib.
+    """On-demand pull: scan → rank by your criteria → update pipeline.
 
     Does NOT wait for 8am/5pm. Phone push is off unless you pass --push.
+    Crib sheets are off unless you pass --crib.
     Prints the active criteria + resume map first so you see what gate ran.
     """
     from jobpilot.gigs.core import preferences as prefs
@@ -289,6 +293,7 @@ def now(
             contract_first=cf,
             drop_rigid_schedule=ar,
             push=push,
+            crib=crib,
         )
     except Exception as exc:
         short = f"{type(exc).__name__}: {exc}"
@@ -320,6 +325,9 @@ def digest(
         "--push/--no-push",
         help="Phone push (default on for legacy digest; use `gigs now` for on-demand)",
     ),
+    crib: bool = typer.Option(
+        False, "--crib", help="Also write a copy/paste crib sheet to iCloud"
+    ),
 ):
     """Legacy scheduled path: scan → rank → write pipeline → optional push.
 
@@ -346,6 +354,7 @@ def digest(
             contract_first=cf,
             drop_rigid_schedule=ar,
             push=push,
+            crib=crib,
         )
     except Exception as exc:
         short = f"{type(exc).__name__}: {exc}"
@@ -365,6 +374,7 @@ def _run_digest(
     contract_first: bool = False,
     drop_rigid_schedule: bool = False,
     push: bool = True,
+    crib: bool = False,
 ) -> None:
     migrate_applied_into_pipeline()
     hygiene = pipeline.migrate_pipeline_hygiene()
@@ -477,12 +487,11 @@ def _run_digest(
         mark_seen(sorted({m for g in ranked for m in dupe_groups.get(g.id, [g.id])}))
 
     if not added:
-        # Still refresh crib from empty list so the criteria header is current
-        # when the user opens iCloud after a dry pull.
-        if not push:
+        # A sheet is an explicit export, independent of phone notifications.
+        if crib:
             from jobpilot.gigs.core.crib import write_crib_sheet
 
-            write_crib_sheet([])
+            console.print(f"  Crib: {write_crib_sheet([])}")
         console.print("[yellow]No new gigs this pull. Pipeline refreshed.[/yellow]")
         run_state.record_digest(
             ok=True,
@@ -494,7 +503,9 @@ def _run_digest(
         )
         return
 
-    result = dispatch(added, updated, source_warning=source_warning, push=push)
+    result = dispatch(
+        added, updated, source_warning=source_warning, push=push, crib=crib
+    )
     pushed = result["pushed"]
     if result.get("followups"):
         console.print(f"  Follow-ups due: {result['followups']}")
@@ -506,7 +517,8 @@ def _run_digest(
         console.print(f"  Push: {'sent' if pushed else 'skipped (NTFY_TOPIC unset)'}")
     else:
         console.print("  Push: off (on-demand — pass --push when you want the phone)")
-    console.print(f"  Crib: {result.get('crib_path', '—')}")
+    if result.get("crib_path"):
+        console.print(f"  Crib: {result['crib_path']}")
     console.print(f"  Total unique seen: {seen_count()}")
 
     run_state.record_digest(

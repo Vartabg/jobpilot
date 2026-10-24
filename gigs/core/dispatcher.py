@@ -284,11 +284,13 @@ def dispatch(
     *,
     source_warning: str = "",
     push: bool = True,
+    crib: bool = False,
 ) -> dict:
     """Write artifacts + optionally push. The pipeline has already been written
     by the caller (cli.digest / cli.now) so this just refreshes the
-    supplementary files (digest archive, latest_leads, crib) and, when
+    supplementary files (digest archive, latest_leads) and, when
     ``push`` is True, triggers the ntfy notification.
+    Crib-sheet export requires ``crib=True``; pushes never enable it implicitly.
 
     On-demand mode uses ``push=False`` so the user controls when the phone
     buzzes; scheduled mode (if re-enabled) can still push.
@@ -303,7 +305,7 @@ def dispatch(
     followups = pipeline.followups_due(pipeline_rows) if pipeline_rows else []
     md_path = write_markdown(gigs, source_warning=source_warning, followups=followups)
     save_latest_leads(gigs)
-    crib_path = write_crib_sheet(gigs)
+    crib_path = write_crib_sheet(gigs) if crib else None
     pushed = False
     if push:
         pushed = push_ntfy(
@@ -315,6 +317,6 @@ def dispatch(
         "gigs": len(gigs),
         "followups": len(followups),
         "digest_path": str(md_path),
-        "crib_path": str(crib_path),
+        "crib_path": str(crib_path) if crib_path is not None else None,
         "pushed": pushed,
     }
