@@ -33,6 +33,7 @@ from jobpilot.engine.domain.fit import FIT, Fit
 from jobpilot.engine.domain.settings import FitEngine
 from jobpilot.engine.ports import Boards, FitChecker
 from jobpilot.engine.service.fit import ACTIONABLE, FitReport, assess_fits
+from jobpilot.engine.service.ranking import rank_opportunities
 from jobpilot.engine.service.refresh import RefreshReport, refresh
 
 app = typer.Typer(
@@ -566,3 +567,47 @@ def show_fits(
             fit.biggest_gap,
         )
     console.print(table)
+
+
+@app.command("ranked")
+def show_ranked(
+    limit: Annotated[int, typer.Option(help="Most rows to show.")] = 20,
+    ledger: Annotated[
+        Path | None, typer.Option(help="Ledger file (default: data/opportunities.db).")
+    ] = None,
+) -> None:
+    """Open roles that passed your rules, ranked by fit, best first."""
+    path = ledger or DATA_DIR / LEDGER_FILENAME
+    if not path.exists():
+        console.print("No ledger yet. Run `jobpilot ledger refresh` first.")
+        raise typer.Exit(1)
+    with SQLiteLedger(path) as store:
+        ranked = rank_opportunities(store)
+        places = {}
+        for row in ranked:
+            posting = store.posting(row.opportunity.id)
+            places[row.opportunity.id] = (
+                " / ".join(posting.all_locations[:2])
+                if posting
+                else row.opportunity.location
+            )
+    table = Table(title=f"Ranked roles ({len(ranked)} passed your rules)")
+    for column in ("#", "Score", "Fit", "Company", "Role", "Where", "Why"):
+        table.add_column(column, overflow="fold")
+    for index, row in enumerate(ranked[:limit], start=1):
+        table.add_row(
+            str(index),
+            f"{row.score:.0f}" if row.judged else "—",
+            row.fit.tier.value.replace("_", " ") if row.fit else "not judged",
+            row.opportunity.company,
+            row.opportunity.title,
+            places[row.opportunity.id],
+            "; ".join(row.reasons),
+        )
+    console.print(table)
+    unjudged = sum(1 for row in ranked if not row.judged)
+    if unjudged:
+        console.print(
+            f"{unjudged} role{'s' if unjudged > 1 else ''} not judged yet — "
+            "run `jobpilot ledger fit` to rank them by fit too."
+        )

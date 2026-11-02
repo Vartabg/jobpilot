@@ -298,6 +298,20 @@ def test_fit_then_fits(fitted):
     assert "Forward Deployed Engineer" in shown.output
 
 
+def test_ranked_after_fit(fitted):
+    runner, _, ledger, settings, _ = fitted
+    result = runner.invoke(
+        ledger_cli.app, ["fit", "--ledger", str(ledger), "--settings", str(settings)]
+    )
+    assert result.exit_code == 0, result.output
+
+    shown = runner.invoke(ledger_cli.app, ["ranked", "--ledger", str(ledger)])
+    assert shown.exit_code == 0, shown.output
+    assert "Ranked roles" in shown.output
+    assert "Forward Deployed Engineer" in shown.output
+    assert "Senior Engineer" not in shown.output  # failed the rules, never ranked
+
+
 def test_cloud_models_need_explicit_permission(fitted):
     runner, _, ledger, settings, chosen = fitted
     result = runner.invoke(
