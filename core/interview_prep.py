@@ -29,6 +29,7 @@ from typing import cast
 
 from jobpilot.core import llm_client
 from jobpilot.core.bro_client import is_bro_running, query_rag
+from jobpilot.core.config import DATA_DIR
 from jobpilot.core.job_scorer import JobFitResult, JobScorer
 from jobpilot.core.logger import get_logger
 from jobpilot.core.profile_store import ProfileStore, UserProfile, get_profile_store
@@ -36,7 +37,7 @@ from jobpilot.core.resume_tailor import ResumeTailor
 
 log = get_logger(__name__)
 
-OUTPUT_DIR = Path(__file__).parent.parent / "data" / "reports"
+OUTPUT_DIR = DATA_DIR / "reports"
 LATEST_PREP_FILENAME = "latest_prep.json"
 
 # Behavioral themes almost every interview probes. Kept fixed and template-only

@@ -31,6 +31,7 @@ from jobpilot.core.application_tracker import get_application_tracker
 from jobpilot.core.autonomy import AutonomyMode, get_autonomy_config, set_autonomy_mode
 from jobpilot.core.bro_client import get_health
 from jobpilot.core.cdp_bridge import connect_to_chrome
+from jobpilot.core.config import DATA_DIR
 from jobpilot.core.doctor import run_doctor
 from jobpilot.core.engine import ApplicationEngine
 from jobpilot.core.events import (
@@ -65,7 +66,7 @@ app = typer.Typer(
 )
 console = Console()
 
-CLAUDE_VETTED_TARGETS_DIR = Path(__file__).parent / "data" / "reports"
+CLAUDE_VETTED_TARGETS_DIR = DATA_DIR / "reports"
 CLAUDE_VETTED_TARGETS_GLOB = "claude-vetted-targets-*.json"
 # Explicit override (tests patch this). When None, the newest matching report
 # in CLAUDE_VETTED_TARGETS_DIR is used. When no file exists at all, the
@@ -1518,7 +1519,7 @@ def queue(
     # JSON mode: emit raw queue (respecting --fresh and --limit) and exit.
     # Designed for cross-agent / scripting use without dashboard/UI side effects.
     if as_json:
-        if refresh or not (Path(__file__).parent / "data" / "queue.json").exists():
+        if refresh or not (DATA_DIR / "queue.json").exists():
             jobs = build_queue(limit=limit)
             save_queue(jobs)
         else:
@@ -1528,7 +1529,7 @@ def queue(
         console.print_json(data=[asdict(j) for j in view])
         return
 
-    if not refresh and (Path(__file__).parent / "data" / "queue.json").exists():
+    if not refresh and (DATA_DIR / "queue.json").exists():
         jobs = load_queue()
         queued = [j for j in jobs if j.status == "queued"]
         console.print(
@@ -1804,6 +1805,24 @@ app.add_typer(
     gigs_app,
     name="gigs",
     help="Freelance-gig radar: scan sources, score, digest, push",
+)
+
+# The one opportunity ledger (engine/), reached through the legacy bridge until
+# the service layer replaces these commands (docs/plans/2026-09-25-one-core.md).
+from jobpilot.bridge.cli import app as ledger_app
+
+app.add_typer(
+    ledger_app,
+    name="ledger",
+    help="The one opportunity ledger: import legacy data and inspect it",
+)
+
+from jobpilot.bridge.settings_cli import app as settings_app
+
+app.add_typer(
+    settings_app,
+    name="settings",
+    help="Your settings file (rules, targets, profile): create it once, then check it",
 )
 
 
@@ -2213,7 +2232,7 @@ def psyche(
     if not sample:
         return
 
-    queue_path = Path(__file__).parent / "data" / "queue.json"
+    queue_path = DATA_DIR / "queue.json"
     if not queue_path.exists():
         console.print(
             "[yellow]No queue.json yet — run `jobpilot queue --refresh` first to see scoring in action.[/yellow]"

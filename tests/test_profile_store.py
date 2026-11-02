@@ -78,3 +78,38 @@ class TestCustomAnswers:
     def test_custom_answers_loaded(self, store: ProfileStore):
         profile = store.load()
         assert profile.custom_answers.get("clearance") == "No"
+
+
+def test_save_keeps_fields_the_model_does_not_declare(tmp_path):
+    (tmp_path / "profile.json").write_text(
+        json.dumps(
+            {
+                "first_name": "Ada",
+                "skills": ["Python"],
+                "target_titles": ["Solutions Engineer"],
+                "domain_experience": {"field service": 4},
+                "future_key": {"nested": True},
+            }
+        )
+    )
+    store = ProfileStore(data_dir=tmp_path)
+    profile = store.load()
+    profile.first_name = "Ada L."
+    store.save(profile)
+
+    saved = json.loads((tmp_path / "profile.json").read_text())
+    assert saved["first_name"] == "Ada L."
+    assert saved["skills"] == ["Python"]
+    assert saved["target_titles"] == ["Solutions Engineer"]
+    assert saved["domain_experience"] == {"field service": 4}
+    assert saved["future_key"] == {"nested": True}
+
+
+def test_unreadable_profile_is_backed_up_before_overwrite(tmp_path):
+    (tmp_path / "profile.json").write_text("{broken")
+    store = ProfileStore(data_dir=tmp_path)
+    store.load()
+    store.update(first_name="Ada")
+
+    assert (tmp_path / "profile.json.bak").read_text() == "{broken"
+    assert json.loads((tmp_path / "profile.json").read_text())["first_name"] == "Ada"

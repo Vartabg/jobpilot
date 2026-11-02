@@ -19,7 +19,14 @@ except ImportError:
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
-DATA_DIR = Path(__file__).parent.parent / "data"
+# Every piece of JobPilot state (profile, tracker, queue, settings, logs,
+# reports, resumes) lives under DATA_DIR. Set JOBPILOT_DATA_DIR to relocate it;
+# the test suite points it at a throwaway directory so tests can never touch a
+# user's real data. Modules must derive their paths from DATA_DIR, never from
+# their own file location.
+DATA_DIR = Path(
+    os.environ.get("JOBPILOT_DATA_DIR") or Path(__file__).parent.parent / "data"
+).expanduser()
 SESSION_FILE = DATA_DIR / "session.json"
 SETTINGS_FILE = DATA_DIR / "settings.json"
 CHROME_PROFILE = Path(

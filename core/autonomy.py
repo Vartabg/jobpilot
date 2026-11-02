@@ -11,6 +11,7 @@ import json
 from dataclasses import dataclass
 from enum import StrEnum
 
+from jobpilot.core.atomic_io import atomic_write_text
 from jobpilot.core.config import DATA_DIR, SETTINGS_FILE
 
 
@@ -48,15 +49,33 @@ class AutonomyConfig:
         return not (is_final_step and self.never_auto_submit)
 
     def save(self) -> None:
-        """Persist settings to disk."""
+        """Persist the autonomy keys without disturbing the rest of settings.json.
+
+        settings.json is shared (resume lanes live there too), so this merges
+        into the existing object instead of replacing it. An unreadable file
+        is copied to settings.json.bak before being rewritten, never discarded.
+        """
         DATA_DIR.mkdir(parents=True, exist_ok=True)
-        data = {
-            "mode": self.mode.value,
-            "auto_fill_threshold": self.auto_fill_threshold,
-            "auto_advance_delay_ms": self.auto_advance_delay_ms,
-            "never_auto_submit": self.never_auto_submit,
-        }
-        SETTINGS_FILE.write_text(json.dumps(data, indent=2))
+        data: dict = {}
+        if SETTINGS_FILE.exists():
+            raw = SETTINGS_FILE.read_text()
+            try:
+                loaded = json.loads(raw)
+            except ValueError:
+                loaded = None
+            if isinstance(loaded, dict):
+                data = loaded
+            else:
+                atomic_write_text(SETTINGS_FILE.with_name("settings.json.bak"), raw)
+        data.update(
+            {
+                "mode": self.mode.value,
+                "auto_fill_threshold": self.auto_fill_threshold,
+                "auto_advance_delay_ms": self.auto_advance_delay_ms,
+                "never_auto_submit": self.never_auto_submit,
+            }
+        )
+        atomic_write_text(SETTINGS_FILE, json.dumps(data, indent=2))
 
     @classmethod
     def load(cls) -> "AutonomyConfig":

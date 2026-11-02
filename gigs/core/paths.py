@@ -29,5 +29,9 @@ def data_dir() -> Path:
     """Repo-local state dir (jobpilot's gitignored data/gigs). Overridable so
     smoke tests / sandboxed runs can't touch real state (seen.json, hygiene
     marker, latest_leads.json, ...)."""
-    default = Path(__file__).parent.parent.parent / "data" / "gigs"
+    root = (
+        os.environ.get("JOBPILOT_DATA_DIR")
+        or Path(__file__).parent.parent.parent / "data"
+    )
+    default = Path(root).expanduser() / "gigs"
     return Path(os.environ.get("GIGPILOT_DATA_DIR", default))
