@@ -1,4 +1,7 @@
-"""On-demand criteria report + dispatch push control."""
+"""On-demand criteria report + independent push and crib controls."""
+
+import pytest
+from typer.testing import CliRunner
 
 from jobpilot.gigs.core import preferences
 from jobpilot.gigs.core.dispatcher import dispatch
@@ -77,10 +80,65 @@ def test_dispatch_skips_ntfy_when_push_false(monkeypatch, tmp_path) -> None:
     result = dispatch([g], push=False)
     assert result["pushed"] is False
     assert calls == []
+    assert result["crib_path"] is None
+    assert not (tmp_path / "c.md").exists()
 
     result2 = dispatch([g], push=True)
     assert result2["pushed"] is True
     assert calls == [True]
+    assert result2["crib_path"] is None
+    assert not (tmp_path / "c.md").exists()
+
+    result3 = dispatch([g], push=False, crib=True)
+    assert result3["crib_path"] == str(tmp_path / "c.md")
+    assert (tmp_path / "c.md").read_text() == "c"
+    assert calls == [True]
+
+
+@pytest.mark.parametrize("command", ["now", "digest"])
+@pytest.mark.parametrize("request_crib", [False, True])
+def test_cli_requires_explicit_crib_request(monkeypatch, command, request_crib):
+    from jobpilot.gigs import cli
+
+    calls = []
+    monkeypatch.setattr(cli, "_run_digest", lambda **kw: calls.append(kw))
+    args = [command] + (["--crib"] if request_crib else [])
+    result = CliRunner().invoke(cli.app, args)
+    assert result.exit_code == 0, result.output
+    assert calls[0]["crib"] is request_crib
+
+
+@pytest.mark.parametrize("request_crib", [False, True])
+def test_empty_pull_only_writes_crib_when_requested(monkeypatch, request_crib):
+    from types import SimpleNamespace
+
+    from jobpilot.gigs import cli
+
+    monkeypatch.setattr(cli, "migrate_applied_into_pipeline", lambda: None)
+    monkeypatch.setattr(cli, "_collect_with_status", lambda: [])
+    monkeypatch.setattr(cli, "filter_and_rank", lambda *a, **kw: [])
+    monkeypatch.setattr(cli, "enrich_wwr", lambda gigs: gigs)
+    monkeypatch.setattr(cli, "sync_reminders_from_pipeline", lambda rows: 0)
+    monkeypatch.setattr(cli.feedback, "sync_from_pipeline", lambda rows: 0)
+    monkeypatch.setattr(cli.pipeline, "parse", lambda: [])
+    monkeypatch.setattr(cli.pipeline, "load_status_snapshot", lambda: {})
+    monkeypatch.setattr(cli.pipeline, "save_status_snapshot", lambda rows: None)
+    monkeypatch.setattr(
+        cli.pipeline, "migrate_pipeline_hygiene",
+        lambda: {"collapsed": 0, "ids_regenerated": 0},
+    )
+    monkeypatch.setattr(cli.pipeline, "archive_stale_new", lambda: {})
+    monkeypatch.setattr(
+        cli.pipeline, "write", lambda *a, **kw: SimpleNamespace(refused=False)
+    )
+    monkeypatch.setattr(cli.run_state, "record_digest", lambda **kw: None)
+    calls = []
+    monkeypatch.setattr(
+        "jobpilot.gigs.core.crib.write_crib_sheet",
+        lambda gigs: calls.append(gigs) or "crib_sheet.md",
+    )
+    cli._run_digest(min_score=60, top_n=12, push=False, crib=request_crib)
+    assert calls == ([[]] if request_crib else [])
 
 
 def test_crib_includes_criteria_block(tmp_path, monkeypatch) -> None:

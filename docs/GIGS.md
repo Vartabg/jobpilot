@@ -43,8 +43,9 @@ All gigs commands live under `jobpilot gigs`:
 
 ```bash
 ./jobpilot gigs criteria          # see pay floor, geo, titles, resumes
-./jobpilot gigs now               # scan + rank + pipeline + crib (no buzz)
+./jobpilot gigs now               # scan + rank + pipeline (no buzz or crib sheet)
 ./jobpilot gigs now --push        # when you want the phone notification
+./jobpilot gigs now --crib        # explicitly export a copy/paste crib sheet
 ```
 
 ## Your profile
@@ -69,7 +70,7 @@ See [gigs-scoring.example.json](gigs-scoring.example.json) for a fuller example.
 
 - **Digests** — `Gigpilot_Digests/` in your iCloud Drive (so you can read them on your phone).
 - **Pipeline** — `GigPilot/pipeline.md` in iCloud Drive: one table row per gig, with a Status column you edit.
-- **Crib sheet** — `Gigpilot_Away/crib_sheet.md` in iCloud Drive: refreshed each digest with standard ATS form answers for copy/paste while applying from your phone.
+- **Optional crib sheet** — `Gigpilot_Away/crib_sheet.md` in iCloud Drive: written only when `gigs now --crib` or `gigs digest --crib` is requested. Ordinary searches and scheduled digests leave existing sheets untouched. Phone notifications remain independently controlled by `--push`.
 - **State** — `data/gigs/` inside the repo (gitignored): `seen.json`, `sources_health.json`, `last_run.json`, `feedback.jsonl`, `preferences.json`.
 - **Logs** — `~/Library/Logs/jobpilot-gigs/`.
 
