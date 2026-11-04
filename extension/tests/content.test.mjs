@@ -256,3 +256,53 @@ test("the real action callbacks fill a modern Greenhouse form and independently 
     } finally {globalThis.chrome=previous;}
   });
 });
+
+test("security-code fills segmented Greenhouse verification inputs and trims pasted email lines", async () => {
+  await fixture(`<form id="application-form">
+    <fieldset><legend>Security code *</legend>
+      <input id="security-input-0" maxlength="1" required>
+      <input id="security-input-1" maxlength="1" required>
+      <input id="security-input-2" maxlength="1" required>
+      <input id="security-input-3" maxlength="1" required>
+      <input id="security-input-4" maxlength="1" required>
+      <input id="security-input-5" maxlength="1" required>
+      <input id="security-input-6" maxlength="1" required>
+      <input id="security-input-7" maxlength="1" required>
+    </fieldset>
+  </form>`, async page => {
+    const inspectBefore = await execute(page, "inspect");
+    assert.equal(inspectBefore.required.length, 1);
+    assert.equal(inspectBefore.required[0].label, "Security code");
+    assert.equal(inspectBefore.required[0].type, "security-code");
+
+    const filled = await execute(page, "security-code", {
+      securityCode: "  Copy and paste this code into the security code field on your application: jebUzw3M \n",
+    });
+    assert.equal(filled.status, "complete");
+    assert.equal(filled.securityCode.status, "filled");
+    assert.equal(filled.securityCode.mode, "segmented");
+    assert.equal(filled.required.length, 0);
+    const values = await Promise.all(
+      Array.from({ length: 8 }, (_, index) => page.locator(`#security-input-${index}`).inputValue()),
+    );
+    assert.equal(values.join(""), "jebUzw3M");
+  });
+});
+
+test("security-code fills single legacy Greenhouse verification input and reports invalid or missing targets", async () => {
+  await fixture(`<form id="application-form">
+    <label for="security_code">Security code *</label>
+    <input id="security_code" name="security_code" required>
+  </form>`, async page => {
+    const bad = await execute(page, "security-code", { securityCode: "bad!" });
+    assert.equal(bad.status, "partial");
+    assert.equal(bad.securityCode.status, "invalid-code");
+    assert.equal(await page.locator("#security_code").inputValue(), "");
+
+    const good = await execute(page, "security-code", { securityCode: " 68BwW2Qu " });
+    assert.equal(good.status, "complete");
+    assert.equal(good.securityCode.status, "filled");
+    assert.equal(good.securityCode.mode, "single");
+    assert.equal(await page.locator("#security_code").inputValue(), "68BwW2Qu");
+  });
+});

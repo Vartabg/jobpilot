@@ -117,10 +117,11 @@ function setBusy(busy) {
   state.busy = busy;
   document.body.setAttribute('aria-busy', String(busy));
   for (const button of [
-    $('#capture-job'), $('#inspect-form'), $('#fill-details'), $('#attach-resume'),
+    $('#capture-job'), $('#inspect-form'), $('#fill-details'), $('#attach-resume'), $('#fill-security-code'),
     $('#save-started'), $('#save-submitted'), $('#save-profile'), $('#export-data'),
     $('#confirm-import'), $('#refresh-applications'),
-  ]) button.disabled = busy;
+  ]) if (button) button.disabled = busy;
+  $('#security-code-input').disabled = busy;
   $('#resume-upload').disabled = busy;
   $('#import-data').disabled = busy;
   for (const control of $$('#application-list select, #resume-library button')) control.disabled = busy;
@@ -427,7 +428,10 @@ function renderReport() {
   const incomplete = interrupted || report.status === 'partial' || groups.failed.length > 0
     || frames.some(frame => ['partial', 'interrupted'].includes(frame.status));
   const action = report.uiAction || frames[0]?.action || 'inspect';
-  $('#report-heading').textContent = action === 'resume' ? 'Résumé result' : action === 'details' ? 'Autofill results' : 'Field inspection';
+  $('#report-heading').textContent = action === 'resume' ? 'Résumé result'
+    : action === 'details' ? 'Autofill results'
+    : action === 'security-code' ? 'Security code result'
+    : 'Field inspection';
   $('#report-context').textContent = [hostOf(report.pageUrl || frames[0]?.pageUrl), readableTime(report.checkedAt)].filter(Boolean).join(' · ');
   let summary;
   if (report.status === 'running') {
@@ -439,6 +443,11 @@ function renderReport() {
         : frames.length ? 'No empty visible required fields were detected.' : 'No form results were returned.';
   } else if (action === 'details') {
     summary = `${incomplete ? interrupted ? 'Autofill interrupted. ' : 'Autofill needs attention. ' : ''}${groups.filled.length} ${groups.filled.length === 1 ? 'field' : 'fields'} confirmed filled · ${groups.skipped.length} skipped · ${groups.failed.length} failed.`;
+  } else if (action === 'security-code') {
+    summary = groups.filled.length
+      ? '1 security code challenge filled on the page.'
+      : incomplete ? 'Security code action needs attention. Review the message below.'
+        : 'No security code field was filled on this page.';
   } else {
     summary = 'Review the résumé result below and the attachment shown on the application page.';
   }
@@ -460,6 +469,13 @@ function renderReport() {
       });
       upload.textContent = lines.join('\n');
       if (resumeResults.every(item => item.status === 'accepted')) upload.classList.add('good');
+    }
+  } else if (action === 'security-code') {
+    const codeResults = frames.map(frame => frame.securityCode).filter(item => item && typeof item === 'object');
+    if (codeResults.length) {
+      upload.hidden = false;
+      upload.textContent = codeResults.map(item => item.message || '').filter(Boolean).join('\n');
+      if (codeResults.every(item => item.status === 'filled')) upload.classList.add('good');
     }
   }
   const container = $('#report-details');
@@ -484,6 +500,11 @@ async function runAction(action) {
     if (action === 'resume' && (!resume?.dataUrl || resume.metadata?.missingFile)) {
       throw new Error('Choose an available résumé PDF in Profile first.');
     }
+    const securityCode = action === 'security-code' ? $('#security-code-input').value : '';
+    if (action === 'security-code' && !securityCode.trim()) {
+      $('#security-code-input').focus();
+      throw new Error('Enter the 8-character security code from your Greenhouse email first.');
+    }
     const checkedAt = new Date().toISOString();
     state.report = {pageUrl: state.job.url, frames: [], status: 'running', checkedAt, uiAction: action};
     renderReport();
@@ -495,6 +516,7 @@ async function runAction(action) {
     try {
       report = await runCurrentAction(action, state.profile, resume, {
         expectedUrl: state.job.url,
+        securityCode,
         onProgress: async progress => {
           state.report = {...progress, checkedAt, uiAction: action};
           renderReport();
@@ -510,9 +532,12 @@ async function runAction(action) {
     state.report = { ...report, checkedAt: new Date().toISOString(), uiAction: action };
     renderReport(); await persistUi();
     const incomplete = ['partial', 'interrupted'].includes(report.status);
-    showNotice(incomplete ? 'The action needs attention. Review the results, inspect the current page, and retry to continue.'
+    const securityStatus = report.frames?.find(frame => frame?.securityCode)?.securityCode?.status;
+    const needsAttention = incomplete || (action === 'security-code' && securityStatus !== 'filled');
+    showNotice(needsAttention ? 'The action needs attention. Review the results, inspect the current page, and retry to continue.'
       : action === 'inspect' ? 'Inspection finished. Review the fields listed below.'
       : action === 'resume' ? 'Attachment action finished. Review its result and the application page.'
+      : action === 'security-code' ? 'Security code filled. Review the page and submit your application.'
         : 'Autofill finished. Review the exact results below.', 'info');
     $('#report-card').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   });
@@ -695,6 +720,13 @@ function bindEvents() {
   $('#inspect-form').addEventListener('click', () => runAction('inspect'));
   $('#fill-details').addEventListener('click', () => runAction('details'));
   $('#attach-resume').addEventListener('click', () => runAction('resume'));
+  $('#fill-security-code').addEventListener('click', () => runAction('security-code'));
+  $('#security-code-input').addEventListener('keydown', event => {
+    if (event.key === 'Enter' && !event.isComposing) {
+      event.preventDefault();
+      runAction('security-code');
+    }
+  });
   $('#clear-report').addEventListener('click', () => { state.report = null; renderReport(); queuePersistUi(); });
   $('#save-started').addEventListener('click', () => recordApplication('started'));
   $('#save-submitted').addEventListener('click', () => recordApplication('submitted'));

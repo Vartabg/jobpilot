@@ -62,13 +62,16 @@ function frameFailure(frameId, error) {
   };
 }
 
-export async function runCurrentAction(action, profile, resume = null, {expectedUrl = '', onProgress} = {}) {
-  if (!["inspect", "details", "resume"].includes(action)) throw new Error("Unknown application action");
+export async function runCurrentAction(action, profile, resume = null, {expectedUrl = '', securityCode = '', onProgress} = {}) {
+  if (!["inspect", "details", "resume", "security-code"].includes(action)) throw new Error("Unknown application action");
   const {tab, url} = await activePage();
   if (url.protocol !== "https:" || !SUPPORTED_HOSTS.has(url.hostname)) {
     throw new Error("Autofill supports Greenhouse, Lever, and Ashby application hosts. You can still capture and track this job.");
   }
   if (action === "resume" && !resume?.dataUrl) throw new Error("Choose a résumé with a local file first.");
+  if (action === "security-code" && !String(securityCode || "").trim()) {
+    throw new Error("Enter the 8-character security code from your Greenhouse email first.");
+  }
   if (expectedUrl && normalizeJobUrl(expectedUrl).identity !== normalizeJobUrl(url.href).identity) {
     throw new Error("The current tab is a different job from your saved draft. Capture this tab before filling or attaching a résumé.");
   }
@@ -91,7 +94,7 @@ export async function runCurrentAction(action, profile, resume = null, {expected
         if (el.disabled || ['hidden', 'search', 'submit', 'button', 'reset', 'password'].includes(el.type)) return false;
         const shown = visible(el) || el.type === 'file' && visible(el.closest('.file-upload, .field, [class*="FileUpload"]') || el.parentElement);
         return shown && (el.closest('form, [role="form"], #application-form')
-          || /first.?name|last.?name|email|resume|application/i.test([el.name, el.id, el.getAttribute('aria-label')].join(' ')));
+          || /first.?name|last.?name|email|resume|application|security[-_]?input|security[-_]?code|verification[-_]?code/i.test([el.name, el.id, el.getAttribute('aria-label')].join(' ')));
       });
       return {pageUrl: location.href, hasForm, isTop: window === top,
         visibleEmbeds: window === top ? [...document.querySelectorAll('iframe')].filter(visible).map(frame => frame.src).filter(Boolean) : []};
@@ -164,6 +167,7 @@ export async function runCurrentAction(action, profile, resume = null, {expected
       }, args: [{action: action === 'inspect' || ambiguous || !candidates.length ? 'inspect' : action,
         profile: action === 'details' && !ambiguous && candidates.length ? profile : {},
         resume: action === "resume" && !ambiguous && candidates.length ? resume : null,
+        ...(action === "security-code" && !ambiguous && candidates.length ? {securityCode: String(securityCode || '')} : {}),
         expectedIdentity: normalizeJobUrl(url.href).identity, expectedPageUrl: url.href}]});
       const result = results?.find(item => item.result && typeof item.result === 'object');
       report.frames.push(result ? {frameId: result.frameId ?? frame.frameId, ...result.result}

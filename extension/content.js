@@ -38,6 +38,64 @@
   const reactControl = el => el.closest("[class*='select__control'], [class*='Select__control'], [class*='react-select__control']");
   const selectedReact = el => reactControl(el)?.querySelector("[class*='single-value'], [class*='multi-value'], [class*='singleValue'], [class*='multiValue']")?.textContent?.trim() || '';
   const combo = el => el.getAttribute('role') === 'combobox' || !!reactControl(el);
+  const isSecurityCodeInput = el => {
+    const rawIds = [el.id, el.name, el.getAttribute('data-testid'), el.getAttribute('aria-label')].filter(Boolean).join(' ');
+    return /\bsecurity[-_]?input[-_]?\d+\b|\b(security|verification)[-_]?code\b/i.test(rawIds)
+      || labels(el).some(label => /\b(security|verification)\s+code\b/i.test(label));
+  };
+  const segmentedSecurityInput = el => el.matches?.("input[id^='security-input-'], input[name^='security-input-'], input[data-testid^='security-input-']");
+  function normalizeSecurityCode(raw) {
+    const trimmed = String(raw || '').trim();
+    if (/^[A-Za-z0-9]{6,12}$/.test(trimmed)) return trimmed;
+    const collapsed = trimmed.replace(/\s+/g, '');
+    if (/^[A-Za-z0-9]{8}$/.test(collapsed)) return collapsed;
+    const match = trimmed.match(/(?:security\s+code|verification\s+code|application)\s*[:\-]?\s*([A-Za-z0-9]{8})\b/i);
+    return match ? match[1] : '';
+  }
+  function securityCodeTarget() {
+    const segmented = [...document.querySelectorAll("input[id^='security-input-'], input[name^='security-input-'], input[data-testid^='security-input-']")]
+      .filter(el => !el.disabled && !el.readOnly && visible(el))
+      .sort((a, b) => {
+        const idx = el => Number((el.id || el.name || el.getAttribute('data-testid') || '').match(/(\d+)$/)?.[1] ?? 0);
+        return idx(a) - idx(b);
+      });
+    if (segmented.length >= 6) return {mode: 'segmented', inputs: segmented};
+    const single = [...document.querySelectorAll('input')].filter(el =>
+      !el.disabled && !el.readOnly && !['hidden','submit','button','reset','file','checkbox','radio','password'].includes(el.type)
+      && visible(el) && isSecurityCodeInput(el)
+    );
+    return single.length === 1 ? {mode: 'single', inputs: single} : null;
+  }
+  async function fillSecurityCode(rawCode) {
+    if (!location.hostname.includes('greenhouse')) {
+      return {status: 'unsupported', message: 'Security code autofill is only supported on Greenhouse application pages.'};
+    }
+    const code = normalizeSecurityCode(rawCode);
+    if (!code) {
+      return {status: 'invalid-code', message: 'Enter the 8-character security code from your Greenhouse verification email.'};
+    }
+    const target = securityCodeTarget();
+    if (!target) {
+      return {status: 'no-target', message: 'No visible security code field was found on this page. Submit the form first if Greenhouse has not shown the code prompt yet.'};
+    }
+    if (target.mode === 'segmented') {
+      if (target.inputs.length !== code.length) {
+        return {status: 'invalid-code', message: `This security code prompt has ${target.inputs.length} character boxes, but the code provided has ${code.length} characters.`};
+      }
+      target.inputs.forEach((input, index) => setText(input, code[index]));
+      await pause(50);
+      const ok = target.inputs.every((input, index) => input.isConnected && input.value === code[index]);
+      return ok
+        ? {status: 'filled', mode: 'segmented', count: target.inputs.length, message: 'Security code filled across all verification boxes. Review the page and submit your application.'}
+        : {status: 'failed', mode: 'segmented', message: 'The form did not retain every security code character. Check the code boxes on the page.'};
+    }
+    const [input] = target.inputs;
+    setText(input, code);
+    await pause(50);
+    return input.isConnected && input.value === code
+      ? {status: 'filled', mode: 'single', count: 1, message: 'Security code filled on the page. Review the page and submit your application.'}
+      : {status: 'failed', mode: 'single', message: 'The form did not retain the security code. Enter it directly on the page.'};
+  }
   const placeholderOption = o => !o || o.disabled || !o.value || /^(select|choose|please select|please choose)(\b|$)/i.test(o.text.trim());
   const attachedText = container => /\b[^\s]+\.(pdf|docx?|rtf)\b|remove (file|resume)|replace (file|resume)|resume.*uploaded/i.test((container?.innerText || '').replace(/Accepted file types:[^\n]*/gi, ''));
   function answered(el) {
@@ -49,10 +107,16 @@
   }
   function inventory(onError = () => {}) {
     const controls = [...document.querySelectorAll("input, textarea, select, [role='combobox']:not(input), [role='checkbox']:not(input), [role='radiogroup'], .ashby-application-form-input-yesno")];
-    const seenRadio = new Set();
+    const seenRadio = new Set(), seenSecurity = new Set();
     return controls.flatMap(el => { try {
       const choiceProxy=['radio','checkbox'].includes(el.type) && visible(el.closest('.ashby-application-form-input-radio-group-option, .ashby-application-form-input-checkbox-group-option'));
       if (el.disabled || el.readOnly || ['hidden','submit','button','reset'].includes(el.type) || !(visible(el) || choiceProxy || (el.type === 'file' && visible(wrapper(el))))) return [];
+      if (segmentedSecurityInput(el)) {
+        if (seenSecurity.has(el)) return [];
+        const group = controls.filter(other => segmentedSecurityInput(other) && !other.disabled && !other.readOnly && visible(other));
+        group.forEach(input => seenSecurity.add(input));
+        return [{el,label:'Security code',type:'security-code',required:group.some(required),answered:group.every(answered)}];
+      }
       if (el.matches('.ashby-application-form-input-yesno')) return [{el,label:labelOf(el),type:'choice',required:required(el),answered:!!el.querySelector("button[aria-pressed='true']")}];
       if (el.type === 'radio') {
         if (seenRadio.has(el)) return [];
@@ -235,9 +299,9 @@
   }
   // Re-injecting the script must not let a second click race an existing run.
   const runtime = globalThis.__jobpilotAutofillRuntime ||= {running:false};
-  globalThis.__jobpilotRun = async ({action='inspect',profile={},resume=null}={}) => {
-    if (!['inspect','details','resume'].includes(action)) throw new Error('Unknown JobPilot action');
-    const report = {action,status:'complete',warnings:[],filled:[],skipped:[],failed:[],required:[],resume:{status:'not-requested',message:''},provider:location.hostname.includes('greenhouse') ? 'Greenhouse' : location.hostname.includes('lever') ? 'Lever' : location.hostname.includes('ashby') ? 'Ashby' : 'Unsupported',pageUrl:location.href};
+  globalThis.__jobpilotRun = async ({action='inspect',profile={},resume=null,securityCode=''}={}) => {
+    if (!['inspect','details','resume','security-code'].includes(action)) throw new Error('Unknown JobPilot action');
+    const report = {action,status:'complete',warnings:[],filled:[],skipped:[],failed:[],required:[],resume:{status:'not-requested',message:''},securityCode:{status:'not-requested',message:''},provider:location.hostname.includes('greenhouse') ? 'Greenhouse' : location.hostname.includes('lever') ? 'Lever' : location.hostname.includes('ashby') ? 'Ashby' : 'Unsupported',pageUrl:location.href};
     if (!hosts.has(location.hostname) || location.protocol !== 'https:') { report.skipped.push({label:'Page',reason:'This frame is outside the supported application hosts'}); return report; }
     const warn = message => { if (!report.warnings.includes(message)) report.warnings.push(message); };
     if (runtime.running) { report.status='interrupted'; warn('Autofill is already running on this page. Wait for its report before retrying.'); return report; }
@@ -270,6 +334,7 @@
             const live=inventory(warn).filter(item => fieldToken(item,profile)===token);
             if (live.length !== 1) { record(token,'failed',{label,reason:'This field changed or is ambiguous. Review it manually.'}); continue; }
             const {el}=live[0];
+            if (type === 'security-code' || isSecurityCodeInput(el)) { record(token,'skipped',{label:'Security code',reason:'Use Fill code in the side panel'}); continue; }
             if (['radio','checkbox','choice','file','password'].includes(type)) { record(token,'skipped',{label,reason:type==='file' ? 'Use Attach résumé separately' : 'Answer this question yourself'}); continue; }
             if (answered(el)) { record(token,'skipped',{label,reason:'Your existing answer was preserved'}); continue; }
             if (combo(el) && String(el.value || '').trim()) { record(token,'skipped',{label,reason:'An existing dropdown search was preserved. Choose its option on the page.'}); continue; }
@@ -297,12 +362,22 @@
           }
         }
       } else if (action==='resume') report.resume=await attachResume(resume);
+      else if (action==='security-code') {
+        report.securityCode = await fillSecurityCode(securityCode);
+        if (report.securityCode.status === 'filled') {
+          report.filled.push({label: 'Security code', key: 'security_code'});
+        } else if (report.securityCode.status === 'no-target') {
+          report.skipped.push({label: 'Security code', reason: report.securityCode.message});
+        } else {
+          report.failed.push({label: 'Security code', reason: report.securityCode.message});
+        }
+      }
       report.required=inventory(warn).filter(item => item.required && !item.answered).map(({label,type})=>({label,type}));
     } catch (_) {
       report.status='interrupted'; warn('Autofill was interrupted. Review the preserved progress and inspect the form before retrying.');
     } finally { runtime.running=false; }
     for (const outcome of outcomes.values()) report[outcome.kind].push(outcome.item);
-    if (report.status==='complete' && (report.failed.length || report.warnings.length || report.resume.status==='failed')) report.status='partial';
+    if (report.status==='complete' && (report.failed.length || report.warnings.length || report.resume.status==='failed' || ['invalid-code','failed','unsupported'].includes(report.securityCode.status))) report.status='partial';
     return report;
   };
 })();

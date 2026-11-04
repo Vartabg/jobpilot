@@ -286,6 +286,40 @@ test("an interrupted inspection cannot claim that no required fields remain", as
   });
 });
 
+test("Greenhouse security code control validates empty input and reports filled verification code", async () => {
+  await workspace(async page => {
+    await page.locator('#capture-job').click();
+    await page.locator('#fill-security-code').click();
+    await expect(page.locator('#notice')).toContainText(/security code/i);
+
+    await page.evaluate(() => {
+      const execute = chrome.scripting.executeScript;
+      chrome.scripting.executeScript = async request => {
+        if (request.args?.[0]?.action !== 'security-code') return execute(request);
+        __extensionCalls.push({files: request.files, args: request.args});
+        return [{frameId: 0, result: {
+          action: 'security-code', status: 'complete', provider: 'Greenhouse',
+          pageUrl: 'https://boards.greenhouse.io/example/jobs/123',
+          filled: [{label: 'Security code', key: 'security_code'}], skipped: [], failed: [], required: [],
+          resume: {status: 'not-requested', message: ''},
+          securityCode: {status: 'filled', mode: 'segmented', count: 8, message: 'Security code filled across all verification boxes. Review the page and submit your application.'},
+        }}];
+      };
+    });
+    await page.locator('#security-code-input').fill('jebUzw3M');
+    await page.locator('#fill-security-code').click();
+    await expect(page.locator('#report-heading')).toHaveText('Security code result');
+    await expect(page.locator('#report-summary')).toContainText('1 security code challenge filled');
+    await expect(page.locator('#report-upload')).toContainText('Security code filled across all verification boxes');
+    await expect(page.locator('#report-upload')).toHaveClass(/good/);
+    const calls = await page.evaluate(() => __extensionCalls.filter(call => call.args?.[0]?.action === 'security-code'));
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].args[0].securityCode, 'jebUzw3M');
+    assert.deepEqual(calls[0].args[0].profile, {});
+    assert.equal(calls[0].args[0].resume, null);
+  });
+});
+
 test("panel fits narrow widths and keeps keyboard navigation available", async () => {
   await workspace(async page => {
     const overflowing = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth);

@@ -18,6 +18,7 @@ For a private package that starts with your verified details and a PDF, add `--p
 - **Profile:** edit verified contact details, work authorization, work history, and education. An unanswered authorization question remains unknown; it does not become a yes or no by default.
 - **Résumés:** add PDFs and choose which version to use for the current application.
 - **Current job:** review the captured company, role, and URL before saving them. Inspect the form, fill supported details, then review the remaining fields.
+- **Greenhouse security code:** when a Greenhouse board emails an 8-character verification code after you click Submit, paste the code (or the email line containing it) into **Greenhouse security code** and choose **Fill code** to populate all segmented (`#security-input-0`..`#security-input-7`) or single security-code inputs at once before resubmitting.
 - **Tracker:** save an application as started. After the employer shows its submission confirmation, mark it submitted yourself. Filling fields or attaching a file does not mean an application was submitted.
 
 The extension never presses the employer's submit button. Review every answer and attachment on the employer's page before submitting. Consent, signatures, demographic questions, salary expectations, and job-specific claims require your answer.
