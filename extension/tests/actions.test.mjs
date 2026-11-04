@@ -58,6 +58,17 @@ test("resume action requires a local file and sends only the selected resume", a
   assert.deepEqual(calls[2].args[0].resume, resume);
 });
 
+test("security-code action requires a non-empty code and never sends profile or resume data", async () => {
+  const privateResume = { metadata: { id: "chosen", name: "Software.pdf" }, dataUrl: "data:application/pdf;base64,AA==" };
+  await assert.rejects(runCurrentAction("security-code", { first_name: "Alex" }, privateResume, { securityCode: "   " }), /security code/i);
+  assert.equal(calls.length, 0);
+  await runCurrentAction("security-code", { first_name: "Alex" }, privateResume, { securityCode: "jebUzw3M" });
+  assert.equal(calls[2].args[0].action, "security-code");
+  assert.equal(calls[2].args[0].securityCode, "jebUzw3M");
+  assert.deepEqual(calls[2].args[0].profile, {});
+  assert.equal(calls[2].args[0].resume, null);
+});
+
 test("switching to a different requisition blocks a stale draft before any injection", async () => {
   await assert.rejects(runCurrentAction("details", { first_name: "Alex" }, null, {
     expectedUrl: "https://boards.greenhouse.io/example/jobs/456",
@@ -204,7 +215,7 @@ test("manual job capture remains available without invoking autofill", async () 
   tab.url = "https://example.org/jobs/123";
   chrome.scripting.executeScript = async request => {
     calls.push(request);
-    return [{ frameId: 0, result: { title: "Engineer", company: "Example Co", description: "A job" } }];
+    return [{ frameId: 0, result: { pageUrl: tab.url, title: "Engineer", company: "Example Co", description: "A job" } }];
   };
   const result = await captureCurrentJob();
   assert.equal(result.supported, false);

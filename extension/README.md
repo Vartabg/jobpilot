@@ -2,6 +2,61 @@
 
 JobPilot keeps your profile, résumés, and application records in a Chrome side panel beside the job you are viewing. The extension works locally: the profile and tracker do not require the Python server or a hosted account.
 
+Version **0.13.0** puts live portal availability (`#portal-status`) and the primary form actions (**Fill details**, **Inspect fields**, **Attach selected résumé**, and **Greenhouse security code**) at the very top of the **Apply** tab, trims defensive boilerplate across panels, and automatically syncs the active supported tab when running an action on a newly opened job tab.
+
+Version **0.12.0** adds optional **Disclosure preferences** in Profile. Save your
+veteran-status choice and whether to decline other demographic disclosures, then
+use **Fill details** on each application step. JobPilot chooses an unambiguous
+offered answer and preserves existing answers. Protected-veteran preferences can
+answer general veteran questions; a general veteran preference never implies
+protected status. Other demographic preferences only select a supplied decline
+choice for gender, pronouns, race/ethnicity, sexual orientation, or disability.
+Missing or ambiguous choices stay manual. Agreements, signatures, and submission
+remain under your control. Preferences stay local and are included in profile
+backups; they are never included as answer values in diagnostic exports.
+
+Version **0.12.1** confirms Workday dropdown selections after their menus finish
+closing. A delayed selection counts as filled only when the expected answer is
+present and its associated menu is closed. Changes made during the wait remain
+under your control; a result that cannot be confirmed asks for review.
+On a verified Workday disability self-identification form, the three checkboxes
+are inspected as one question and the saved demographic decline preference may
+choose its offered nondisclosure answer. The required signed-date control is
+reported as one date and remains manual. Privacy scans recognize the group and
+its offered decline choice without reading answers.
+Workday Capture uses public job-description metadata only. It leaves the
+description blank when that metadata is unavailable, keeping application and
+review answers out of the captured job description.
+
+Version **0.12.2** confirms the disability decline after Workday disables the
+other two checkboxes. That normal change now remains one answered question;
+existing answers stay preserved. Filling an empty question still requires all
+three offered choices to be enabled.
+
+Version **0.11.0** adds **Scan privacy on this page** in Apply. Open the job's
+application step, click the JobPilot toolbar icon to grant page access, and scan
+before sharing answers. The report shows exact question wording, required or
+optional responses, decline choices, and employer-provided help. It reads visible
+field metadata without reading entered answers, filling, advancing, or submitting.
+The last scan stays local and can be exported. Rescan each step: later, hidden,
+conditional or inaccessible embedded questions remain outside coverage. Existing
+permissions are unchanged; no new host access or Python service is required.
+
+For comparing public Greenhouse forms by link, the companion product supports
+`python -m product.main --privacy`. Other ATS pages use the extension's visible
+scan; an uninspected step is never treated as privacy-safe.
+
+Version **0.10.0** includes a **Career workspace** link in the side panel: searchable,
+reviewed career stories with assistant exports; immutable application time
+capsules with independent résumé/receipt copies; and an inbox for reviewing XLSX,
+CSV, TSV, and JSON tracker imports. See [the workflow and limits](WORKSPACE_GUIDE.md).
+Use **Backup and restore** in that workspace for complete capsule files. The
+existing profile/tracker backup below still omits library PDF bytes.
+
+The 0.9.1 button audit fixes stale captures and import previews, interrupted
+actions after tab/page changes, busy controls, and import retry/refresh behavior.
+See the [tested controls and page coverage](BUTTON_AUDIT.md).
+
 ## Install
 
 1. Build the unpacked extension with `python3 scripts/package_extension.py --output ~/job-search/JobPilot-Extension --zip`. Use the output directory, not this source directory.
@@ -15,18 +70,35 @@ For a private package that starts with your verified details and a PDF, add `--p
 
 ## Apply with the side panel
 
-- **Profile:** edit verified contact details, work authorization, work history, and education. An unanswered authorization question remains unknown; it does not become a yes or no by default.
+- **Profile:** edit verified contact details, work authorization, work history, education, and optional disclosure preferences. Unanswered preferences remain unknown; they do not become a yes or no by default.
 - **Résumés:** add PDFs and choose which version to use for the current application.
 - **Current job:** review the captured company, role, and URL before saving them. Inspect the form, fill supported details, then review the remaining fields.
+- **Greenhouse security code:** when a Greenhouse board emails an 8-character verification code after you click Submit, paste the code (or the email line containing it) into **Greenhouse security code** and choose **Fill code** to populate all segmented (`#security-input-0`..`#security-input-7`) or single security-code inputs at once before resubmitting.
 - **Tracker:** save an application as started. After the employer shows its submission confirmation, mark it submitted yourself. Filling fields or attaching a file does not mean an application was submitted.
 
-The extension never presses the employer's submit button. Review every answer and attachment on the employer's page before submitting. Consent, signatures, demographic questions, salary expectations, and job-specific claims require your answer.
+The extension never presses the employer's submit button. Review every answer and attachment on the employer's page before submitting. Consent, signatures, demographic questions without a saved matching preference, salary expectations, and job-specific claims require your answer.
 
 ## Portal coverage and first-release limits
 
-Automatic form filling supports the allowed Greenhouse, Lever, and Ashby hosts listed in `manifest.json`. Other sites use manual profile copying and application tracking; they do not get an automatic-fill success message.
+Automatic form filling supports the allowed Greenhouse, Lever, and Ashby hosts listed in `manifest.json`, plus public Workday candidate job routes described below. Other sites use manual profile copying and application tracking; they do not get an automatic-fill success message.
 
 Existing answers and attachments are preserved. Work and education fields fill only when a clearly labelled, numbered section can be matched to the same verified profile row. Ambiguous or unsupported repeaters require manual copying. The extension does not add missing work-history rows or navigate multi-step application forms.
+
+### Workday applications
+
+Version 0.10.0 supports public candidate job routes on `tenant.wdN.myworkdayjobs.com` and `wdN.myworkdaysite.com/[locale/]recruiting/tenant/site/job/...`. It uses the existing **activeTab** permission: open the job or application step, click the JobPilot toolbar icon on that tab, then capture or inspect. No new persistent host permission is added.
+
+Version 0.11.1 fixes the toolbar invocation so it grants temporary access before opening the panel. Clicking the icon again on another tab grants access to that tab. Opening JobPilot through Chrome's side-panel menu alone still requires a toolbar click before page actions.
+
+Version 0.11.2 incorporates live Workiva fixes: accepted résumés remain recognized after the upload input disappears, selected phone-code tokens count as answered, required Yes/No questions are reported without answering them, and new History links open the public requisition. Privacy scans omit selected-answer announcements from field help and distinguish a dialing prefix from a residence question.
+
+Capture the job before opening its application. After you sign in or choose to apply manually, use **Inspect fields**, **Fill details**, and **Attach selected résumé** on the current step. My Information and My Experience use verified contact and existing history controls; the résumé step supports an explicit local PDF upload. Review every result, advance the step yourself, and inspect again. Workday may replace the form without changing the URL; JobPilot stops an in-flight action when the step changes.
+
+A Workday session can expire while an open form still displays your signed-in name. If Workday returns page errors, keep that tab open while restoring sign-in in a second tab, then return to the preserved form. A successful JobPilot fill verifies the fields it changed; it does not certify that Workday has saved or accepted the whole step.
+
+Sign-in, account creation, verification, job-specific application questions, attestations, and final submission stay under your control. On verified question, disclosure, and self-identification steps, **Fill details** may apply your saved disclosure preferences only; it does not fill names, signatures, dates, or other contact details there. Unknown or translated labels, ambiguous history rows, and unsupported date/phone formats remain manual. Existing answers and attachments stay intact. Selected Workday multi-select tokens, such as a field of study, are preserved even when their search box is empty. Empty or draft-only multi-selects require choosing an option on the application page. The report distinguishes a selected file from a résumé that the page displays as accepted.
+
+Job identities ignore locale, tracking parameters, and `/apply/...` suffixes while retaining the host, tenant, career site, and job path. Older tracked Workday records retain their IDs, notes, résumé choices, and status when reopened from another application step. Sealed capsules keep their original evidence.
 
 Version 0.8.1 rechecks the live form between fields, handles delayed Greenhouse location suggestions and country/state aliases, and discovers fields revealed by earlier selections. It waits up to 3.5 seconds for an associated dropdown and limits a details action to about 20 seconds. A changing, ambiguous, or rejected control appears in the review report rather than stopping every other supported field. User edits made during autofill are preserved.
 
@@ -37,6 +109,16 @@ An interrupted action retains the frame results already returned. If the panel c
 To update an unpacked installation without creating a second extension identity, replace its packaged code in the same folder, then **Reload** JobPilot in Chrome's extension manager. Keep `initial-data.json` and `initial-resume.pdf` if present; runtime profile, résumé library, and tracking data are stored in Chrome, not those seed files. Keep a backup of the old package and export your workspace before removing the extension. Updating the folder does not activate new code until Reload.
 
 A résumé result of **prepared** means a file was placed in the upload control. **Accepted** means the page displayed attachment evidence without a detected upload error; the employer's final application review remains the authority. An unlabelled or unrelated upload control is never treated as a résumé field.
+
+## Run history and problem reports
+
+Version 0.8.3 adds **History**. Inspect fields, Fill details, and Attach résumé automatically save a local record before starting and update it as frame results return. The last 50 runs survive closing the panel, clearing the current report, and later attempts. When updating from an older version, the most recent report is imported once. Earlier overwritten reports cannot be recovered.
+
+Failed controls, unmapped questions, interruptions, and unsuccessful or unconfirmed uploads appear under **Open problems**. Expected manual questions and missing profile facts appear under **All runs** without being marked as bugs. If a result looks wrong despite a success message, choose **Report a problem** beneath the report. **Mark resolved** hides a reviewed case from open problems; **Reopen** restores it.
+
+Use **Export run** for one case or **Export open problems** for the current backlog. The JSON contains a run ID, time, version, public job link, field labels, outcomes, and fixed reason codes. It excludes form answers, profile values, résumé names and contents, raw exceptions, HTML, URL query strings and fragments. Contact-like text in labels is redacted. Unexpected exception details become an `unknown` code. Nothing is sent automatically; exports are separate from your profile backup. Logs are bounded to 200 field entries and eight frames per run, with truncation indicated.
+
+The history is evidence from extension actions, not a record of employer submissions, page validation after manual edits, or activity while JobPilot is idle. It cannot diagnose an employer-side rejection by itself. If diagnostic storage is unavailable, the action result stays visible and JobPilot does not retry the form automatically.
 
 ## Data and backups
 

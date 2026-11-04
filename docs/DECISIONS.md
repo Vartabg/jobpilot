@@ -1,3 +1,72 @@
+# 2026-11-04 — Top-first side panel layout, Greenhouse security code, and active-tab reliability (0.13.0)
+
+## Concept & User Feedback Record
+- **Who it is for & purpose:** The owner applying across Greenhouse, Lever, Ashby, Workday, and custom career sites who needs immediate visibility into what JobPilot can do on the active tab and one-click access to primary form actions (`Fill details`, `Attach selected résumé`, `Inspect fields`, and `Fill code`) without wading through defensive disclaimers or scrolling past secondary cards.
+- **Concrete action-to-result relationship:**
+  - Opening the side panel or switching tabs immediately updates the top availability banner (`#portal-status`) using read-only tab metadata (`chrome.tabs.query`), showing the detected portal and available actions (`Greenhouse · Ready to fill details, attach PDF, inspect, or fill security code`, `Workday · Ready to inspect, fill details, or attach PDF on this step`, `Lever / Ashby · Ready to fill details, attach PDF, or inspect fields`, `Manual tracking only`, or `Click the JobPilot toolbar icon on the job tab to connect`).
+  - Clicking `Fill details`, `Attach selected résumé`, `Inspect fields`, or `Fill code` at the top of the panel automatically syncs the draft target when the active tab is a different supported job page from the previously stored `chrome.storage.local` draft, eliminating false `"different job from your saved draft"` rejections while preserving mid-action navigation guards.
+- **Accepted by user:**
+  - Top-first `Apply` tab hierarchy: live page availability status and primary action controls (`Fill details`, `Attach selected résumé`, `Inspect fields`, résumé selector, and compact Greenhouse 8-character security-code helper) at the very top of the panel.
+  - Drastic reduction of wordy subtitles, repetitive `.fine-print` disclaimers, and visual noise across cards and form reports (keeping `Filled` and `Skipped` groups collapsed by default while opening actionable `Still required`, `Failed`, and `Needs review` items).
+  - Unifying the diverged extension builds (`main` v0.8.2, `codex/greenhouse-security-code`, and the installed v0.12.2 Workday/disclosure/privacy/workspace build) and fixing intermittent autofill/capture failures (`expectedUrl` stale-draft lock, `tab.status === 'loading'` subresource false-positive abort, and Ashby/security-code preflight form detection).
+- **Rejected by user:**
+  - Burying primary autofill/inspect/resume buttons beneath the `Current job` text form and `Application privacy` scan results.
+  - Verbose explanatory copy and repetitive defensive disclaimers on every card.
+- **Undecided / deferred:**
+  - Whether to add new ATS providers beyond Greenhouse, Lever, Ashby, and Workday in future releases.
+
+# 2026-10-15 — Workday candidate applications (0.10.0)
+
+Support verified public Workday job routes on tenant.wdN.myworkdayjobs.com and
+wdN.myworkdaysite.com/recruiting/tenant/site, including locale prefixes and
+application suffixes. Use the existing toolbar-triggered activeTab grant;
+do not request persistent access to every Workday tenant or employee portals.
+
+Scope actions to the current recognized application step, exclude account
+gates, and stop on step replacement even if the URL remains unchanged.
+Fill only verified field mappings and existing history rows; attach a selected
+local PDF separately. Sign-in, account creation, questions, disclosures,
+attestations, navigation and submission stay manual. Canonical job identity
+keeps tenant/site/job boundaries and reconciles older generic Workday tracker
+records without rewriting sealed capsules. Test both candidate URL families
+through real DOM fixtures and isolated MV3 scripting.
+
+# 2026-10-15 — Button reliability audit (0.9.1)
+
+Exercise the extension's control groups with synthetic browser fixtures and a
+real isolated MV3 installation. Form actions must stay tied to the current job
+and tab, and stop across navigation or visibility changes, including while a
+dropdown or upload waits. Restrict recognized application scopes so hidden old
+forms and unrelated signup controls do not block or receive application data.
+
+Keep user-visible previews consistent with their inputs. Disable edits while
+saves run, invalidate changed import previews, preserve explicit selections on
+refresh, and allow same-file import retries. The workspace opens through the
+Chrome tabs API. Keep the existing permissions and manual submission boundary.
+See the [control/page coverage](../extension/BUTTON_AUDIT.md).
+
+# 2026-10-15 — Career memory, application capsules, and a review inbox
+
+Extend the existing Chrome extension with a bundled career workspace tab, using
+the same serialized trusted-UI worker broker and live application tracker. Store
+the new stories, immutable capsules, and import review history in extension-local
+IndexedDB; keep capsule list metadata separate from file bytes. No Python server,
+new browser permissions, AI provider, or cloud synchronization is required.
+
+Career wording is reviewed by the candidate and edits invalidate that approval.
+Imported accounts need review. Portable JSON/Markdown packets let a person share
+selected context with assistants; ordinary chats do not automatically read the
+extension. Capsules copy the chosen files and story revisions, preserve exact
+answer/posting text, and are sealed only after explicit review. They record a
+user's account of a submission, with optional receipts; checksums detect changes
+and do not certify delivery to an employer.
+
+XLSX, CSV, TSV, and JSON records enter a pending inbox with source/row provenance.
+The applicant resolves conflicts explicitly, and stale reviews/edits are rejected.
+No new code fills or submits employer forms. Full workspace backups include
+capsule file bytes; profile/tracker backups keep their existing contract. See the
+[workspace guide](../extension/WORKSPACE_GUIDE.md) for formats, limits, and checks.
+
 # 2026-09-29 — An extension for the owner's application workflow
 
 The owner requested that JobPilot become a Chrome extension. Start with a

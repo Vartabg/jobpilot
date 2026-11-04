@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { beforeEach, test } from "node:test";
-import { emptyProfile, normalizeJobUrl, initializeLocalData, executeModelOperation as run } from "../model.js";
+import { emptyProfile, normalizeJobUrl, workdayJob, initializeLocalData, executeModelOperation as run } from "../model.js";
 
 let data, writes;
 beforeEach(() => {
   data = {}; writes = 0;
-  globalThis.chrome = { runtime: { getURL: name => "https://extension.test/" + name }, storage: { local: {
+  globalThis.chrome = { runtime: { getURL: name => "https://extension.test/" + name, getManifest: () => ({version: '0.8.3'}) }, storage: { local: {
     get: async key => Object.fromEntries([key].flat().map(name => [name, structuredClone(data[name])])),
     set: async values => { writes++; Object.assign(data, structuredClone(values)); },
   } } };
@@ -48,6 +48,46 @@ test("profile preserves unknown authorization and retains only verified structur
   await assert.rejects(run("saveProfile", [{ ...emptyProfile(), work_authorized: "yes" }]), /authorization/i);
 });
 
+test('voluntary disclosure preferences default to blank, retain only supported fields and round-trip through backups', async () => {
+  const blank={veteran_status:'',other_demographics:''};
+  assert.deepEqual(emptyProfile().disclosure_preferences,blank);
+  assert.deepEqual((await run('getProfile',[])).disclosure_preferences,blank);
+  for(const veteran_status of ['','protected_veteran','veteran','not_veteran','decline']) {
+    const saved=await run('saveProfile',[{disclosure_preferences:{veteran_status,other_demographics:'decline',gender:'PRIVATE',unknown:true},gender:'PRIVATE'}]);
+    assert.deepEqual(saved.disclosure_preferences,{veteran_status,other_demographics:'decline'});
+    assert.equal('gender' in saved,false);
+  }
+  const backup=await run('exportData',[]); data={};
+  await run('importData',[backup]);
+  assert.deepEqual((await run('getProfile',[])).disclosure_preferences,{veteran_status:'decline',other_demographics:'decline'});
+  const imported=await run('importData',[{...backup,profile:{disclosure_preferences:{veteran_status:'veteran',other_demographics:'',unknown:'PRIVATE'}}},{replaceProfile:true}]);
+  assert.equal(imported.profileImported,true);
+  assert.deepEqual((await run('getProfile',[])).disclosure_preferences,{veteran_status:'veteran',other_demographics:''});
+  assert.equal(JSON.stringify(await run('exportData',[])).includes('PRIVATE'),false);
+  assert.deepEqual((await run('saveProfile',[{disclosure_preferences:blank}])).disclosure_preferences,blank);
+});
+
+test('invalid disclosure preferences reject save and import atomically without changing existing data', async () => {
+  await run('saveProfile',[{first_name:'Existing',disclosure_preferences:{veteran_status:'decline'}}]);
+  for(const disclosure_preferences of [null,[],false,'decline',42,{veteran_status:true},{veteran_status:null},{veteran_status:'yes'},
+    {veteran_status:' decline '},{other_demographics:'yes'},{other_demographics:1},{other_demographics:null}]) {
+    const before=structuredClone(data),count=writes;
+    await assert.rejects(run('saveProfile',[{disclosure_preferences}]),/disclosure/i);
+    await assert.rejects(run('importData',[{schemaVersion:1,profile:{disclosure_preferences},applications:[],resumes:[]},{replaceProfile:true}]),/disclosure/i);
+    assert.deepEqual(data,before); assert.equal(writes,count);
+  }
+});
+
+test('a preference-only profile is protected from optional seeding and implicit backup replacement', async () => {
+  const preferences={veteran_status:'',other_demographics:'decline'};
+  await run('saveProfile',[{disclosure_preferences:preferences}]);
+  let requested=false; globalThis.fetch=async()=>{requested=true;throw new Error('Seed must not load');};
+  assert.equal((await initializeLocalData()).reason,'existing_data'); assert.equal(requested,false);
+  const result=await run('importData',[{schemaVersion:1,profile:{first_name:'Incoming'},applications:[],resumes:[]}]);
+  assert.equal(result.profilePreserved,true);
+  const profile=await run('getProfile',[]); assert.equal(profile.first_name,''); assert.deepEqual(profile.disclosure_preferences,preferences);
+});
+
 test("job identity dedupes tracking parameters and apply paths while preserving different requisitions", () => {
   const greenhouse = normalizeJobUrl("https://boards.greenhouse.io/example/jobs/123?gh_src=campaign");
   const greenhouseNewHost = normalizeJobUrl("https://job-boards.greenhouse.io/example/jobs/123?utm_source=foo#apply");
@@ -72,6 +112,40 @@ test('preferred name and address survive saving and backup without inferring mis
   assert.equal(restored.preferred_name,'Lex');
   assert.equal(restored.address_line1,'123 Example Street');
   assert.equal(restored.address_line2,'Unit 2');
+});
+
+test('Workday job identity is stable across locale, tracking and application steps, isolated by tenant/site/requisition', () => {
+  const base = 'https://example.wd5.myworkdayjobs.com/External/job/Austin/Engineer_R123';
+  const expected = normalizeJobUrl(base);
+  for (const url of [base + '/apply', base + '/apply/applyManually?source=LinkedIn', base.replace('/External/', '/en-US/External/') + '?utm_source=feed']) {
+    assert.deepEqual(normalizeJobUrl(url), expected);
+  }
+  assert.equal(expected.provider, 'workday');
+  assert.equal(expected.identity, normalizeJobUrl(base.replace('/Austin/Engineer_R123', '/austin/engineer_r123') + '/apply/applyManually').identity);
+  for (const url of [base.replace('example.', 'other.'), base.replace('/External/', '/Internal/'), base.replace('R123', 'R456')]) {
+    assert.notEqual(normalizeJobUrl(url).identity, expected.identity);
+  }
+  const site = 'https://wd3.myworkdaysite.com/recruiting/example/External/job/Austin/Engineer_R123';
+  assert.equal(normalizeJobUrl(site).identity, normalizeJobUrl(site.replace('/recruiting/', '/en-GB/recruiting/') + '/apply/autofillWithResume').identity);
+  assert.notEqual(normalizeJobUrl(site).identity, normalizeJobUrl(site.replace('/example/', '/other/')).identity);
+  for (const url of [base.replace('https:', 'http:'), base.replace('.com/', '.com.evil.test/'), base.replace('.com/', '.com:8443/'),
+    'https://example.myworkday.com/External/job/1', 'https://example.wd5.myworkdayjobs.com/External/login',
+    'https://wd3.myworkdaysite.com/recruiting/example/External', 'https://wd3.myworkdaysite.com/employee/example/External/job/1']) {
+    assert.equal(workdayJob(url), null, url);
+  }
+});
+
+test('pre-Workday tracker entries keep their ID, notes and submission status across application steps', async () => {
+  const url = 'https://example.wd5.myworkdayjobs.com/en-US/External/job/Austin/Engineer_R123';
+  data.jobpilot_applications_v1 = [{id:'old-workday', company:'Example', title:'Engineer', url, provider:'website',
+    identity:'website:' + url, status:'submitted', notes:'Existing notes', resume_id:'my-resume', resume_name:'Exact.pdf',
+    createdAt:'2026-01-01T00:00:00.000Z', updatedAt:'2026-01-02T00:00:00.000Z', submittedAt:'2026-01-02T00:00:00.000Z'}];
+  assert.equal((await run('findApplication', [url + '/apply/applyManually'])).id, 'old-workday');
+  assert.equal(writes, 0, 'reading a legacy identity does not rewrite storage');
+  const saved = await run('saveApplication', [{url: url + '/apply/applyManually'}, 'started']);
+  assert.equal(saved.id, 'old-workday'); assert.equal(saved.status, 'submitted');
+  assert.equal(saved.notes, 'Existing notes'); assert.equal(saved.resume_id, 'my-resume');
+  assert.equal((await run('listApplications', [])).length, 1);
 });
 
 test("submission is explicit and saving another started draft cannot downgrade it", async () => {

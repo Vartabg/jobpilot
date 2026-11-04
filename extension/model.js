@@ -1,16 +1,23 @@
 // Local domain storage. UI callers use the worker broker so multiple panels
 // cannot overwrite one another's application/resume read-modify-write updates.
+import { RUN_LIMIT, sanitizeRun } from './diagnostics.js';
+import { executeWorkspaceOperation } from './workspace-store.js';
 export const APPLICATION_STATUSES = ["started", "submitted", "interview", "rejected", "offer", "withdrawn"];
 export const SCHEMA_VERSION = 1;
 const KEYS = { profile: "jobpilot_profile_v1", applications: "jobpilot_applications_v1", resumes: "jobpilot_resumes_v1" };
 const INITIALIZATION_MARKER = "jobpilot_initialized_v1";
+const RUNS_STORAGE = "jobpilot_runs_v1";
 const MAX_RESUME_BYTES = 10 * 1024 * 1024;
 const PROFILE_FIELDS = ["first_name", "last_name", "preferred_name", "email", "phone", "address_line1", "address_line2", "city", "state", "country", "postal_code", "linkedin_url", "github_url", "portfolio_url", "current_title", "selected_resume_id"];
 const MIME_TYPES = { pdf: "application/pdf" };
+const DISCLOSURE_CHOICES = {
+  veteran_status: ["", "protected_veteran", "veteran", "not_veteran", "decline"],
+  other_demographics: ["", "decline"],
+};
 
 export function emptyProfile() {
   return { ...Object.fromEntries(PROFILE_FIELDS.map((key) => [key, ""])), work_authorized: null,
-    requires_sponsorship: null, work_history: [], education: [] };
+    requires_sponsorship: null, disclosure_preferences: { veteran_status: "", other_demographics: "" }, work_history: [], education: [] };
 }
 
 const uid = () => crypto.randomUUID();
@@ -62,6 +69,14 @@ function profileData(value) {
   }
   result.work_authorized = nullableBoolean(value.work_authorized);
   result.requires_sponsorship = nullableBoolean(value.requires_sponsorship);
+  if (value.disclosure_preferences !== undefined) {
+    const preferences = object(value.disclosure_preferences, "Disclosure preferences");
+    for (const [key, choices] of Object.entries(DISCLOSURE_CHOICES)) {
+      const choice = preferences[key] === undefined ? "" : preferences[key];
+      if (typeof choice !== "string" || !choices.includes(choice)) throw new Error("Choose a supported voluntary disclosure preference or leave it unanswered.");
+      result.disclosure_preferences[key] = choice;
+    }
+  }
   result.work_history = rows(value.work_history, "Work history", (row) => ({
     id: identifier(row.id), company: string(row.company), title: string(row.title),
     start_date: date(row.start_date), end_date: date(row.end_date), current: row.current === true,
@@ -75,13 +90,38 @@ function profileData(value) {
 }
 function hasProfile(profile) {
   return PROFILE_FIELDS.some((key) => Boolean(profile[key])) || profile.work_authorized !== null ||
-    profile.requires_sponsorship !== null || profile.work_history.length > 0 || profile.education.length > 0;
+    profile.requires_sponsorship !== null || Object.values(profile.disclosure_preferences).some(Boolean) || profile.work_history.length > 0 || profile.education.length > 0;
 }
 function safeUrl(value) {
   let url;
   try { url = new URL(string(value, 5000)); } catch { throw new Error("Enter a complete http or https URL."); }
   if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) throw new Error("Only public http or https URLs are supported.");
   return url.href;
+}
+
+// Only public candidate job routes qualify. Employee Workday and account/search
+// pages never become autofill targets just because their host contains Workday.
+export function workdayJob(value) {
+  let url;
+  try { url = new URL(value); } catch { return null; }
+  if (url.protocol !== 'https:' || url.username || url.password || url.port) return null;
+  const host = url.hostname.toLowerCase();
+  const path = url.pathname.split('/').filter(Boolean);
+  if (/^[a-z]{2,3}(?:-[a-z0-9]{2,8}){1,2}$/i.test(path[0] || '')) path.shift();
+  let tenant = '', site, jobIndex;
+  if (/^[a-z0-9][a-z0-9-]*\.wd\d+\.myworkdayjobs\.com$/.test(host)) {
+    site = path[0]; jobIndex = 1;
+  } else if (/^wd\d+\.myworkdaysite\.com$/.test(host) && path[0] === 'recruiting') {
+    tenant = path[1]; site = path[2]; jobIndex = 3;
+  } else return null;
+  if (!site || path[jobIndex] !== 'job' || jobIndex === 3 && !tenant) return null;
+  const end = path.indexOf('apply', jobIndex + 1);
+  const jobPath = path.slice(jobIndex + 1, end < 0 ? undefined : end);
+  if (!jobPath.length) return null;
+  const prefix = tenant ? ['recruiting', tenant, site] : [site];
+  const canonical = `${url.origin}/${[...prefix, 'job', ...jobPath].join('/')}`;
+  return {host, tenant, site, jobPath, url: canonical,
+    identity: `workday:${host}:${tenant ? tenant + ':' : ''}${site}:${jobPath.join('/').toLowerCase()}`};
 }
 
 export function normalizeJobUrl(value) {
@@ -91,7 +131,11 @@ export function normalizeJobUrl(value) {
   const host = url.hostname.toLowerCase();
   let provider = "website";
   let identity;
-  if (["boards.greenhouse.io", "job-boards.greenhouse.io", "boards-eu.greenhouse.io", "job-boards.eu.greenhouse.io"].includes(host)) {
+  const workday = workdayJob(url.href);
+  if (workday) {
+    provider = 'workday'; identity = workday.identity;
+    url.href = workday.url;
+  } else if (["boards.greenhouse.io", "job-boards.greenhouse.io", "boards-eu.greenhouse.io", "job-boards.eu.greenhouse.io"].includes(host)) {
     provider = "greenhouse";
     const jobsIndex = path.indexOf("jobs");
     const job = url.searchParams.get("gh_jid") || (jobsIndex >= 0 ? path[jobsIndex + 1] : "");
@@ -244,6 +288,27 @@ export async function initializeLocalData() {
 }
 
 const handlers = {
+  async listRuns() { return read(RUNS_STORAGE, []); },
+  async saveRun(value) {
+    object(value, 'Run');
+    const id = identifier(value.id);
+    const runs = await handlers.listRuns();
+    const previous = runs.find(run => run.id === id);
+    const run = sanitizeRun({...value, id}, previous, chrome.runtime.getManifest().version);
+    // A completed retry is a new run; checkpoints replace their own run only.
+    await write(RUNS_STORAGE, [run, ...runs.filter(item => item.id !== id)].slice(0, RUN_LIMIT));
+    return run;
+  },
+  async updateRun(id, patch) {
+    object(patch, 'Run update');
+    const runs = await handlers.listRuns();
+    const run = runs.find(item => item.id === id);
+    if (!run) throw new Error('This run is no longer in the local history.');
+    if (typeof patch.resolved === 'boolean') run.resolved = patch.resolved;
+    if (patch.reported === true) run.reported = true;
+    await write(RUNS_STORAGE, runs);
+    return run;
+  },
   async getProfile() { return profileData(await read(KEYS.profile, emptyProfile())); },
   async saveProfile(value) {
     const profile = profileData(value);
@@ -273,7 +338,12 @@ const handlers = {
     await fileOperation("readwrite", "delete", id);
     return true;
   },
-  async listApplications() { return read(KEYS.applications, []); },
+  async listApplications() {
+    // Older releases stored Workday as a generic website. Resolve that identity
+    // when reading so a later application step updates the existing record.
+    return (await read(KEYS.applications, [])).map(application => workdayJob(application.url)
+      ? {...application, ...normalizeJobUrl(application.url)} : application);
+  },
   async findApplication(url) {
     const { identity } = normalizeJobUrl(url);
     return (await handlers.listApplications()).find((application) => application.identity === identity) || null;
@@ -347,6 +417,9 @@ const handlers = {
 };
 
 export async function executeModelOperation(operation, args) {
+  if (typeof operation === 'string' && operation.startsWith('workspace:')) {
+    return executeWorkspaceOperation(operation.slice(10), args, {legacy: executeModelOperation, normalizeJobUrl});
+  }
   if (!Object.hasOwn(handlers, operation) || !Array.isArray(args)) throw new Error("Unknown JobPilot storage operation.");
   return handlers[operation](...args);
 }
@@ -370,5 +443,8 @@ export const listApplications = () => invoke("listApplications");
 export const saveApplication = (job, status = "started") => invoke("saveApplication", job, status);
 export const updateApplication = (id, patch) => invoke("updateApplication", id, patch);
 export const findApplication = (url) => invoke("findApplication", url);
+export const listRuns = () => invoke('listRuns');
+export const saveRun = (run) => invoke('saveRun', run);
+export const updateRun = (id, patch) => invoke('updateRun', id, patch);
 export const exportData = () => invoke("exportData");
 export const importData = (data, options = {}) => invoke("importData", data, options);

@@ -2,8 +2,11 @@ import {
   getProfile, saveProfile, listResumes, addResume, getResume, deleteResume,
   listApplications, saveApplication, updateApplication, findApplication,
   exportData, importData, normalizeJobUrl,
+  listRuns, saveRun, updateRun,
 } from './model.js';
-import { captureCurrentJob, runCurrentAction } from './actions.js';
+import { captureCurrentJob, runCurrentAction, isSupportedPage, providerFor } from './actions.js';
+import { REASONS } from './diagnostics.js';
+import { setupPrivacyPanel } from './privacy-panel.js';
 
 const UI_KEY = 'jobpilot_ui_v1';
 const STATUS_LABELS = {
@@ -14,15 +17,17 @@ const PROFILE_FIELDS = [
   'first_name', 'last_name', 'preferred_name', 'email', 'phone', 'address_line1', 'address_line2', 'city', 'state', 'postal_code',
   'country', 'linkedin_url', 'github_url', 'portfolio_url', 'current_title',
 ];
+const DISCLOSURE_FIELDS = ['veteran_status', 'other_demographics'];
 const $ = (selector, scope = document) => scope.querySelector(selector);
 const $$ = (selector, scope = document) => [...scope.querySelectorAll(selector)];
 const state = {
-  profile: {}, resumes: [], applications: [], selectedResumeId: '',
+  profile: {}, resumes: [], applications: [], runs: [], selectedResumeId: '',
   job: { title: '', company: '', url: '', notes: '', provider: '', supported: null },
-  report: null, tab: 'apply', busy: false, pendingImport: null, dirtyProfile: false,
+  activeTab: null, report: null, tab: 'apply', busy: false, pendingImport: null, dirtyProfile: false,
 };
 let draftTimer;
 let duplicateGeneration = 0;
+let busyControls = new Map();
 
 function element(tag, className, text) {
   const node = document.createElement(tag);
@@ -101,7 +106,7 @@ function queuePersistUi() {
 }
 
 function switchTab(tab, moveFocus = false) {
-  if (!['apply', 'profile', 'applications'].includes(tab)) return;
+  if (!['apply', 'profile', 'applications', 'history'].includes(tab)) return;
   state.tab = tab;
   for (const button of $$('[data-tab]')) {
     const selected = button.dataset.tab === tab;
@@ -116,14 +121,20 @@ function switchTab(tab, moveFocus = false) {
 function setBusy(busy) {
   state.busy = busy;
   document.body.setAttribute('aria-busy', String(busy));
-  for (const button of [
-    $('#capture-job'), $('#inspect-form'), $('#fill-details'), $('#attach-resume'),
-    $('#save-started'), $('#save-submitted'), $('#save-profile'), $('#export-data'),
-    $('#confirm-import'), $('#refresh-applications'),
-  ]) button.disabled = busy;
-  $('#resume-upload').disabled = busy;
-  $('#import-data').disabled = busy;
-  for (const control of $$('#application-list select, #resume-library button')) control.disabled = busy;
+  $('main').inert = busy;
+  if (busy) {
+    busyControls = new Map($$('main button, main input, main select, main textarea').map(control => [control, control.disabled]));
+    for (const control of busyControls.keys()) control.disabled = true;
+  } else {
+    for (const [control, disabled] of busyControls) if (control.isConnected) control.disabled = disabled;
+    // These lists can be rebuilt while the operation is pending. Their newly
+    // rendered controls inherit busy=true and are not in the original snapshot.
+    for (const control of $$('#application-list select, #resume-library button, #run-history button')) {
+      if (!busyControls.has(control)) control.disabled = false;
+    }
+    busyControls.clear();
+  }
+  $('#open-workspace').setAttribute('aria-disabled', String(busy));
   if (!busy) updateActionButtons();
 }
 
@@ -138,6 +149,7 @@ async function perform(task) {
 function updateActionButtons() {
   const resume = state.resumes.find(item => item.id === state.selectedResumeId);
   $('#attach-resume').disabled = state.busy || !resume || Boolean(resume.missingFile);
+  $('#report-problem').disabled = state.busy || !state.runs.some(run => run.id === state.report?.diagnosticId);
 }
 
 function readJob() {
@@ -154,21 +166,56 @@ function renderJob() {
   checkDuplicate();
 }
 
+async function refreshActiveTab() {
+  try {
+    const [tab] = await (chrome.tabs?.query?.({ active: true, currentWindow: true }) || []);
+    state.activeTab = tab ? { id: tab.id, url: tab.url || '', title: tab.title || '' } : null;
+  } catch {
+    state.activeTab = null;
+  }
+  renderPortalStatus();
+}
+
 function renderPortalStatus() {
   const status = $('#portal-status');
   status.replaceChildren();
   const dot = element('span', 'status-dot');
   dot.setAttribute('aria-hidden', 'true');
   const captured = Boolean(state.job.capturedAt);
-  let message = 'Capture the tab to identify this page.';
-  if (captured && state.job.supported === true) {
+  const activeUrl = state.activeTab?.url || '';
+  const matchesActive = !activeUrl || sameApplicationUrl(state.job.url, activeUrl);
+  let message = 'Click JobPilot toolbar icon on a job tab to check availability.';
+  if (captured && matchesActive && state.job.supported === true) {
     dot.classList.add('supported');
-    message = `${state.job.provider || 'Supported portal'} · Autofill available on this captured page`;
-  } else if (captured && state.job.supported === false) {
+    message = state.job.provider === 'Workday'
+      ? 'Workday · Ready to inspect, fill details, or attach PDF on this step.'
+      : `${state.job.provider || 'Supported portal'} · Autofill ready (fill details, attach PDF, inspect)`;
+  } else if (captured && matchesActive && state.job.supported === false) {
     dot.classList.add('unsupported');
-    message = 'Autofill unavailable here. You can still save this job and use your profile.';
+    message = 'Manual tracking only · Autofill supports Greenhouse, Lever, Ashby, and Workday.';
+  } else if (activeUrl) {
+    if (isSupportedPage(activeUrl)) {
+      const provider = providerFor(activeUrl);
+      dot.classList.add('supported');
+      message = provider === 'Workday'
+        ? 'Workday · Ready to inspect, fill details, or attach PDF on this step.'
+        : `${provider} · Autofill ready (fill details, attach PDF, inspect)`;
+    } else if (validWebUrl(activeUrl)) {
+      dot.classList.add('unsupported');
+      message = 'Manual tracking only · Capture tab to save this job.';
+    } else {
+      message = 'Open a job application webpage to begin.';
+    }
   } else if (state.job.url) {
-    message = 'Job draft saved. Capture the tab to check autofill support.';
+    if (isSupportedPage(state.job.url)) {
+      const provider = providerFor(state.job.url);
+      dot.classList.add('supported');
+      message = provider === 'Workday'
+        ? 'Workday · Click JobPilot on the tab, then inspect or fill this step.'
+        : `${provider} · Autofill ready on this page`;
+    } else {
+      message = 'Job draft saved · Click Capture tab on the job page.';
+    }
   }
   status.append(dot, element('span', '', message));
 }
@@ -196,7 +243,7 @@ async function checkDuplicate() {
 function renderProfileSummary() {
   const container = $('#profile-summary');
   const name = [state.profile.first_name, state.profile.last_name].filter(Boolean).join(' ');
-  const hasProfile = Boolean(name || state.profile.email || state.profile.work_history?.length);
+  const hasProfile = Boolean(name || state.profile.email || state.profile.work_history?.length || DISCLOSURE_FIELDS.some(key => state.profile.disclosure_preferences?.[key]));
   const text = hasProfile
     ? [name || 'Saved profile', state.profile.email || ''].filter(Boolean).join(' · ')
     : 'Add your profile to fill application fields.';
@@ -295,6 +342,10 @@ function renumberHistory(kind) {
     const label = kind === 'work' ? 'Position' : 'Education';
     $('h3', entry).textContent = `${label} ${index + 1}`;
     $('button', entry).setAttribute('aria-label', `Remove ${label.toLowerCase()} ${index + 1}`);
+    if (kind === 'work') {
+      $('[data-field="start_date"]', entry).setAttribute('aria-label', `Position ${index + 1} start date, year and month`);
+      $('[data-field="end_date"]', entry).setAttribute('aria-label', `Position ${index + 1} end date, year and month`);
+    }
   });
 }
 
@@ -304,6 +355,7 @@ function renderProfile() {
   for (const key of ['work_authorized', 'requires_sponsorship']) {
     form.elements.namedItem(key).value = state.profile[key] === true ? 'yes' : state.profile[key] === false ? 'no' : '';
   }
+  for (const key of DISCLOSURE_FIELDS) form.elements.namedItem(`disclosure_${key}`).value = state.profile.disclosure_preferences?.[key] || '';
   const work = $('#work-history');
   const education = $('#education-history');
   work.replaceChildren(); education.replaceChildren();
@@ -336,6 +388,7 @@ function readProfile() {
     const value = $('#profile-form').elements.namedItem(key).value;
     result[key] = value === 'yes' ? true : value === 'no' ? false : null;
   }
+  result.disclosure_preferences = Object.fromEntries(DISCLOSURE_FIELDS.map(key => [key, $('#profile-form').elements.namedItem(`disclosure_${key}`).value]));
   result.work_history = readHistory('#work-history');
   result.education = readHistory('#education-history');
   result.selected_resume_id = state.selectedResumeId;
@@ -427,7 +480,10 @@ function renderReport() {
   const incomplete = interrupted || report.status === 'partial' || groups.failed.length > 0
     || frames.some(frame => ['partial', 'interrupted'].includes(frame.status));
   const action = report.uiAction || frames[0]?.action || 'inspect';
-  $('#report-heading').textContent = action === 'resume' ? 'Résumé result' : action === 'details' ? 'Autofill results' : 'Field inspection';
+  $('#report-heading').textContent = action === 'resume' ? 'Résumé result'
+    : action === 'details' ? 'Autofill results'
+    : action === 'security-code' ? 'Security code result'
+    : 'Field inspection';
   $('#report-context').textContent = [hostOf(report.pageUrl || frames[0]?.pageUrl), readableTime(report.checkedAt)].filter(Boolean).join(' · ');
   let summary;
   if (report.status === 'running') {
@@ -439,6 +495,11 @@ function renderReport() {
         : frames.length ? 'No empty visible required fields were detected.' : 'No form results were returned.';
   } else if (action === 'details') {
     summary = `${incomplete ? interrupted ? 'Autofill interrupted. ' : 'Autofill needs attention. ' : ''}${groups.filled.length} ${groups.filled.length === 1 ? 'field' : 'fields'} confirmed filled · ${groups.skipped.length} skipped · ${groups.failed.length} failed.`;
+  } else if (action === 'security-code') {
+    summary = groups.filled.length
+      ? '1 security code challenge filled on the page.'
+      : incomplete ? 'Security code action needs attention. Review the message below.'
+        : 'No security code field was filled on this page.';
   } else {
     summary = 'Review the résumé result below and the attachment shown on the application page.';
   }
@@ -461,6 +522,13 @@ function renderReport() {
       upload.textContent = lines.join('\n');
       if (resumeResults.every(item => item.status === 'accepted')) upload.classList.add('good');
     }
+  } else if (action === 'security-code') {
+    const codeResults = frames.map(frame => frame.securityCode).filter(item => item && typeof item === 'object');
+    if (codeResults.length) {
+      upload.hidden = false;
+      upload.textContent = codeResults.map(item => item.message || '').filter(Boolean).join('\n');
+      if (codeResults.every(item => item.status === 'filled')) upload.classList.add('good');
+    }
   }
   const container = $('#report-details');
   container.replaceChildren();
@@ -471,51 +539,159 @@ function renderReport() {
   reportGroup(container, 'Skipped', groups.skipped, row => `${row.label || 'Unlabeled field'} · ${row.reason || 'Not filled'}`);
   reportGroup(container, 'Failed', groups.failed, row => `${row.label || 'Unlabeled field'} · ${row.reason || 'Could not fill'}`, true);
   if (!frames.length) container.append(element('p', 'fine-print', 'The extension did not return a frame report.'));
-  if (action === 'inspect' || action === 'details') container.append(element('p', 'fine-print', 'Results cover visible fields on this page. Later steps may ask additional questions.'));
+  const saved = state.runs.find(run => run.id === report.diagnosticId);
+  $('#report-log-status').textContent = saved ? `Saved in History · Run ${saved.id.slice(0, 8)}${saved.reported ? ' · Problem reported' : ''}`
+    : 'This report has not been saved in History.';
+}
+
+async function checkpointRun(action, job) {
+  try {
+    const saved = await saveRun({id: state.report.diagnosticId, action, job,
+      startedAt: state.report.startedAt || state.report.checkedAt, legacy: state.report.legacy === true, report: state.report});
+    state.runs = [saved, ...state.runs.filter(run => run.id !== saved.id)].slice(0, 50);
+    renderHistory(); renderReport();
+    return true;
+  } catch {
+    // Logging must never replay a completed form mutation or hide its outcome.
+    $('#report-log-status').textContent = 'Could not save this run in History. The current report remains available.';
+    return false;
+  }
 }
 
 async function runAction(action) {
+  let focusSecurityCode = false;
   await perform(async () => {
     if (state.dirtyProfile && action === 'details') {
       showNotice('Save your profile changes before filling details.', 'info');
       return;
     }
-    const resume = action === 'resume' ? await getResume(state.selectedResumeId) : null;
-    if (action === 'resume' && (!resume?.dataUrl || resume.metadata?.missingFile)) {
-      throw new Error('Choose an available résumé PDF in Profile first.');
+    const securityCode = action === 'security-code' ? $('#security-code-input').value : '';
+    if (action === 'security-code' && !securityCode.trim()) {
+      focusSecurityCode = true;
+      throw new Error('Enter the 8-character security code from your Greenhouse email first.');
     }
+    try {
+      const [activeTab] = await (chrome.tabs?.query?.({ active: true, currentWindow: true }) || []);
+      if (activeTab?.url) {
+        state.activeTab = { id: activeTab.id, url: activeTab.url, title: activeTab.title || '' };
+        if (isSupportedPage(activeTab.url) && (!state.job.url || !sameApplicationUrl(state.job.url, activeTab.url))) {
+          const hadUrl = Boolean(state.job.url);
+          state.job = {
+            title: (!hadUrl && state.job.title) || activeTab.title || '',
+            company: hadUrl ? '' : state.job.company || '',
+            url: activeTab.url,
+            notes: hadUrl ? '' : state.job.notes || '',
+            provider: providerFor(activeTab.url),
+            supported: true, capturedAt: new Date().toISOString(),
+            request_id: '', description: '',
+          };
+          renderJob();
+        }
+      }
+    } catch { /* Proceed to runCurrentAction which handles tab errors cleanly. */ }
     const checkedAt = new Date().toISOString();
-    state.report = {pageUrl: state.job.url, frames: [], status: 'running', checkedAt, uiAction: action};
+    const diagnosticId = crypto.randomUUID();
+    const job = {...state.job};
+    state.report = {pageUrl: job.url, frames: [], status: 'running', checkedAt, startedAt: checkedAt, uiAction: action, diagnosticId};
     renderReport();
     // Save the operation before sending profile data. If the panel closes, its
     // next opening must explain that the result is unknown rather than show an
     // older, successful action as the current result.
-    await persistUi();
     let report;
     try {
+      await checkpointRun(action, job);
+      await persistUi();
+      const resume = action === 'resume' ? await getResume(state.selectedResumeId) : null;
+      if (action === 'resume' && (!resume?.dataUrl || resume.metadata?.missingFile)) throw new Error('Choose a résumé with a local file first.');
       report = await runCurrentAction(action, state.profile, resume, {
-        expectedUrl: state.job.url,
+        expectedUrl: job.url,
+        securityCode,
         onProgress: async progress => {
-          state.report = {...progress, checkedAt, uiAction: action};
+          state.report = {...progress, checkedAt, startedAt: checkedAt, uiAction: action, diagnosticId};
           renderReport();
+          await checkpointRun(action, job);
           await persistUi();
         },
       });
     } catch (error) {
       state.report = {...state.report, status: 'interrupted', error: friendlyError(error)};
+      await checkpointRun(action, job);
       renderReport(); await persistUi();
       showNotice(friendlyError(error), 'error');
       return;
     }
-    state.report = { ...report, checkedAt: new Date().toISOString(), uiAction: action };
+    state.report = { ...report, checkedAt: new Date().toISOString(), startedAt: checkedAt, uiAction: action, diagnosticId };
+    const logged = await checkpointRun(action, job);
     renderReport(); await persistUi();
     const incomplete = ['partial', 'interrupted'].includes(report.status);
-    showNotice(incomplete ? 'The action needs attention. Review the results, inspect the current page, and retry to continue.'
+    const securityStatus = report.frames?.find(frame => frame?.securityCode)?.securityCode?.status;
+    const needsAttention = incomplete || (action === 'security-code' && securityStatus !== 'filled');
+    showNotice(!logged ? 'The action finished, but its history could not be saved. Review the current report.'
+      : needsAttention ? 'The action needs attention. Review the results, inspect the current page, and retry to continue.'
       : action === 'inspect' ? 'Inspection finished. Review the fields listed below.'
       : action === 'resume' ? 'Attachment action finished. Review its result and the application page.'
+      : action === 'security-code' ? 'Security code filled. Review the page and submit your application.'
         : 'Autofill finished. Review the exact results below.', 'info');
     $('#report-card').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   });
+  if (focusSecurityCode) $('#security-code-input')?.focus();
+}
+
+const isProblem = run => run.health === 'problem' || run.reported;
+
+function renderHistory() {
+  const open = state.runs.filter(run => isProblem(run) && !run.resolved);
+  $('#problem-count').textContent = String(open.length);
+  const container = $('#run-history');
+  container.replaceChildren();
+  const runs = $('#history-filter').value === 'all' ? state.runs : open;
+  if (!runs.length) {
+    container.append(element('p', 'empty-state', state.runs.length ? 'No open problems. Choose All runs to review saved results.' : 'Runs will appear here after you inspect, fill details, or attach a résumé.'));
+    return;
+  }
+  for (const run of runs) {
+    const card = element('section', 'card report-card');
+    card.append(element('h3', '', `${{inspect: 'Inspect fields', details: 'Fill details', resume: 'Attach résumé', 'security-code': 'Fill security code'}[run.action]} · ${run.company || run.provider}`));
+    const status = run.resolved ? 'Resolved' : run.reported ? 'Reported problem' : ({problem: 'Needs investigation', manual: 'Manual answers remain', running: 'Final result not yet known', ok: 'Completed'}[run.health]);
+    card.append(element('p', 'fine-print', `${readableTime(run.startedAt)} · ${status} · ${run.version ? `v${run.version}` : 'version unknown'} · Run ${run.id.slice(0, 8)}`));
+    if (run.title) card.append(element('p', 'fine-print', run.title));
+    if (run.url) {
+      const link = element('a', 'fine-print', 'Open job');
+      link.href = run.url; link.target = '_blank'; link.rel = 'noopener noreferrer'; card.append(link);
+    }
+    const reasons = [...run.warnings, ...(run.error ? [run.error] : []), ...run.frames.flatMap(frame => [...frame.warnings, ...(frame.error ? [frame.error] : [])])];
+    reportGroup(card, 'Errors and warnings', [...new Set(reasons)], reason => REASONS[reason] || REASONS.unknown, true);
+    for (const [key, heading] of [['failed', 'Failed'], ['required', 'Still required'], ['skipped', 'Skipped'], ['filled', 'Filled']]) {
+      reportGroup(card, heading, run.frames.flatMap(frame => frame[key]), row => `${row.label}${row.type ? ` · ${row.type}` : ''}${row.reason ? ` · ${REASONS[row.reason] || REASONS.unknown}` : ''}`, key === 'failed');
+    }
+    for (const frame of run.frames.filter(frame => frame.resume.status !== 'not-requested')) {
+      card.append(element('p', 'fine-print', `Résumé: ${frame.resume.status}${frame.resume.reason ? ` · ${REASONS[frame.resume.reason] || REASONS.unknown}` : ''}`));
+    }
+    if (run.truncated) card.append(element('p', 'fine-print', 'Some fields were omitted to keep this log within the storage limit.'));
+    const actions = element('div', 'action-grid');
+    const download = element('button', 'button small', 'Export run'); download.type = 'button';
+    download.disabled = state.busy;
+    download.addEventListener('click', () => downloadRuns([run])); actions.append(download);
+    const review = element('button', 'button small', run.resolved ? 'Reopen' : isProblem(run) ? 'Mark resolved' : 'Report a problem');
+    review.type = 'button'; review.disabled = state.busy;
+    review.addEventListener('click', () => perform(async () => {
+      await updateRun(run.id, run.resolved ? {resolved: false} : isProblem(run) ? {resolved: true} : {reported: true});
+      state.runs = await listRuns(); renderHistory(); renderReport();
+    }));
+    actions.append(review); card.append(actions); container.append(card);
+  }
+}
+
+function downloadRuns(runs) {
+  if (!runs.length) { showNotice('There are no open problems to export.', 'info'); return; }
+  const data = {schemaVersion: 1, exportedAt: new Date().toISOString(), runs,
+    note: 'Local diagnostics only. No answers, profile values, file names, file bytes, HTML, or raw exceptions.'};
+  const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'}));
+  const link = element('a'); link.href = url;
+  link.download = `jobpilot-diagnostics-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.append(link); link.click(); link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  showNotice('Diagnostics exported. Nothing was sent to a server.');
 }
 
 function renderApplications() {
@@ -659,15 +835,22 @@ async function confirmImport() {
 }
 
 function bindEvents() {
+  $('#open-workspace').addEventListener('click', event => {
+    event.preventDefault();
+    void perform(async () => {
+      await chrome.tabs.create({url: chrome.runtime.getURL('workspace.html')});
+      showNotice('Career workspace opened in a new tab.');
+    });
+  });
   for (const button of $$('[data-tab]')) {
     button.addEventListener('click', () => switchTab(button.dataset.tab));
     button.addEventListener('keydown', event => {
       if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
       event.preventDefault();
-      const tabs = ['apply', 'profile', 'applications'];
+      const tabs = ['apply', 'profile', 'applications', 'history'];
       const index = tabs.indexOf(state.tab);
-      const next = event.key === 'Home' ? 0 : event.key === 'End' ? 2
-        : (index + (event.key === 'ArrowRight' ? 1 : 2)) % 3;
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1
+        : (index + (event.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length;
       switchTab(tabs[next], true);
     });
   }
@@ -683,6 +866,7 @@ function bindEvents() {
     const job = await captureCurrentJob();
     const sameUrl = sameApplicationUrl(state.job.url, job.url);
     if (!sameUrl) { state.report = null; renderReport(); }
+    state.activeTab = { id: state.activeTab?.id, url: job.url || '', title: job.title || '' };
     state.job = {
       title: job.title || '', company: job.company || '', url: job.url || '',
       notes: sameUrl ? $('#job-notes').value : '', provider: job.provider || '',
@@ -695,7 +879,24 @@ function bindEvents() {
   $('#inspect-form').addEventListener('click', () => runAction('inspect'));
   $('#fill-details').addEventListener('click', () => runAction('details'));
   $('#attach-resume').addEventListener('click', () => runAction('resume'));
-  $('#clear-report').addEventListener('click', () => { state.report = null; renderReport(); queuePersistUi(); });
+  $('#fill-security-code').addEventListener('click', () => runAction('security-code'));
+  $('#security-code-input').addEventListener('keydown', event => {
+    if (event.key === 'Enter' && !event.isComposing) {
+      event.preventDefault();
+      runAction('security-code');
+    }
+  });
+  chrome.tabs?.onActivated?.addListener(() => void refreshActiveTab());
+  chrome.tabs?.onUpdated?.addListener(() => void refreshActiveTab());
+  $('#clear-report').addEventListener('click', () => { if (state.busy) return; state.report = null; renderReport(); queuePersistUi(); });
+  $('#report-problem').addEventListener('click', () => perform(async () => {
+    await updateRun(state.report.diagnosticId, {reported: true, resolved: false});
+    state.runs = await listRuns(); renderHistory(); renderReport(); switchTab('history');
+    showNotice('Problem saved locally with this run. You can export it from History.');
+  }));
+  $('#history-filter').addEventListener('change', renderHistory);
+  $('#refresh-history').addEventListener('click', () => perform(async () => { state.runs = await listRuns(); renderHistory(); }));
+  $('#export-problems').addEventListener('click', () => downloadRuns(state.runs.filter(run => isProblem(run) && !run.resolved)));
   $('#save-started').addEventListener('click', () => recordApplication('started'));
   $('#save-submitted').addEventListener('click', () => recordApplication('submitted'));
   $('#apply-resume').addEventListener('change', () => {
@@ -728,12 +929,14 @@ function bindEvents() {
     const file = $('#resume-upload').files[0];
     if (!file) return;
     perform(async () => {
-      const metadata = await addResume(file, $('#resume-label').value.trim());
-      state.resumes = await listResumes();
-      state.selectedResumeId = metadata?.id || state.selectedResumeId;
-      renderResumes(); await persistUi();
-      $('#resume-upload').value = ''; $('#resume-label').value = '';
-      showNotice('Résumé saved locally. It is ready to choose in Apply.');
+      try {
+        const metadata = await addResume(file, $('#resume-label').value.trim());
+        state.resumes = await listResumes();
+        state.selectedResumeId = metadata?.id || state.selectedResumeId;
+        renderResumes(); await persistUi();
+        $('#resume-label').value = '';
+        showNotice('Résumé saved locally. It is ready to choose in Apply.');
+      } finally { $('#resume-upload').value = ''; }
     });
   });
   $('#application-filter').addEventListener('change', renderApplications);
@@ -754,12 +957,13 @@ async function init() {
   try {
     const version=chrome.runtime.getManifest().version;
     $('#extension-version').textContent=version ? ` ${version}` : '';
-    const [profile, resumes, applications, stored] = await Promise.all([
-      getProfile(), listResumes(), listApplications(), chrome.storage.local.get(UI_KEY),
+    const [profile, resumes, applications, runs, stored] = await Promise.all([
+      getProfile(), listResumes(), listApplications(), listRuns(), chrome.storage.local.get(UI_KEY),
     ]);
     state.profile = profile || {};
     state.resumes = Array.isArray(resumes) ? resumes : [];
     state.applications = Array.isArray(applications) ? applications : [];
+    state.runs = Array.isArray(runs) ? runs : [];
     const ui = stored?.[UI_KEY];
     if (ui && typeof ui === 'object') {
       if (ui.job && typeof ui.job === 'object') state.job = { ...state.job, ...ui.job };
@@ -770,13 +974,22 @@ async function init() {
             'The panel closed before this action finished. Its final result is unknown. Inspect the current page before retrying.']};
       }
       state.selectedResumeId = typeof ui.selectedResumeId === 'string' ? ui.selectedResumeId : '';
-      if (['apply', 'profile', 'applications'].includes(ui.tab)) state.tab = ui.tab;
+      if (['apply', 'profile', 'applications', 'history'].includes(ui.tab)) state.tab = ui.tab;
+    }
+    // Migrate the last pre-history report and recover checkpoints on reopening.
+    // This stores evidence only; it never replays the employer-page action.
+    if (state.report && (!state.report.diagnosticId || ui?.report?.status === 'running')) {
+      if (!state.report.diagnosticId) state.report.legacy = true;
+      state.report.diagnosticId ||= crypto.randomUUID();
+      await checkpointRun(state.report.uiAction || 'inspect', state.job);
+      await persistUi();
     }
     if (!state.selectedResumeId) state.selectedResumeId = state.profile.selected_resume_id || '';
-    renderProfile(); renderResumes(); renderJob(); renderApplications(); renderReport(); switchTab(state.tab);
+    await refreshActiveTab();
+    renderProfile(); renderResumes(); renderJob(); renderApplications(); renderHistory(); renderReport(); switchTab(state.tab);
   } catch (error) {
     showNotice(`Could not load your local workspace: ${friendlyError(error)}`, 'error');
   } finally { setBusy(false); }
 }
 
-init();
+init().then(() => setupPrivacyPanel({perform, showNotice}));

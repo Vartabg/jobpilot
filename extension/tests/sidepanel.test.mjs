@@ -78,6 +78,7 @@ async function workspace(run, { width = 400, seed = null } = {}) {
         onChanged: event,
       },
       tabs: {
+        create: async details => { globalThis.__extensionCalls.push({tabCreated: details}); return {id: 99, ...details}; },
         query: async () => [{ id: 17, url: "https://boards.greenhouse.io/example/jobs/123", title: "Software Engineer at Example Co" }],
         onActivated: event, onUpdated: event,
       },
@@ -92,7 +93,7 @@ async function workspace(run, { width = 400, seed = null } = {}) {
             filled: [], skipped: [], failed: [], required: [{ label: "Salary expectations", type: "text" }],
             resume: { status: "not-requested", message: "" },
           } }];
-          return [{ frameId: 0, result: { company: "Example Co", title: "Software Engineer", url: "https://boards.greenhouse.io/example/jobs/123" } }];
+          return [{ frameId: 0, result: { company: "Example Co", title: "Software Engineer", pageUrl: "https://boards.greenhouse.io/example/jobs/123", documentType: 'text/html' } }];
         },
       },
     };
@@ -101,6 +102,34 @@ async function workspace(run, { width = 400, seed = null } = {}) {
   try { await run(page); assert.deepEqual(errors, [], "side panel must not throw browser errors"); }
   finally { await context.close(); }
 }
+
+test('privacy button scans without profile data, keeps decline choices, and restores its local report', async () => {
+  await workspace(async page => {
+    await page.evaluate(() => {
+      chrome.scripting.executeScript = async request => {
+        __extensionCalls.push({files:request.files,args:request.args});
+        if (request.files) return [{frameId:0,documentId:'privacy-doc',result:{source_url:'https://boards.greenhouse.io/example/jobs/123',document_type:'text/html'}}];
+        return [{frameId:0,documentId:'privacy-doc',result:{document_type:'text/html',parent_visibility:'visible',visible_embeds:0,
+          payload:{source_url:'https://boards.greenhouse.io/example/jobs/123',notices:[],fields:[
+            {label:'Legal Address',required:true,options:[]},
+            {label:'Gender identity',required:true,options:['Woman','Man','Prefer not to answer']}]}}}];
+      };
+    });
+    await page.getByRole('button',{name:'Scan privacy on this page'}).click();
+    await expect(page.locator('#privacy-count')).toContainText('2 flagged requests');
+    await expect(page.locator('#privacy-findings')).toContainText('Response required; disclosure optional');
+    await expect(page.locator('#privacy-heading')).toBeFocused();
+    await page.getByLabel('Show requests').selectOption('required');
+    await expect(page.locator('.privacy-finding')).toHaveCount(1);
+    assert.equal(await page.evaluate(()=>__extensionCalls.some(call=>call.args?.[0]?.profile || call.args?.[0]?.resume)),false);
+    await page.reload();
+    await expect(page.locator('#privacy-status')).toContainText('last saved scan');
+    await expect(page.locator('.privacy-finding')).toHaveCount(2);
+    await expect(page.locator('#privacy-findings')).toContainText('Main application page');
+    await page.getByRole('button',{name:'Clear saved scan'}).click();
+    await expect(page.locator('#privacy-result')).toBeHidden();
+  });
+});
 
 test("profile edits persist and an unanswered work-authorization question remains unknown", async () => {
   await workspace(async page => {
@@ -126,6 +155,81 @@ test("profile edits persist and an unanswered work-authorization question remain
     await expect(page.locator('[name="requires_sponsorship"]')).toHaveValue("");
     assert.equal(await page.evaluate(() => __extensionCalls.length), 0, "opening and editing the panel cannot inject into the job page");
   });
+});
+
+test('voluntary disclosure preferences save, reload and clear to manual without changing employer fields', async () => {
+  await workspace(async page=>{
+    await page.locator('[data-tab="profile"]').click();
+    const veteran=page.getByLabel('Veteran status preference'),other=page.getByLabel('Other demographic questions');
+    await expect(page.locator('#save-profile')).toBeEnabled();
+    await expect(veteran).toHaveValue(''); await expect(other).toHaveValue('');
+    await veteran.selectOption('protected_veteran'); await other.selectOption('decline');
+    await page.locator('#save-profile').click(); await expect(page.locator('#notice')).toContainText('Profile saved');
+    assert.deepEqual(await page.evaluate(()=>__storageData.jobpilot_profile_v1.disclosure_preferences),{veteran_status:'protected_veteran',other_demographics:'decline'});
+    await page.reload(); await page.locator('[data-tab="profile"]').click();
+    await expect(veteran).toHaveValue('protected_veteran'); await expect(other).toHaveValue('decline');
+    await veteran.selectOption(''); await other.selectOption('');
+    await page.locator('#save-profile').click(); await expect(page.locator('#notice')).toContainText('Profile saved');
+    await page.reload(); await page.locator('[data-tab="profile"]').click();
+    await expect(veteran).toHaveValue(''); await expect(other).toHaveValue('');
+    assert.equal(await page.evaluate(()=>__extensionCalls.length),0,'Saving preferences never injects into an employer page');
+  });
+});
+
+test('profile backup imports display approved preference fields and reject invalid choices without overwriting them', async () => {
+  await workspace(async page=>{
+    await page.locator('[data-tab="profile"]').click();
+    const file=profile=>({name:'preferences.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify({schemaVersion:1,profile,applications:[],resumes:[]}))});
+    await page.locator('#import-data').setInputFiles(file({disclosure_preferences:{veteran_status:'veteran',other_demographics:'decline',unknown:'PRIVATE'}}));
+    await expect(page.locator('#import-preview')).toBeVisible(); await page.locator('#confirm-import').click();
+    await expect(page.getByLabel('Veteran status preference')).toHaveValue('veteran');
+    await expect(page.getByLabel('Other demographic questions')).toHaveValue('decline');
+    assert.deepEqual(await page.evaluate(()=>__storageData.jobpilot_profile_v1.disclosure_preferences),{veteran_status:'veteran',other_demographics:'decline'});
+    await page.locator('#import-data').setInputFiles(file({disclosure_preferences:{veteran_status:'invented'}}));
+    await expect(page.locator('#import-preview')).toBeVisible(); await page.locator('#import-replace-profile').check();
+    await page.locator('#confirm-import').click(); await expect(page.locator('#notice')).toContainText('supported voluntary disclosure');
+    await expect(page.getByLabel('Veteran status preference')).toHaveValue('veteran');
+    assert.deepEqual(await page.evaluate(()=>__storageData.jobpilot_profile_v1.disclosure_preferences),{veteran_status:'veteran',other_demographics:'decline'});
+    await page.locator('#cancel-import').click();
+  });
+});
+
+test('Workday capture, inspect, fill, attach and tracker buttons use the current step and selected local PDF', async () => {
+  await workspace(async page => {
+    await page.evaluate(() => {
+      const url = 'https://fixture.wd5.myworkdayjobs.com/en-US/External/job/Austin/Engineer_R123/apply/applyManually';
+      chrome.tabs.query = async () => [{id:17,url,title:'Engineer'}];
+      chrome.scripting.executeScript = async request => {
+        __extensionCalls.push({files:request.files,args:request.args});
+        if (request.files) return [{frameId:0}];
+        if (request.args?.[0]?.probe) return [{frameId:0,result:{pageUrl:url,hasForm:true,isTop:true,visibleEmbeds:[],
+          workdayScope:{hasForm:true,canFillDetails:true,canAttachResume:true,stepKey:'applyFlowMyExpPage'}}}];
+        if (request.args?.[0]?.action) return [{frameId:0,result:{status:'complete',provider:'Workday',pageUrl:url,
+          filled:request.args[0].action==='details' ? [{label:'First Name',key:'first_name'}] : [],skipped:[],failed:[],required:[],
+          resume:request.args[0].action==='resume' ? {status:'accepted',filename:'Exact.pdf',message:'Form displays Exact.pdf'} : {status:'not-requested'}}}];
+        return [{frameId:0,result:{pageUrl:url,documentType:'text/html',company:'Fixture',title:'Engineer'}}];
+      };
+    });
+    await page.locator('#capture-job').click();
+    await expect(page.locator('#portal-status')).toContainText('Workday');
+    await expect(page.locator('#portal-status')).toContainText('this step');
+    await page.locator('#inspect-form').click();
+    await expect(page.locator('#notice')).toContainText('Inspection finished');
+    await page.locator('#fill-details').click();
+    await expect(page.locator('#report-summary')).toContainText('1 field confirmed filled');
+    await page.locator('#attach-resume').click();
+    await expect(page.locator('#report-upload')).toContainText('Form displays Exact.pdf');
+    const sent = await page.evaluate(() => __extensionCalls.filter(call=>call.args?.[0]?.action).map(call=>call.args[0]));
+    assert.deepEqual(sent.map(value=>value.action),['inspect','details','resume']);
+    assert.equal(sent[0].profile.first_name,undefined);
+    assert.equal(sent[1].profile.first_name,'Alex');
+    assert.equal(sent[2].resume.metadata.name,'Exact.pdf');
+    assert.ok(sent.every(value=>value.expectedWorkdayStep==='applyFlowMyExpPage'));
+    await page.locator('#save-started').click();
+    const applications = await page.evaluate(async()=> (await import('./model.js')).listApplications());
+    assert.equal(applications.length,1); assert.equal(applications[0].provider,'workday');
+    assert.equal(applications[0].status,'started');
+  }, {seed:{profile:{first_name:'Alex'},resumes:[{path:'initial-resume.pdf',name:'Exact.pdf',label:'Exact'}]}});
 });
 
 test("first-use seeded PDF enters real local IndexedDB and edited details survive restart", async () => {
@@ -266,10 +370,14 @@ test("closing the panel during a pending action restores an interrupted result w
     await page.locator('#fill-details').click();
     await expect(page.locator('#report-summary')).toContainText('Action in progress');
     await expect.poll(() => page.evaluate(() => __storageData.jobpilot_ui_v1?.report?.status)).toBe('running');
+    await expect.poll(() => page.evaluate(() => __storageData.jobpilot_runs_v1?.[0]?.status)).toBe('running');
     await page.reload();
     await expect(page.locator('#report-summary')).toContainText('Autofill interrupted');
     await expect(page.locator('#report-details')).toContainText('Its final result is unknown');
     await expect(page.locator('#fill-details')).toBeEnabled();
+    assert.equal(await page.evaluate(() => __storageData.jobpilot_runs_v1.length), 1);
+    assert.equal(await page.evaluate(() => __storageData.jobpilot_runs_v1[0].health), 'problem');
+    assert.ok(await page.evaluate(() => __storageData.jobpilot_runs_v1[0].warnings.includes('panel_closed')));
     assert.equal(await page.evaluate(() => __extensionCalls.length), 0, 'opening the panel must not replay an uncertain action');
   });
 });
@@ -286,6 +394,98 @@ test("an interrupted inspection cannot claim that no required fields remain", as
   });
 });
 
+test('a failed autofill is automatically logged, survives another run and exports diagnostic evidence only', async () => {
+  await workspace(async page => {
+    await page.locator('#capture-job').click();
+    await page.evaluate(() => {
+      const execute = chrome.scripting.executeScript;
+      chrome.scripting.executeScript = async request => request.args?.[0]?.action === 'details'
+        ? [{frameId: 0, result: {status: 'partial', filled: [], skipped: [], required: [], pageUrl: 'https://boards.greenhouse.io/example/jobs/123?secret=token',
+          failed: [{label: 'Location', value: 'private address', reason: 'This field changed or is ambiguous. Review it manually.'}],
+          resume: {status: 'failed', filename: 'private.pdf', dataUrl: 'private bytes', message: 'Exception for private@example.org'}}}]
+        : execute(request);
+    });
+    await page.locator('#fill-details').click();
+    await expect(page.locator('#report-log-status')).toContainText('Saved in History');
+    await expect(page.locator('#problem-count')).toHaveText('1');
+    await page.locator('#inspect-form').click();
+    await expect(page.locator('#report-summary')).toContainText('required');
+    await page.locator('#clear-report').click();
+    await page.reload();
+    await page.locator('[data-tab="history"]').click();
+    await expect(page.locator('#run-history')).toContainText('Fill details');
+    await expect(page.locator('#run-history')).toContainText('Location');
+    assert.equal(await page.evaluate(() => __storageData.jobpilot_runs_v1.length), 2);
+    const downloading = page.waitForEvent('download');
+    await page.locator('#export-problems').click();
+    const download = await downloading;
+    const text = await readFile(await download.path(), 'utf8');
+    const exported = JSON.parse(text);
+    assert.equal(exported.runs.length, 1);
+    assert.equal(exported.runs[0].frames[0].failed[0].reason, 'ambiguous_field');
+    for (const secret of ['private address', 'private.pdf', 'private bytes', 'private@example.org', '?secret', 'token']) assert.ok(!text.includes(secret));
+    const path = process.env.JOBPILOT_TEST_ARTIFACTS || '/tmp/jobpilot-extension-checks';
+    await mkdir(path, {recursive: true});
+    await page.screenshot({path: path + '/jobpilot-problem-history.png', fullPage: true});
+  });
+});
+
+test('expected manual answers stay out of open problems until reported, with reversible resolution', async () => {
+  await workspace(async page => {
+    await page.locator('#capture-job').click();
+    await page.locator('#inspect-form').click();
+    await expect(page.locator('#report-log-status')).toContainText('Saved in History');
+    await expect(page.locator('#problem-count')).toHaveText('0');
+    await page.locator('#report-problem').click();
+    await expect(page.locator('[data-tab="history"]')).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('#problem-count')).toHaveText('1');
+    await page.getByRole('button', {name: 'Mark resolved', exact: true}).click();
+    await expect(page.locator('#problem-count')).toHaveText('0');
+    await page.locator('#history-filter').selectOption('all');
+    await expect(page.locator('#run-history')).toContainText('Resolved');
+    await page.getByRole('button', {name: 'Reopen', exact: true}).click();
+    await expect(page.locator('#problem-count')).toHaveText('1');
+    await page.reload();
+    await expect(page.locator('#problem-count')).toHaveText('1');
+  });
+});
+
+test('diagnostic storage failure preserves action results without retrying autofill', async () => {
+  await workspace(async page => {
+    await page.locator('#capture-job').click();
+    await page.evaluate(() => {
+      const send = chrome.runtime.sendMessage;
+      chrome.runtime.sendMessage = message => message.operation === 'saveRun'
+        ? Promise.resolve({ok: false, error: 'Storage quota exceeded'}) : send(message);
+    });
+    await page.locator('#fill-details').click();
+    await expect(page.locator('#notice')).toContainText('history could not be saved');
+    await expect(page.locator('#report-summary')).toContainText('confirmed filled');
+    await expect(page.locator('#report-problem')).toBeDisabled();
+    assert.equal(await page.evaluate(() => __extensionCalls.filter(call => call.args?.[0]?.action === 'details').length), 1);
+  });
+});
+
+test('the last pre-history report migrates once without replaying actions or copying answers', async () => {
+  await workspace(async page => {
+    await page.evaluate(async () => chrome.storage.local.set({jobpilot_ui_v1: {
+      job: {company: 'Example', title: 'Engineer', url: 'https://jobs.ashbyhq.com/example/req/application'},
+      report: {uiAction: 'details', status: 'partial', checkedAt: '2026-10-08T10:00:00Z',
+        frames: [{failed: [{label: 'Email', value: 'private@example.org', reason: 'This field changed or is ambiguous. Review it manually.'}]}]},
+    }}));
+    await page.reload();
+    await expect(page.locator('#report-log-status')).toContainText('Saved in History');
+    await page.reload();
+    await expect(page.locator('#problem-count')).toHaveText('1');
+    const records = await page.evaluate(() => __storageData.jobpilot_runs_v1);
+    assert.equal(records.length, 1);
+    assert.equal(records[0].startedAt, '2026-10-08T10:00:00.000Z');
+    assert.equal(records[0].version, '', 'a migrated report must not claim it ran on the new version');
+    assert.ok(!JSON.stringify(records).includes('private@example.org'));
+    assert.equal(await page.evaluate(() => __extensionCalls.length), 0);
+  });
+});
+
 test("panel fits narrow widths and keeps keyboard navigation available", async () => {
   await workspace(async page => {
     const overflowing = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth);
@@ -298,4 +498,209 @@ test("panel fits narrow widths and keeps keyboard navigation available", async (
     await mkdir(path, { recursive: true });
     await page.screenshot({ path: path + "/jobpilot-profile-narrow.png", fullPage: true });
   }, { width: 320 });
+});
+
+test('the career workspace control opens the bundled app on job, unrelated, and browser pages', async () => {
+  await workspace(async page => {
+    for (const url of ['https://jobs.ashbyhq.com/example/req/application', 'https://jobs.lever.co/example/req',
+      'https://work.example.org/role', 'chrome://extensions/', 'file:///tmp/resume.pdf']) {
+      await page.evaluate(url => { chrome.tabs.query = async () => [{id: 17, url}]; }, url);
+      await page.locator('#open-workspace').click();
+      await expect(page.locator('#notice')).toContainText('Career workspace opened');
+    }
+    const tabs = await page.evaluate(() => __extensionCalls.filter(call => call.tabCreated));
+    assert.equal(tabs.length, 5);
+    assert.ok(tabs.every(call => call.tabCreated.url.endsWith('/workspace.html')));
+  });
+});
+
+test('saving locks all profile controls and preserves a failed save for retry', async () => {
+  await workspace(async page => {
+    await page.locator('[data-tab="profile"]').click();
+    await page.locator('[name="first_name"]').fill('Unsaved name');
+    await page.evaluate(() => {
+      const send = chrome.runtime.sendMessage;
+      chrome.runtime.sendMessage = message => message.operation === 'saveProfile'
+        ? new Promise(resolve => { globalThis.__releaseSave = () => resolve({ok:false,error:'Synthetic storage failure'}); }) : send(message);
+    });
+    await page.locator('#save-profile').click();
+    await expect(page.locator('[name="first_name"]')).toBeDisabled();
+    await expect(page.locator('#add-work')).toBeDisabled();
+    await expect(page.locator('#add-education')).toBeDisabled();
+    await expect(page.locator('#open-workspace')).toHaveAttribute('aria-disabled', 'true');
+    await page.evaluate(() => __releaseSave());
+    await expect(page.locator('#notice')).toContainText('Synthetic storage failure');
+    await expect(page.locator('[name="first_name"]')).toHaveValue('Unsaved name');
+    await expect(page.locator('[name="first_name"]')).toBeEnabled();
+    await expect(page.locator('#save-profile')).toBeEnabled();
+  });
+});
+
+test('clear report cannot erase a pending action and unsupported pages show actionable failure', async () => {
+  await workspace(async page => {
+    await page.locator('#capture-job').click();
+    await page.evaluate(() => {
+      const execute = chrome.scripting.executeScript;
+      chrome.scripting.executeScript = request => request.args?.[0]?.action
+        ? new Promise(resolve => { globalThis.__releaseAction = () => resolve([{frameId:0,result:{status:'complete',filled:[],skipped:[],failed:[],required:[]}}]); })
+        : execute(request);
+    });
+    await page.locator('#inspect-form').click();
+    await expect.poll(() => page.evaluate(() => typeof __releaseAction)).toBe('function');
+    await expect(page.locator('#clear-report')).toBeDisabled();
+    await page.locator('#clear-report').dispatchEvent('click');
+    await page.evaluate(() => __releaseAction());
+    await expect(page.locator('#report-summary')).toContainText('No empty visible required fields');
+    await page.evaluate(() => { chrome.tabs.query = async () => [{id:17,url:'https://example.org/jobs/1'}]; });
+    await page.locator('#fill-details').click();
+    await expect(page.locator('#notice')).toContainText('Autofill supports Greenhouse, Lever, Ashby, and Workday');
+    await expect(page.locator('#report-summary')).toContainText('Autofill interrupted');
+    await expect(page.locator('#fill-details')).toBeEnabled();
+  });
+});
+
+test('work and education Add and Remove controls save the intended remaining rows', async () => {
+  await workspace(async page => {
+    await page.locator('[data-tab="profile"]').click();
+    await page.locator('#add-work').click(); await page.locator('#work-history [data-field="company"]').fill('Keep employer');
+    await page.locator('#add-work').click(); await page.getByRole('button',{name:'Remove position 2',exact:true}).click();
+    await page.locator('#add-education').click(); await page.locator('#education-history [data-field="school"]').fill('Keep school');
+    await page.locator('#add-education').click(); await page.getByRole('button',{name:'Remove education 2',exact:true}).click();
+    await page.locator('#save-profile').click(); await expect(page.locator('#notice')).toContainText('Profile saved');
+    await page.reload(); await expect(page.locator('#work-history [data-field="company"]')).toHaveValue('Keep employer');
+    await expect(page.locator('#education-history [data-field="school"]')).toHaveValue('Keep school');
+    assert.equal(await page.locator('#work-history [data-history]').count(),1);
+    assert.equal(await page.locator('#education-history [data-history]').count(),1);
+  });
+});
+
+test('résumé delete, invalid-file retry, backup preview, and cancel controls preserve existing data', async () => {
+  await workspace(async page => {
+    await page.locator('[data-tab="profile"]').click();
+    const file = {name:'One.pdf',mimeType:'application/pdf',buffer:Buffer.from('%PDF-1.4\nfixture')};
+    await page.locator('#resume-upload').setInputFiles(file);
+    await expect(page.locator('#resume-library')).toContainText('One.pdf');
+    await page.getByRole('button',{name:'Delete résumé One.pdf'}).click();
+    await expect(page.locator('#resume-library button')).toHaveText('Delete?');
+    await page.getByRole('button',{name:'Delete résumé One.pdf'}).click();
+    await expect(page.locator('#resume-library')).toContainText('No résumés yet');
+    const invalid = {name:'Wrong.txt',mimeType:'text/plain',buffer:Buffer.from('wrong type')};
+    for (let i=0;i<2;i++) {
+      await page.locator('#resume-upload').setInputFiles(invalid);
+      await expect(page.locator('#notice')).toContainText('supports PDF');
+      await expect(page.locator('#resume-upload')).toHaveValue('');
+    }
+    const backup = {schemaVersion:1,profile:{first_name:'Imported'},applications:[],resumes:[]};
+    const importFile = {name:'backup.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(backup))};
+    await page.locator('#import-data').setInputFiles(importFile);
+    await expect(page.locator('#import-preview')).toBeVisible(); await page.locator('#cancel-import').click();
+    await expect(page.locator('#import-preview')).toBeHidden(); await expect(page.locator('#import-data')).toHaveValue('');
+    await page.locator('#import-data').setInputFiles(importFile); await page.locator('#confirm-import').click();
+    await expect(page.locator('[name="first_name"]')).toHaveValue('Imported');
+  });
+});
+
+test('application filter, status, refresh, duplicate navigation and empty-state controls show intended records', async () => {
+  await workspace(async page => {
+    await page.locator('[data-tab="applications"]').click();
+    await page.getByRole('button',{name:'Go to Apply',exact:true}).click();
+    await expect(page.locator('[data-tab="apply"]')).toHaveAttribute('aria-selected','true');
+    await page.locator('#capture-job').click(); await page.locator('#save-started').click();
+    await page.getByRole('button',{name:'View applications',exact:true}).click();
+    const status = page.getByLabel('Status for Software Engineer at Example Co');
+    await status.selectOption('interview');
+    await expect(page.locator('#notice')).toContainText('Application status updated');
+    await page.locator('#application-filter').selectOption('submitted');
+    await expect(page.locator('#application-list')).toContainText('No applications with this status');
+    await page.locator('#application-filter').selectOption('interview');
+    await page.locator('#refresh-applications').click();
+    await expect(page.locator('#application-list')).toContainText('Example Co');
+    await expect(page.getByLabel('Status for Software Engineer at Example Co')).toHaveValue('interview');
+    await page.locator('[data-tab="apply"]').click();
+    await page.getByRole('button',{name:'Add profile',exact:true}).click();
+    await expect(page.locator('[data-tab="profile"]')).toHaveAttribute('aria-selected','true');
+  });
+});
+
+test("top-first layout places live availability and primary form actions above job tracker and privacy cards", async () => {
+  await workspace(async page => {
+    await expect(page.locator("#portal-status")).toContainText("Greenhouse · Autofill ready");
+    const tops = await page.evaluate(() => {
+      const topOf = selector => document.querySelector(selector).getBoundingClientRect().top;
+      return {
+        portalStatus: topOf("#portal-status"),
+        fillDetails: topOf("#fill-details"),
+        inspectForm: topOf("#inspect-form"),
+        attachResume: topOf("#attach-resume"),
+        securityCode: topOf("#fill-security-code"),
+        jobForm: topOf("#job-form"),
+        scanPrivacy: topOf("#scan-privacy"),
+      };
+    });
+    assert.ok(tops.portalStatus < tops.fillDetails, "availability banner sits at the top of Apply");
+    assert.ok(tops.fillDetails < tops.jobForm, "Fill details sits above the job form");
+    assert.ok(tops.inspectForm < tops.jobForm, "Inspect fields sits above the job form");
+    assert.ok(tops.attachResume < tops.jobForm, "Attach selected résumé sits above the job form");
+    assert.ok(tops.securityCode < tops.jobForm, "Greenhouse security code sits above the job form");
+    assert.ok(tops.jobForm < tops.scanPrivacy, "privacy card sits below the primary actions and job details");
+  });
+});
+
+test("switching to a new supported job tab auto-syncs the draft on Fill details without throwing a stale-draft lock", async () => {
+  await workspace(async page => {
+    await page.locator("#capture-job").click();
+    await expect(page.locator("#job-url")).toHaveValue("https://boards.greenhouse.io/example/jobs/123");
+    await page.evaluate(() => {
+      const nextUrl = "https://boards.greenhouse.io/other/jobs/456";
+      chrome.tabs.query = async () => [{ id: 19, url: nextUrl, title: "Staff Engineer at Other Co" }];
+      chrome.scripting.executeScript = async request => {
+        __extensionCalls.push({ files: request.files, args: request.args });
+        if (request.files) return [{ frameId: 0 }];
+        if (request.args?.[0]?.probe) return [{ frameId: 0, result: { pageUrl: nextUrl, hasForm: true, isTop: true, visibleEmbeds: [] } }];
+        return [{ frameId: 0, result: {
+          action: request.args[0].action, status: "complete", provider: "Greenhouse", pageUrl: nextUrl,
+          filled: [{ label: "First name", key: "first_name" }], skipped: [], failed: [], required: [],
+          resume: { status: "not-requested", message: "" },
+        } }];
+      };
+    });
+    await page.locator("#fill-details").click();
+    await expect(page.locator("#job-url")).toHaveValue("https://boards.greenhouse.io/other/jobs/456");
+    await expect(page.locator("#report-summary")).toContainText("1 field confirmed filled");
+    await expect(page.locator("#notice")).toContainText("Autofill finished");
+  });
+});
+
+test("Greenhouse security code control validates empty input and reports filled verification code", async () => {
+  await workspace(async page => {
+    await page.locator('#capture-job').click();
+    await page.locator('#fill-security-code').click();
+    await expect(page.locator('#notice')).toContainText(/security code/i);
+
+    await page.evaluate(() => {
+      const execute = chrome.scripting.executeScript;
+      chrome.scripting.executeScript = async request => {
+        if (request.args?.[0]?.action !== 'security-code') return execute(request);
+        __extensionCalls.push({files: request.files, args: request.args});
+        return [{frameId: 0, result: {
+          action: 'security-code', status: 'complete', provider: 'Greenhouse',
+          pageUrl: 'https://boards.greenhouse.io/example/jobs/123',
+          filled: [{label: 'Security code', key: 'security_code'}], skipped: [], failed: [], required: [],
+          resume: {status: 'not-requested', message: ''},
+          securityCode: {status: 'filled', mode: 'segmented', count: 8, message: 'Security code filled across all verification boxes. Review the page and submit your application.'},
+        }}];
+      };
+    });
+    await page.locator('#security-code-input').fill('jebUzw3M');
+    await page.locator('#fill-security-code').click();
+    await expect(page.locator('#report-heading')).toHaveText('Security code result');
+    await expect(page.locator('#report-summary')).toContainText('1 security code challenge filled');
+    await expect(page.locator('#report-upload')).toContainText('Security code filled across all verification boxes');
+    await expect(page.locator('#report-upload')).toHaveClass(/good/);
+    const calls = await page.evaluate(() => __extensionCalls.filter(call => call.args?.[0]?.action === 'security-code'));
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].args[0].securityCode, 'jebUzw3M');
+    assert.deepEqual(calls[0].args[0].profile, {});
+    assert.equal(calls[0].args[0].resume, null);
+  });
 });
