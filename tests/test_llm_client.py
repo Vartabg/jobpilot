@@ -114,7 +114,8 @@ class TestCompleteViaGemini:
         kwargs = mock_post.call_args[1]
         assert "generativelanguage.googleapis.com" in url
         assert llm_client.GEMINI_MODEL in url
-        assert kwargs["params"] == {"key": "key-123"}
+        assert kwargs.get("params") in (None, {})
+        assert kwargs["headers"]["x-goog-api-key"] == "key-123"
         assert kwargs["json"]["contents"][0]["parts"][0]["text"] == "prompt"
 
     @patch("jobpilot.core.llm_client.requests.post")

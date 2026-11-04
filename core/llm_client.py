@@ -21,7 +21,7 @@ import requests
 
 from jobpilot.core.bro_client import BroUnavailable, chat_or_raise, is_bro_running
 from jobpilot.core.config import TIMEOUT_CHAT
-from jobpilot.core.logger import get_logger
+from jobpilot.core.logger import get_logger, redact_text
 
 log = get_logger(__name__)
 
@@ -48,6 +48,12 @@ class LLMUnavailable(Exception):
 
 def _gemini_api_key() -> str:
     return os.environ.get(GEMINI_API_KEY_ENV, "").strip()
+
+
+def _scrub_key(text: str, api_key: str) -> str:
+    """Remove a live API key (and key= URL params) from error text."""
+    out = text.replace(api_key, "[redacted]") if api_key else text
+    return redact_text(out)
 
 
 def get_provider() -> str | None:
@@ -103,14 +109,18 @@ def _complete_gemini(prompt: str, *, context: str | None = None) -> str:
     url = GEMINI_ENDPOINT.format(model=GEMINI_MODEL)
 
     try:
+        # Send the key in a header, never as a ?key= URL param: URLs are
+        # persisted by proxies, error reporters, and request logs.
         response = requests.post(
             url,
-            params={"key": api_key},
+            headers={"x-goog-api-key": api_key},
             json={"contents": [{"parts": [{"text": full_prompt}]}]},
             timeout=TIMEOUT_CHAT,
         )
     except requests.exceptions.RequestException as exc:
-        raise LLMUnavailable(f"Could not reach the Gemini API: {exc}") from exc
+        raise LLMUnavailable(
+            f"Could not reach the Gemini API: {_scrub_key(str(exc), api_key)}"
+        ) from exc
 
     if response.status_code != 200:
         raise LLMUnavailable(_gemini_error_message(response))

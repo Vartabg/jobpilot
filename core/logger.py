@@ -8,6 +8,7 @@ Provides a configured logger with:
 """
 
 import logging
+import re
 from logging.handlers import RotatingFileHandler
 
 from rich.logging import RichHandler
@@ -17,6 +18,43 @@ from jobpilot.core.config import DATA_DIR
 LOG_FILE = DATA_DIR / "jobpilot.log"
 
 _configured = False
+
+# Defense-in-depth for the DEBUG file log: JobPilot handles resumes, contact
+# details, and API keys, so a stray log line must never persist a credential
+# or an email address. Patterns classify by credential shape/assignment, not
+# by one product's key name, so renamed keys are still caught.
+_REDACTIONS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"[\w.+-]+@[\w-]+\.[\w.]+"), "[redacted-email]"),
+    (re.compile(r"AIza[0-9A-Za-z_-]{20,}"), "[redacted-key]"),
+    (re.compile(r"(?i)\bBearer\s+\S+"), "Bearer [redacted]"),
+    (
+        re.compile(
+            r"(?i)([\w-]*(?:api[_-]?key|access[_-]?token|auth[_-]?token|password|passwd|secret))(\s*[:=]\s*)\S+"
+        ),
+        r"\1\2[redacted]",
+    ),
+    (re.compile(r"(?i)([?&]key=)[^&\s]+"), r"\1[redacted]"),
+]
+
+
+def redact_text(text: str) -> str:
+    """Mask emails and credential-shaped values in a log message."""
+    out = text
+    for pattern, replacement in _REDACTIONS:
+        out = pattern.sub(replacement, out)
+    return out
+
+
+class RedactingFilter(logging.Filter):
+    """Logging filter that redacts credentials/PII before any handler writes."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            record.msg = redact_text(record.getMessage())
+            record.args = ()
+        except Exception:
+            pass
+        return True
 
 
 def setup_logging(level: int = logging.INFO) -> None:
@@ -40,6 +78,7 @@ def setup_logging(level: int = logging.INFO) -> None:
     )
     console_handler.setLevel(logging.INFO)
     console_handler.setFormatter(logging.Formatter("%(message)s"))
+    console_handler.addFilter(RedactingFilter())
     root.addHandler(console_handler)
 
     # Rotating file handler — detailed format for debugging
@@ -50,6 +89,7 @@ def setup_logging(level: int = logging.INFO) -> None:
         encoding="utf-8",
     )
     file_handler.setLevel(logging.DEBUG)
+    file_handler.addFilter(RedactingFilter())
     file_handler.setFormatter(
         logging.Formatter(
             "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
