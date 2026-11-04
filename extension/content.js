@@ -745,6 +745,15 @@
     }
     if (el.tagName === 'SELECT') return !placeholderOption(el.selectedOptions[0]) && optionMatches(el.selectedOptions[0].textContent,rule,profile);
     if (combo(el)) return el.getAttribute('aria-expanded')!=='true' && optionMatches(selectedCombo(el) || (!reactControl(el) ? el.value || el.textContent : ''),rule,profile);
+    if (rule.key === 'phone') {
+      const actual=String(el.value || '').trim(), expected=String(rule.value || '').trim();
+      // Formatting may change while the phone number stays identical. Compare
+      // every digit, including country prefixes; extensions and changed digits
+      // remain a hold. Native/ARIA validity was checked above.
+      if (actual === expected) return true;
+      return /^\+?[\d\s().-]+$/.test(actual) && /^\+?[\d\s().-]+$/.test(expected)
+        && /\d/.test(expected) && actual.replace(/\D/g,'') === expected.replace(/\D/g,'');
+    }
     return el.value === String(rule.value);
   }
   // Re-injecting the script must not let a second click race an existing run.

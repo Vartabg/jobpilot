@@ -33,6 +33,30 @@ async function fixture(html, run) {
   await page.addScriptTag({ content: script });
   try { return await run(page); } finally { await context.close(); }
 }
+
+test('phone formatting preserves every digit without weakening validity or accepting changed numbers',async t=>{
+  const cases=[
+    {name:'punctuation-only formatting',saved:'+1 555 010 1200',retained:'15550101200',filled:true},
+    {name:'formatted national number',saved:'5550101200',retained:'(555) 010-1200',filled:true},
+    {name:'changed digit',saved:'5550101200',retained:'5550101201',filled:false},
+    {name:'removed country prefix',saved:'+1 555 010 1200',retained:'5550101200',filled:false},
+    {name:'unexpected extension',saved:'5550101200',retained:'5550101200 ext 8',filled:false},
+    {name:'native validation failure',saved:'5550101200',retained:'(555) 010-1200',pattern:'[0-9]{10}',filled:false},
+    {name:'employer validation failure',saved:'5550101200',retained:'(555) 010-1200',ariaInvalid:true,filled:false},
+  ];
+  for (const row of cases) await t.test(row.name,async()=>{
+    await fixture(`<form id="application-form"><label>Phone<input type="tel" name="phone" required ${row.pattern ? `pattern="${row.pattern}"` : ''}></label></form>`,async page=>{
+      await page.evaluate(({retained,ariaInvalid})=>{
+        const input=document.querySelector('input');
+        input.addEventListener('input',()=>{input.value=retained;if(ariaInvalid)input.setAttribute('aria-invalid','true');});
+      },row);
+      const result=await execute(page,'details',{profile:{...profile,phone:row.saved}});
+      assert.equal(result.filled.some(field=>field.label==='Phone'),row.filled);
+      assert.equal(result.failed.some(field=>field.label==='Phone'),!row.filled);
+      assert.equal(await page.locator('input').inputValue(),row.retained);
+    });
+  });
+});
 const execute = (page, action, extra = {}) => page.evaluate(
   options => globalThis.__jobpilotRun(options), { action, profile, ...extra },
 );

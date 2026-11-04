@@ -110,3 +110,10 @@ test('tabs discloses only supported job identifiers; open rejects arbitrary URLs
   const opened = await routeLocalRequest(request('open', {url}));
   assert.equal(opened.tabId, 9); assert.deepEqual(calls[0].create, {url, active: false});
 });
+
+test('script loading and page permission failures have distinct static recovery messages',async()=>{
+  chrome.scripting.executeScript=async()=>{throw new Error("Could not load file: 'local-content.js'. PRIVATE_DETAIL");};
+  await assert.rejects(routeLocalRequest(request('inspect')),error=>/Reload JobPilot/.test(error.message) && !error.message.includes('PRIVATE_DETAIL'));
+  chrome.scripting.executeScript=async()=>{throw new Error('Cannot access contents of the page. PRIVATE_URL');};
+  await assert.rejects(routeLocalRequest(request('inspect')),error=>/toolbar icon/.test(error.message) && !error.message.includes('PRIVATE_URL'));
+});

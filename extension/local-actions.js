@@ -110,7 +110,12 @@ export async function routeLocalRequest(request) {
   const target = hasDocument ? {tabId: request.tabId, documentIds: [request.documentId]} : {tabId: request.tabId, frameIds: [0]};
   let installed;
   try { installed = await chrome.scripting.executeScript({target, files: ['content.js', 'local-content.js']}); }
-  catch { throw new Error('The inspected document is unavailable or page access expired. Inspect again; no action was replayed.'); }
+  catch (error) {
+    const message=String(error?.message || '');
+    if (/could not load file|cannot load file|failed to load.*script/i.test(message)) throw new Error('Chrome could not load JobPilot’s form scripts. Reload JobPilot in chrome://extensions, then reopen its side panel and Connect.');
+    if (/cannot access contents|must request permission|not allowed to access/i.test(message)) throw new Error('Chrome has not granted access to this application. Click the JobPilot toolbar icon on this application tab, then inspect again.');
+    throw new Error('The inspected document is unavailable or page access expired. Inspect again; no action was replayed.');
+  }
   const main = installed?.find(frame => frame.frameId === 0 && typeof frame.documentId === 'string' && frame.documentId && (!hasDocument || frame.documentId === request.documentId));
   if (!main) throw new Error('Chrome did not confirm the top application document. Inspect again.');
   await checkedTab(request);
