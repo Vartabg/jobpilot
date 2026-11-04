@@ -135,3 +135,9 @@ node --test extension/tests/*.test.mjs
 ```
 
 Browser tests use a separate Playwright Chromium profile and intercepted local fixtures. They do not access installed Chrome extensions, Chrome settings, or live employer applications. Tests cover conservative field matching, delayed dropdowns, rerenders, edits during autofill, interruptions, unanswered required controls, attachment evidence, local storage, and the side-panel workflow. Portal behavior can change; a passing fixture suite does not guarantee every live employer form behaves identically.
+# Local assistant connection
+
+Version 0.14 adds an opt-in local controller through Chrome native messaging.
+See [LOCAL_CONTROLLER.md](LOCAL_CONTROLLER.md) for installation, exact job-bound
+commands, employer-question exports and one-use submission safeguards. Existing
+manual actions remain available; a timeout or click is never counted as a receipt.

@@ -39,6 +39,13 @@
             </div>
           </div>
         </section>
+        <section class="card" aria-label="Local assistant connection">
+          <h2>Local assistant</h2>
+          <p id="local-status" role="status" aria-live="polite">Disconnected</p>
+          <div class="action-grid"><button id="local-connect" class="button" type="button">Connect</button><button id="local-disconnect" class="button" type="button" disabled>Disconnect</button></div>
+          <p class="fine-print">Connect after installing the local controller. Actions use this Chrome profile. <a href="LOCAL_CONTROLLER.md" target="_blank" rel="noopener">Setup instructions</a></p>
+          <p class="fine-print">Extension ID: <code id="local-extension-id"></code></p>
+        </section>
         <section id="report-card" class="card report-card" hidden>
           <div class="section-heading"><div><h2 id="report-heading">Form results</h2><p id="report-context"></p></div><button id="clear-report" type="button" class="text-button">Clear</button></div>
           <p id="report-summary" class="report-summary" role="status"></p>

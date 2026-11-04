@@ -4,13 +4,13 @@ import { createContext, runInContext } from "node:vm";
 import { test } from "node:test";
 
 const source = (await readFile(new URL("../background.js", import.meta.url), "utf8"))
-  .replace(/^import .*?;\s*/s, "");
+  .replace(/^import .*?;\s*/gm, "");
 
 function worker(execute) {
   let listener;
   const noopEvent = { addListener() {} };
   const context = createContext({
-    console, executeModelOperation: execute, initializeLocalData: async () => ({ seeded: false }),
+    console, executeModelOperation: execute, initializeLocalData: async () => ({ seeded: false }), installLocalBridge: () => {},
     chrome: {
       action: { onClicked: noopEvent },
       storage: { local: { setAccessLevel: async () => {} } },

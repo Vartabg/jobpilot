@@ -123,7 +123,9 @@ function setBusy(busy) {
   document.body.setAttribute('aria-busy', String(busy));
   $('main').inert = busy;
   if (busy) {
-    busyControls = new Map($$('main button, main input, main select, main textarea').map(control => [control, control.disabled]));
+    busyControls = new Map($$('main button, main input, main select, main textarea')
+      .filter(control => !control.closest('[aria-label="Local assistant connection"]'))
+      .map(control => [control, control.disabled]));
     for (const control of busyControls.keys()) control.disabled = true;
   } else {
     for (const [control, disabled] of busyControls) if (control.isConnected) control.disabled = disabled;
@@ -992,4 +994,8 @@ async function init() {
   } finally { setBusy(false); }
 }
 
-init().then(() => setupPrivacyPanel({perform, showNotice}));
+import { setupLocalPanel } from './local-panel.js';
+init().then(() => {
+  setupLocalPanel();
+  setupPrivacyPanel({perform, showNotice});
+});

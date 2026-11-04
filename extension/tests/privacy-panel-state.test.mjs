@@ -33,7 +33,7 @@ test('privacy initialization cannot leave Scan disabled when Capture is attempte
     const controls = new Map();
     const element = id => {
       if (!controls.has(id)) controls.set(id, {id, isConnected:true, disabled:['scan-privacy', 'privacy-export', 'privacy-clear'].includes(id),
-        hidden:false, inert:false, addEventListener() {}, setAttribute() {}});
+        hidden:false, inert:false, addEventListener() {}, setAttribute() {}, closest() {return null;}});
       return controls.get(id);
     };
     const mainControls = ['capture-job', 'inspect-form', 'fill-details', 'attach-resume', 'scan-privacy', 'privacy-export', 'privacy-clear', 'privacy-filter'].map(element);

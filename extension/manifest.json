@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "JobPilot",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "minimum_chrome_version": "116",
   "description": "Your local job workspace: privacy scans, profile, résumé library, reviewed autofill, and application tracking.",
   "action": {
@@ -10,7 +10,7 @@
   "side_panel": {
     "default_path": "sidepanel.html"
   },
-  "permissions": ["storage", "sidePanel", "scripting", "activeTab"],
+  "permissions": ["storage", "sidePanel", "scripting", "activeTab", "nativeMessaging"],
   "host_permissions": [
     "https://boards.greenhouse.io/*",
     "https://job-boards.greenhouse.io/*",

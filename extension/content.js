@@ -559,6 +559,11 @@
   async function fillCombo(el, rule, profile, guard) {
     const value = rule.value;
     const ctrl = reactControl(el) || el, input = el.tagName === 'INPUT' ? el : ctrl.querySelector('input');
+    const safeChoice = node => {
+      const native=node.closest('button,input[type="submit"],input[type="image"],input[type="reset"]');
+      return !native || !native.form || native.tagName==='BUTTON' && native.type==='button';
+    };
+    if (!safeChoice(ctrl)) return 'unsupported';
     const before = input?.value || '';
     if (!guard()) return 'interrupted';
     input?.focus();
@@ -583,6 +588,7 @@
       if (option) break;
     }
     if (option) {
+      if (!safeChoice(option)) return 'unsupported';
       if (!guard()) return 'interrupted';
       if (applicantChanged()) return 'preserved';
       option.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,button:0}));
@@ -743,7 +749,10 @@
   }
   // Re-injecting the script must not let a second click race an existing run.
   const runtime = globalThis.__jobpilotAutofillRuntime ||= {running:false};
-  globalThis.__jobpilotRun = async ({action='inspect',profile={},resume=null,securityCode='',requireVisible=false,expectedWorkdayStep='',disclosureOnly=false}={}) => {
+  // Isolated-world helpers for the job-bound local controller. DOM objects and
+  // applicant values are never sent through this internal interface to a page.
+  globalThis.__jobpilotLocalTools = {inventory, applicationScopes, labels, visible, selectedCombo};
+  globalThis.__jobpilotRun = async ({action='inspect',profile={},resume=null,securityCode='',requireVisible=false,expectedWorkdayStep='',disclosureOnly=false,localGuard=null}={}) => {
     if (!['inspect','details','resume','security-code'].includes(action)) throw new Error('Unknown JobPilot action');
     const workday = workdayPage();
     const report = {action,status:'complete',warnings:[],filled:[],skipped:[],failed:[],required:[],resume:{status:'not-requested',message:''},securityCode:{status:'not-requested',message:''},provider:workday ? 'Workday' : location.hostname.includes('greenhouse') ? 'Greenhouse' : location.hostname.includes('lever') ? 'Lever' : location.hostname.includes('ashby') ? 'Ashby' : 'Unsupported',pageUrl:location.href};
@@ -767,6 +776,7 @@
     const noticePageHide = () => { cancelled = true; };
     const guard = () => {
       noticeChange();
+      if (typeof localGuard === 'function' && !localGuard()) cancelled = true;
       if (!cancelled) return true;
       report.status = 'interrupted'; warn('The application page changed or its tab is no longer active. Existing progress was preserved; inspect the current page before retrying.');
       return false;

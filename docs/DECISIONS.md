@@ -126,3 +126,27 @@ real public-board reads; browser workflow with synthetic application forms;
 packaged binary launch, persistence and quit; website build, regression suite and
 accessible product/download flow. See the PR and product guide for exact evidence
 and the remaining manual/distribution checks.
+# 2026-11-04: Explicit local application controller
+
+The applicant requested a local alternative built on the installed Chrome
+extension and continued applications with employer-question evidence, without
+further TinyFish spending. Version 0.14 adds an opt-in native-messaging connection
+to an owner-only Unix socket and a standard-library Python controller. It uses
+explicit job/tab/document/snapshot bindings and individual supplied answers.
+Demographic preferences are excluded from local bulk filling. Legal/personal
+decisions require an explicit per-question answer; the controller does not infer
+consent, create accounts or solve challenges.
+
+This adds explicit final submission to the local controller, superseding the
+earlier manual-only final-click decision for this authorized workflow. Preparation
+checks the current form, accepted PDF evidence, required answers and one final
+button; a short-lived nonce permits one click. The worker records attempts before
+dispatch and prevents automatic retries across reload. Success still requires a
+separate exact employer receipt before updating the canonical tracker. The
+existing manual UI's final submission behavior is preserved.
+
+Exact fixed question labels, choices, constraints and observation provenance can
+be exported without entered applicant values. This is evidence of the current
+visible form state, not a complete survey. Workday and embedded flows remain
+manual pending a separate multistep contract. Design and review evidence are in
+`docs/plans/2026-11-04-local-application-bridge*.md`.

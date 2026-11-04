@@ -25,7 +25,7 @@ test('real MV3 scripting executes Workday capture, current-step fill and exact P
   const folder = await mkdtemp(join(tmpdir(), 'jobpilot-workday-mv3-'));
   const extension = join(folder, 'extension'); await mkdir(extension);
   const production = JSON.parse(await readFile(join(source, 'manifest.json'), 'utf8'));
-  assert.deepEqual(production.permissions, ['storage', 'sidePanel', 'scripting', 'activeTab']);
+  assert.deepEqual(production.permissions, ['storage', 'sidePanel', 'scripting', 'activeTab', 'nativeMessaging']);
   assert.equal(production.host_permissions.some(host => /workday/i.test(host)), false,
     'production uses the existing toolbar-triggered grant, not persistent Workday access');
   for (const entry of await readdir(source, {withFileTypes:true})) {

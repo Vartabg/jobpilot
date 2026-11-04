@@ -41,12 +41,19 @@ async function workspace(run, { width = 400, seed = null } = {}) {
     globalThis.__extensionCalls = [];
     const event = { addListener() {}, removeListener() {} };
     let modelQueue = Promise.resolve();
+    let localConnected = false;
     globalThis.chrome = {
       runtime: {
+        id: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         getManifest: () => installedManifest,
         getURL: path => new URL(path, location.href).href,
         onMessage: event,
         sendMessage: async message => {
+          if (message.type === 'jobpilot:local') {
+            if (message.op === 'connect') localConnected=true;
+            if (message.op === 'disconnect') localConnected=false;
+            return {ok:true,result:{connected:localConnected,extensionId:'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',pending:0}};
+          }
           if (message.type !== "jobpilot:model") throw new Error("Unknown mocked worker message");
           const result = modelQueue.then(async () => {
             try {
@@ -703,4 +710,19 @@ test("Greenhouse security code control validates empty input and reports filled 
     assert.deepEqual(calls[0].args[0].profile, {});
     assert.equal(calls[0].args[0].resume, null);
   });
+});
+
+test('local controller connects only on request and fits a narrow panel',async()=>{
+  await workspace(async page=>{
+    await expect(page.locator('#local-status')).toContainText('Disconnected');
+    await expect(page.locator('#local-extension-id')).toHaveText('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+    await expect(page.locator('#local-disconnect')).toBeDisabled();
+    await page.locator('#local-connect').click();
+    await expect(page.locator('#local-status')).toContainText('Connected to this Mac');
+    await expect(page.locator('#local-connect')).toBeDisabled();
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+    await page.screenshot({path:'/tmp/jobpilot-local-panel-320.png',fullPage:true});
+    await page.locator('#local-disconnect').click();
+    await expect(page.locator('#local-status')).toContainText('Disconnected');
+  },{width:320});
 });

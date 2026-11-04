@@ -4,7 +4,7 @@ import { createContext, runInContext } from "node:vm";
 import { test } from "node:test";
 
 const source = (await readFile(new URL("../background.js", import.meta.url), "utf8"))
-  .replace(/^import .*?;\s*/s, "");
+  .replace(/^import .*?;\s*/gm, "");
 const settle = () => new Promise(resolve => setImmediate(resolve));
 
 function background({ access = async () => {}, open = async () => {} } = {}) {
@@ -13,6 +13,7 @@ function background({ access = async () => {}, open = async () => {} } = {}) {
   const context = createContext({
     console: { error: (...args) => errors.push(args) },
     initializeLocalData: async () => {},
+    installLocalBridge: () => {},
     executeModelOperation: async () => {},
     chrome: {
       action: { onClicked: event("action") },

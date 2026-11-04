@@ -1,4 +1,7 @@
 import { executeModelOperation, initializeLocalData } from "./model.js";
+import { installLocalBridge } from './local-bridge.js';
+
+installLocalBridge();
 
 // One broker owns read/modify/write operations across every open side panel.
 // Returning true keeps this worker alive until the queued response is sent.
