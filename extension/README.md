@@ -2,6 +2,8 @@
 
 JobPilot keeps your profile, résumés, and application records in a Chrome side panel beside the job you are viewing. The extension works locally: the profile and tracker do not require the Python server or a hosted account.
 
+Version **0.15.0** organizes **Apply** into a human-guided 3-step checklist (**Step 1: Prepare this page** with one-click **Prepare application**, **Step 2: What's done & what's left** with a 2-line `Done for you` / `Left for you on page` summary, and **Step 3: Finish & move on** with **Submit & close tab**, **Pass & close tab**, and **Close handled tabs**), hides the Greenhouse security code prompt on non-Greenhouse pages unless a verification field is detected, collapses captured job details into a 1-line `Role · Company` bar, and tucks **Application privacy** and **Local assistant** into a collapsed bottom drawer.
+
 Version **0.13.0** puts live portal availability (`#portal-status`) and the primary form actions (**Fill details**, **Inspect fields**, **Attach selected résumé**, and **Greenhouse security code**) at the very top of the **Apply** tab, trims defensive boilerplate across panels, and automatically syncs the active supported tab when running an action on a newly opened job tab.
 
 Version **0.12.0** adds optional **Disclosure preferences** in Profile. Save your

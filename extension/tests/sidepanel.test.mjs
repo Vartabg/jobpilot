@@ -86,6 +86,7 @@ async function workspace(run, { width = 400, seed = null } = {}) {
       },
       tabs: {
         create: async details => { globalThis.__extensionCalls.push({tabCreated: details}); return {id: 99, ...details}; },
+        remove: async tabIds => { globalThis.__extensionCalls.push({tabsRemoved: [tabIds].flat()}); },
         query: async () => [{ id: 17, url: "https://boards.greenhouse.io/example/jobs/123", title: "Software Engineer at Example Co" }],
         onActivated: event, onUpdated: event,
       },
@@ -122,6 +123,7 @@ test('privacy button scans without profile data, keeps decline choices, and rest
             {label:'Gender identity',required:true,options:['Woman','Man','Prefer not to answer']}]}}}];
       };
     });
+    await page.locator('#advanced-tools-summary').click();
     await page.getByRole('button',{name:'Scan privacy on this page'}).click();
     await expect(page.locator('#privacy-count')).toContainText('2 flagged requests');
     await expect(page.locator('#privacy-findings')).toContainText('Response required; disclosure optional');
@@ -632,10 +634,13 @@ test('application filter, status, refresh, duplicate navigation and empty-state 
 test("top-first layout places live availability and primary form actions above job tracker and privacy cards", async () => {
   await workspace(async page => {
     await expect(page.locator("#portal-status")).toContainText("Greenhouse · Autofill ready");
+    await expect(page.locator("#advanced-tools-drawer")).not.toHaveAttribute("open", "");
+    await page.locator("#advanced-tools-summary").click();
     const tops = await page.evaluate(() => {
       const topOf = selector => document.querySelector(selector).getBoundingClientRect().top;
       return {
         portalStatus: topOf("#portal-status"),
+        prepareApp: topOf("#prepare-application"),
         fillDetails: topOf("#fill-details"),
         inspectForm: topOf("#inspect-form"),
         attachResume: topOf("#attach-resume"),
@@ -644,7 +649,8 @@ test("top-first layout places live availability and primary form actions above j
         scanPrivacy: topOf("#scan-privacy"),
       };
     });
-    assert.ok(tops.portalStatus < tops.fillDetails, "availability banner sits at the top of Apply");
+    assert.ok(tops.portalStatus < tops.prepareApp, "availability banner sits at the top of Apply");
+    assert.ok(tops.prepareApp < tops.fillDetails, "Prepare application sits above secondary single actions");
     assert.ok(tops.fillDetails < tops.jobForm, "Fill details sits above the job form");
     assert.ok(tops.inspectForm < tops.jobForm, "Inspect fields sits above the job form");
     assert.ok(tops.attachResume < tops.jobForm, "Attach selected résumé sits above the job form");
@@ -714,6 +720,7 @@ test("Greenhouse security code control validates empty input and reports filled 
 
 test('local controller connects only on request and fits a narrow panel',async()=>{
   await workspace(async page=>{
+    await page.locator('#advanced-tools-summary').click();
     await expect(page.locator('#local-status')).toContainText('Disconnected');
     await expect(page.locator('#local-extension-id')).toHaveText('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
     await expect(page.locator('#local-disconnect')).toBeDisabled();
@@ -741,5 +748,93 @@ test('saved failures from a different application show prominent provenance',asy
     await expect(page.locator('#report-current-warning')).toContainText('Inspect fields');
     await expect(page.locator('#report-details')).toContainText('Country*');
     await page.screenshot({path:'/tmp/jobpilot-saved-results-warning.png',fullPage:true});
+  });
+});
+
+test('one-click Prepare application captures the job, fills details, attaches selected PDF, collapses job summary, and renders human checklist', async () => {
+  await workspace(async page => {
+    await page.evaluate(() => {
+      const url = 'https://boards.greenhouse.io/example/jobs/123';
+      chrome.scripting.executeScript = async request => {
+        __extensionCalls.push({files: request.files, args: request.args});
+        if (request.files) return [{frameId: 0}];
+        if (request.args?.[0]?.probe) return [{frameId: 0, result: {pageUrl: url, hasForm: true, isTop: true, visibleEmbeds: []}}];
+        if (request.args?.[0]?.action === 'details') {
+          return [{frameId: 0, result: {
+            action: 'details', status: 'complete', provider: 'Greenhouse', pageUrl: url,
+            filled: [{label: 'First Name', key: 'first_name'}, {label: 'Email', key: 'email'}],
+            skipped: [{label: 'Resume/CV', reason: 'Use Attach résumé separately'}],
+            failed: [], required: [{label: 'Resume/CV', type: 'file'}, {label: 'Salary expectations', type: 'text'}],
+            resume: {status: 'not-requested', message: ''},
+          }}];
+        }
+        if (request.args?.[0]?.action === 'resume') {
+          return [{frameId: 0, result: {
+            action: 'resume', status: 'complete', provider: 'Greenhouse', pageUrl: url,
+            filled: [], skipped: [], failed: [],
+            required: [{label: 'Salary expectations', type: 'text'}],
+            resume: {status: 'accepted', filename: 'Exact.pdf', message: 'Form displays Exact.pdf'},
+          }}];
+        }
+        return [{frameId: 0, result: {company: 'Example Co', title: 'Software Engineer', pageUrl: url, documentType: 'text/html'}}];
+      };
+    });
+    await page.locator('#prepare-application').click();
+    await expect(page.locator('#report-checklist')).toBeVisible();
+    await expect(page.locator('#report-checklist')).toContainText('Done for you: Filled 2 fields · Attached Exact.pdf');
+    await expect(page.locator('#report-checklist')).toContainText('Left for you on page (1): Salary expectations');
+    await expect(page.locator('#report-upload')).toContainText('Form displays Exact.pdf');
+    await expect(page.locator('#job-summary-text')).toHaveText('Software Engineer · Example Co');
+    await expect(page.locator('#job-details-drawer')).not.toHaveAttribute('open', '');
+    await page.locator('#job-summary-toggle').click();
+    await expect(page.locator('#job-details-drawer')).toHaveAttribute('open', '');
+  }, {seed: {profile: {first_name: 'Alex', email: 'alex@example.org'}, resumes: [{path: 'initial-resume.pdf', name: 'Exact.pdf', label: 'Exact'}]}});
+});
+
+test('situational Greenhouse security code hides on non-Greenhouse portals unless a security code field is reported', async () => {
+  await workspace(async page => {
+    await expect(page.locator('#security-code-section')).toBeVisible();
+    await page.evaluate(() => {
+      const ashbyUrl = 'https://jobs.ashbyhq.com/example/req-1/application';
+      chrome.tabs.query = async () => [{id: 21, url: ashbyUrl, title: 'Engineer at Example'}];
+      chrome.scripting.executeScript = async request => {
+        __extensionCalls.push({files: request.files, args: request.args});
+        return [{frameId: 0, result: {company: 'Example', title: 'Engineer', pageUrl: ashbyUrl, documentType: 'text/html'}}];
+      };
+    });
+    await page.locator('#capture-job').click();
+    await expect(page.locator('#security-code-section')).toBeHidden();
+  });
+});
+
+test('Submit & close tab, Pass & close tab, and Close handled tabs record outcomes and remove only the intended browser tabs', async () => {
+  await workspace(async page => {
+    await page.locator('#submit-close-tab').click();
+    await expect(page.locator('#notice')).toContainText('Recorded as submitted and closed the job tab');
+    let removed = await page.evaluate(() => __extensionCalls.filter(c => c.tabsRemoved).flatMap(c => c.tabsRemoved));
+    assert.deepEqual(removed, [17]);
+    await expect(page.locator('#application-count')).toHaveText('1');
+
+    await page.evaluate(() => {
+      __extensionCalls.length = 0;
+      chrome.tabs.query = async queryInfo => {
+        if (queryInfo?.active) return [{id: 25, url: 'https://jobs.lever.co/acme/role-2', title: 'Solutions Architect - Acme'}];
+        return [
+          {id: 17, url: 'https://boards.greenhouse.io/example/jobs/123', pinned: false},
+          {id: 18, url: 'https://boards.greenhouse.io/example/jobs/123', pinned: true},
+          {id: 25, url: 'https://jobs.lever.co/acme/role-2', pinned: false},
+          {id: 30, url: undefined, pinned: false},
+        ];
+      };
+    });
+    await page.locator('#close-handled-tabs').click();
+    await expect(page.locator('#notice')).toContainText('Closed 1 handled job tab');
+    removed = await page.evaluate(() => __extensionCalls.filter(c => c.tabsRemoved).flatMap(c => c.tabsRemoved));
+    assert.deepEqual(removed, [17]);
+
+    await page.locator('#pass-close-tab').click();
+    await expect(page.locator('#notice')).toContainText('Passed on this role and closed the job tab');
+    removed = await page.evaluate(() => __extensionCalls.filter(c => c.tabsRemoved).flatMap(c => c.tabsRemoved));
+    assert.deepEqual(removed, [17, 25]);
   });
 });

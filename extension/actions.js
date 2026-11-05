@@ -267,7 +267,11 @@ export async function runCurrentAction(action, profile, resume = null, {expected
         expectedIdentity: normalizeJobUrl(url.href).identity, expectedPageUrl: url.href}]});
       const result = results?.find(item => item.result && !Array.isArray(item.result)
         && Array.isArray(item.result.filled) && Array.isArray(item.result.required));
-      report.frames.push(result ? {frameId: result.frameId ?? frame.frameId, ...result.result}
+      report.frames.push(result ? {
+        frameId: result.frameId ?? frame.frameId,
+        ...(frame.result.workdayScope ? {workdayScope: frame.result.workdayScope} : {}),
+        ...result.result,
+      }
         : frameFailure(frame.frameId, 'No document result'));
     } catch (error) { report.frames.push(frameFailure(frame.frameId, error)); }
     try { await unchangedPage(tab.id, url.href); }

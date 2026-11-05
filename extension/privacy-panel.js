@@ -49,6 +49,7 @@ export async function setupPrivacyPanel({perform, showNotice}) {
     $('privacy-export').disabled = !report;
     $('privacy-clear').disabled = !report;
     if (!report) return;
+    $('advanced-tools-drawer')?.setAttribute('open', '');
     const findings = report.findings || [];
     $('privacy-context').textContent = [publicUrl(report.source_url),
       report.checked_at ? new Date(report.checked_at).toLocaleString() : ''].filter(Boolean).join(' · ');

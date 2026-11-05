@@ -1,3 +1,24 @@
+# 2026-11-05 — Human-guided 3-step Apply flow and situational controls (0.15.0)
+
+## Concept & User Feedback Record
+- **Who it is for & purpose:** The applicant moving through live job applications who wants the side panel to read like a simple human checklist (*1. Prepare application → 2. See what's done & what's left for you → 3. Log submission*) instead of a flat toolbox of separate mechanics and developer plumbing.
+- **Concrete action-to-result relationship:**
+  - Clicking one primary button (**`Prepare application`**, `#prepare-application`) syncs/captures the active job tab, fills saved profile details, and attaches the selected PDF résumé in one coordinated sequence, then displays a plain-English 2-line human checklist (`#report-checklist`): **✓ Done for you** and **→ Left for you on the page**.
+  - Situational and secondary controls stay out of the way until needed: the Greenhouse 8-character security code box (`#security-code-section`) hides on non-Greenhouse pages unless a security-code field is detected; `Job details & tracker` collapses its text inputs into a 1-line `Role · Company` summary bar (`#job-details-drawer`) once a job is captured; and `Application privacy` + `Local assistant` live in a collapsed `Privacy scan & local assistant` drawer (`#advanced-tools-drawer`) at the bottom of `Apply`.
+  - Tab cleanup is built directly into Step 3 (`Finish & move on`): clicking **`Submit & close tab`** (`#submit-close-tab`) records the submission (auto-syncing role/company from the active tab if needed) and closes the browser tab; clicking **`Pass & close tab`** (`#pass-close-tab`) closes a tab the user decided to move on from and advances to the next tab; and **`Close handled tabs`** (`#close-handled-tabs`) closes open job tabs in the current window that already match submitted/withdrawn/rejected tracker records.
+- **Accepted by user:**
+  - Top-first layout from `0.13.0` (`ok cool i like it`).
+  - Approach 1: One-click **`Prepare application`** + 3-step human checklist (*Done for you → Left for you → Log submission*), while keeping single-action `Fill details`, `Inspect fields`, and `Attach selected résumé` accessible for granular use.
+  - Hiding the Greenhouse security code section unless on a Greenhouse page or when a security code field is detected.
+  - Collapsing `Job details & tracker` inputs into a 1-line `Role · Company` summary once captured until `Edit / notes` is clicked, keeping `Save as started` and `I submitted this` immediately clickable.
+  - Moving `Local assistant` (CLI bridge) and `Application privacy` into a collapsed bottom drawer.
+  - Direct tab-closing actions for tabs that have been applied to (`Submit & close tab`, `Close handled tabs`) or chosen to move on from (`Pass & close tab`).
+- **Rejected by user:**
+  - Multi-screen wizard mode that hides steps behind Next/Back navigation.
+  - Keeping all situational cards (`Greenhouse security code`, full `Job details` inputs, `Local assistant`, `Application privacy`) permanently expanded on every page.
+- **Undecided / deferred:**
+  - Automated multi-page navigation across ATS steps (remains intentionally manual).
+
 # 2026-11-04 — Top-first side panel layout, Greenhouse security code, and active-tab reliability (0.13.0)
 
 ## Concept & User Feedback Record
