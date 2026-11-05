@@ -126,6 +126,10 @@ Inspection also returns a separate `diagnostics` object with document visibility
 and control-validation booleans/counts. It never opens menus or returns entered
 values, selected labels or validation messages. Remove this operational supplement
 from the sanitized research copy before importing it into the article ledger.
+An Ashby page using a known container without a semantic form can return a
+read-only container inventory with `inspectionComplete: false` and an empty
+snapshot. It cannot authorize filling, answers, attachments or submission and
+must stay separate from verified form inventories in the research ledger.
 
 Import sanitized observations into the research ledger with employer/role,
 category, exact wording, requiredness, evidence JSON pointer, source URL, date,

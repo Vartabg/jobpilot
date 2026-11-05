@@ -726,3 +726,20 @@ test('local controller connects only on request and fits a narrow panel',async()
     await expect(page.locator('#local-status')).toContainText('Disconnected');
   },{width:320});
 });
+
+test('saved failures from a different application show prominent provenance',async()=>{
+  await workspace(async page=>{
+    await page.evaluate(async()=>{
+      await chrome.storage.local.set({jobpilot_ui_v1:{job:{url:'https://boards.greenhouse.io/example/jobs/456'},
+        report:{pageUrl:'https://boards.greenhouse.io/example/jobs/456',uiAction:'details',status:'partial',
+          frames:[{frameId:0,failed:[{label:'Country*',reason:'Review this field.'},{label:'Gender',reason:'Review this field.'}],filled:[],skipped:[],required:[]}]}}});
+    });
+    await page.reload();
+    await expect(page.locator('#report-heading')).toHaveText('Saved results from another application');
+    await expect(page.locator('#report-current-warning')).toBeVisible();
+    await expect(page.locator('#report-current-warning a')).toHaveAttribute('href','https://boards.greenhouse.io/example/jobs/456');
+    await expect(page.locator('#report-current-warning')).toContainText('Inspect fields');
+    await expect(page.locator('#report-details')).toContainText('Country*');
+    await page.screenshot({path:'/tmp/jobpilot-saved-results-warning.png',fullPage:true});
+  });
+});

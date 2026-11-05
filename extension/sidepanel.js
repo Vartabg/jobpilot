@@ -176,6 +176,7 @@ async function refreshActiveTab() {
     state.activeTab = null;
   }
   renderPortalStatus();
+  renderReport();
 }
 
 function renderPortalStatus() {
@@ -468,6 +469,17 @@ function renderReport() {
   if (!state.report) return;
   const report = state.report;
   const frames = safeReportFrames(report);
+  const reportUrl=validWebUrl(report.pageUrl || frames[0]?.pageUrl);
+  const activeUrl=validWebUrl(state.activeTab?.url);
+  const differentApplication=!!reportUrl && !!activeUrl && !sameApplicationUrl(reportUrl,activeUrl);
+  const provenance=$('#report-current-warning');
+  provenance.hidden=!differentApplication;
+  provenance.replaceChildren();
+  if(differentApplication) {
+    const original=element('a','','another application');original.href=reportUrl;original.target='_blank';original.rel='noopener';
+    provenance.append(document.createTextNode('These saved results belong to '),original,
+      document.createTextNode('. Click Inspect fields to check the current tab.'));
+  }
   const groups = { filled: [], skipped: [], failed: [], required: [] };
   const warnings = Array.isArray(report.warnings) ? [...report.warnings] : [];
   for (const frame of frames) {
@@ -482,7 +494,7 @@ function renderReport() {
   const incomplete = interrupted || report.status === 'partial' || groups.failed.length > 0
     || frames.some(frame => ['partial', 'interrupted'].includes(frame.status));
   const action = report.uiAction || frames[0]?.action || 'inspect';
-  $('#report-heading').textContent = action === 'resume' ? 'Résumé result'
+  $('#report-heading').textContent = differentApplication ? 'Saved results from another application' : action === 'resume' ? 'Résumé result'
     : action === 'details' ? 'Autofill results'
     : action === 'security-code' ? 'Security code result'
     : 'Field inspection';

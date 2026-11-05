@@ -34,6 +34,21 @@ test('read-only diagnostics expose validation state without opening menus or exp
   });
 });
 
+test('unverified form probe reports only control state and cannot authorize any mutation',async()=>{
+  await fixture('<main class="ashby-application-form-container"><div class="ashby-application-form-field-entry"><label class="ashby-application-form-question-title" for="country">Country*</label><input id="country" role="combobox" value="PRIVATE_COUNTRY" aria-invalid="true"></div><label for="gender">Gender</label><input id="gender" role="combobox" value="PRIVATE_GENDER"></main>',async page=>{
+    const result=await inspect(page);
+    assert.equal(result.inspectionComplete,false);assert.equal(result.snapshot,'');
+    assert.deepEqual(result.questions.map(question=>question.label),['Country*','Gender']);
+    assert.equal(result.source.scope,'read_only_ashby_container');
+    assert.equal(result.diagnostics.inputCount,2);
+    assert.equal(result.diagnostics.ashbyContainers['.ashby-application-form-container'],1);
+    assert.equal(result.diagnostics.controls[0].validation.ariaInvalid,true);
+    assert.equal(JSON.stringify(result).includes('PRIVATE_'),false);
+    await assert.rejects(run(page,'details',{snapshot:result.snapshot,profile:{country:'Other'}}),/expired|consumed/);
+    assert.equal(await page.locator('#country').inputValue(),'PRIVATE_COUNTRY');
+  });
+});
+
 test('inventory exports exact fixed labels, choices and constraints, never entered values',async()=>{
   await fixture(`<form id="application"><label for="name">Full name</label><input id="name" value="PRIVATE_NAME" required maxlength="80">
     <label for="location">Preferred office</label><input id="location" role="combobox" aria-label="Preferred office PRIVATE_CITY" value="PRIVATE_CITY">

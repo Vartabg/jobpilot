@@ -48,9 +48,9 @@
     if (type === 'checkbox') return String(el.checked ?? (el.getAttribute('aria-checked') === 'true'));
     return JSON.stringify([el.value || '',el.getAttribute('aria-expanded'),el.closest('.react-select__control,[class*="select__control"]')?.textContent || '']);
   }
-  function context() {
+  function context(probeScope=null) {
     if (!tools()) throw new Error('The form inspector is unavailable.');
-    const scopes = tools().applicationScopes().filter(tools().visible);
+    const scopes = probeScope ? [probeScope] : tools().applicationScopes().filter(tools().visible);
     if (scopes.length !== 1) throw new Error('A unique top-document application form is required. Embedded, missing or ambiguous forms are held.');
     const scope = scopes[0], warnings = [];
     const entries = tools().inventory(message => warnings.push(message)).filter(entry => scope.contains(entry.el));
@@ -185,6 +185,28 @@
           ...Object.fromEntries(flags.map(flag=>[flag,el.validity ? el.validity[flag]===true : null]))}};
     })};
   }
+  function unscopedInspection() {
+    // No verified form means no mutation snapshot and no research inventory.
+    // A document probe can still identify the two controls under investigation
+    // using fixed labels, without returning values or changing the document.
+    const containers=location.hostname==='jobs.ashbyhq.com'
+      ? [...document.querySelectorAll('.ashby-application-form-container')].filter(tools().visible) : [];
+    const container=containers.length===1 ? containers[0] : null;
+    let readOnlyContext=null;
+    if(container) {try {readOnlyContext=context(container);} catch { /* Remain a diagnostic probe. */ }}
+    const entries=readOnlyContext?.entries || tools().inventory().filter(entry=>/^(?:country|gender)\s*\*?$/i.test(fixedLabel(entry)));
+    const diagnostics=inspectionDiagnostics({entries});
+    diagnostics.targetLabels=entries.map(entry=>({questionId:id(entry.el),label:fixedLabel(entry)}));
+    diagnostics.readyState=document.readyState;
+    diagnostics.formCount=[...document.querySelectorAll('form,[role="form"],#application-form')].filter(tools().visible).length;
+    diagnostics.inputCount=[...document.querySelectorAll('input,textarea,select,[role="combobox"]')].filter(tools().visible).length;
+    diagnostics.ashbyContainers=Object.fromEntries(['.ashby-application-form-container','.ashby-application-form','.ashby-application-form-field-entry']
+      .map(selector=>[selector,[...document.querySelectorAll(selector)].filter(tools().visible).length]));
+    diagnostics.visibleFrameCount=[...document.querySelectorAll('iframe')].filter(tools().visible).length;
+    return {inspectionComplete:false,snapshot:'',questions:readOnlyContext?.questions || [],pageUrl:location.href,diagnostics,
+      source:{url:location.href,capturedAt:new Date().toISOString(),evidenceType:readOnlyContext?'live_extension_read_only_container_inventory':'live_extension_document_probe',
+        wording:readOnlyContext?'exact_fixed_label':'no_question_inventory',scope:readOnlyContext?'read_only_ashby_container':'no_verified_application_form'}};
+  }
   globalThis.__jobpilotLocalRun=async request=>{
     if (!request || request.expectedUrl !== location.href) throw new Error('The application URL changed.');
     if (state.busy) throw new Error('A local form action is already running.');
@@ -192,7 +214,15 @@
     try {
       if (request.op==='receipt') return receipt();
       if (request.op==='inspect') {
-        const current=context(), snapshot=crypto.randomUUID(); state.prepared=null;
+        let current;
+        try {current=context();}
+        catch(error) {
+          if (tools() && tools().applicationScopes().filter(tools().visible).length!==1) {
+            state.snapshot=null;state.prepared=null;return unscopedInspection();
+          }
+          throw error;
+        }
+        const snapshot=crypto.randomUUID(); state.prepared=null;
         state.snapshot={...current,id:snapshot,expiresAt:Date.now()+300000};
         return {snapshot,expiresAt:state.snapshot.expiresAt,questions:current.questions,pageUrl:location.href,diagnostics:inspectionDiagnostics(current),
           source:{url:location.href,capturedAt:new Date().toISOString(),evidenceType:'live_extension_control_inventory',wording:'exact_fixed_label',scope:'visible_top_document_application_form'}};
