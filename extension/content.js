@@ -391,10 +391,10 @@
     if (preference === 'veteran') return kind === 'veteran' && veteranYes.has(value);
     return preference === 'protected_veteran' && (protectedYes.has(value) || (kind === 'protected' ? value === 'yes' : veteranYes.has(value)));
   }
-  function inventory(onError = () => {}) {
-    const scopes = applicationScopes();
-    const controls = [...document.querySelectorAll("input, textarea, select, [role='combobox']:not(input), button[aria-haspopup='listbox'], [role='checkbox']:not(input), [role='radiogroup'], .ashby-application-form-input-yesno")]
-      .filter(el => (!scopes.length || scopes.some(scope => scope.contains(el)) || isSecurityCodeInput(el) || segmentedSecurityInput(el)) && !unrelatedControl(el));
+  function inventory(onError = () => {}, localScope = null) {
+    const scopes = localScope ? [localScope] : applicationScopes();
+    const controls = [...(localScope || document).querySelectorAll("input, textarea, select, [role='combobox']:not(input), button[aria-haspopup='listbox'], [role='checkbox']:not(input), [role='radiogroup'], .ashby-application-form-input-yesno")]
+      .filter(el => (localScope ? localScope.contains(el) : (!scopes.length || scopes.some(scope => scope.contains(el)) || isSecurityCodeInput(el) || segmentedSecurityInput(el))) && !unrelatedControl(el));
     const seenRadio = new Set(),seenGroups=new Set(),seenSecurity=new Set();
     return controls.flatMap(el => { try {
       const metadata=el.type === 'radio' ? workdayRadioQuestion(el) : null;
@@ -512,7 +512,9 @@
     if (workdayPage() && /^education\.\d+\.degree$/.test(rule.key) && bachelorOfArts.has(norm(rule.value))) return bachelorOfArts.has(norm(text));
     if (rule.key === 'location') {
       const parts = text.split(',').map(s => s.trim());
-      if (norm(parts[0]) !== norm(profile.city)) return false;
+      const nyc = stateValue(profile.state)==='new york' && usCountry(profile.country)
+        && ['new york','new york city'].includes(norm(profile.city)) && ['new york','new york city'].includes(norm(parts[0]));
+      if (norm(parts[0]) !== norm(profile.city) && !nyc) return false;
       if (parts.length === 1) return !profile.state && !profile.country;
       if (!profile.state || stateValue(parts[1]) !== stateValue(profile.state)) return false;
       return parts.length === 2 || (parts.length === 3 && !!profile.country && sameCountry(parts[2],profile.country));
@@ -556,9 +558,25 @@
     const menus = [...scope.querySelectorAll("[role='listbox']")].filter(visible);
     return menus.length === 1 ? menus[0] : null;
   }
-  async function fillCombo(el, rule, profile, guard) {
+  async function fillCombo(el, rule, profile, guard, localScope = null, observeLocation = () => {}) {
     const value = rule.value;
     const ctrl = reactControl(el) || el, input = el.tagName === 'INPUT' ? el : ctrl.querySelector('input');
+    if (localScope && (!localScope.contains(ctrl) || !localScope.contains(input) || rule.key!=='location')) return 'unsupported';
+    const scopedMenu = () => {
+      const menu=menuFor(el);
+      if (!localScope) return menu;
+      if (!menu || menu.getAttribute('role')!=='listbox' || !visible(menu)) return null;
+      const field=wrapper(el);
+      if (localScope.contains(field) && field.contains(menu)
+        && [...field.querySelectorAll('[role="listbox"]')].filter(visible).length===1
+        && [...field.querySelectorAll('input[role="combobox"],textarea[role="combobox"],button[role="combobox"]')].filter(visible).every(node=>node===el)) return menu;
+      if(!menu.id) return null;
+      const references=node=>[node.getAttribute('aria-controls'),node.getAttribute('aria-owns')].filter(Boolean).flatMap(attr=>attr.split(/\s+/));
+      const owners=[...document.querySelectorAll('[aria-controls],[aria-owns]')].filter(node=>references(node).includes(menu.id));
+      if (owners.length!==1 || owners[0]!==el || [...document.querySelectorAll('[id]')].filter(node=>node.id===menu.id).length!==1) return null;
+      if (menu.closest('form,[role="form"],.ashby-application-form-container') && !localScope.contains(menu)) return null;
+      return menu;
+    };
     const safeChoice = node => {
       const native=node.closest('button,input[type="submit"],input[type="image"],input[type="reset"]');
       return !native || !native.form || native.tagName==='BUTTON' && native.type==='button';
@@ -576,25 +594,32 @@
     if (input && !rule.disclosure && !/^(Yes|No)$/.test(value)) setText(input,rule.key === 'location' ? profile.city : value,guard);
     const query = input?.value || '';
     const applicantChanged = () => !!selectedCombo(el) || (input && input.value !== query);
-    let option = null;
+    let option = null, selectedMenu=null;
     for (let attempt=0; attempt<35; attempt++) {
       await pause(100);
       if (!guard()) return 'interrupted';
       if (!el.isConnected) break;
       if (applicantChanged()) return 'preserved';
-      const menu = menuFor(el);
+      const menu = scopedMenu();
       const options = [...(menu?.querySelectorAll("[role='option'], [class*='select__option']") || [])].filter(visible);
+      if(localScope) observeLocation({associatedMenu:!!menu,unverifiedMenu:!menu && !!menuFor(el),
+        offered:options.map(node=>node.textContent.trim()).filter(label=>label.length<=150).slice(0,8)});
       option = exactOption(options,rule,profile);
-      if (option) break;
+      if (option) {selectedMenu=menu;break;}
     }
     if (option) {
       if (!safeChoice(option)) return 'unsupported';
+      const sameOption=()=>!localScope || scopedMenu()===selectedMenu && selectedMenu?.contains(option) && visible(option)
+        && (!option.form || localScope.contains(option.form)) && exactOption([...selectedMenu.querySelectorAll("[role='option'],[class*='select__option']")].filter(visible),rule,profile)===option;
       if (!guard()) return 'interrupted';
       if (applicantChanged()) return 'preserved';
+      if (!sameOption()) return 'unconfirmed';
       option.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,button:0}));
       if (!guard()) return 'interrupted';
+      if (!sameOption()) return 'unconfirmed';
       option.dispatchEvent(new MouseEvent('mouseup',{bubbles:true,button:0}));
       if (!guard()) return 'interrupted';
+      if (!sameOption()) return 'unconfirmed';
       const chosenMenu=option.closest('[role="listbox"]');
       option.click();
       if (workdaySelect(el)) {
@@ -666,7 +691,12 @@
     const unique = [...new Set(scopes)];
     return unique.filter(scope => !unique.some(other => other !== scope && scope.contains(other)));
   }
-  function resumeTarget() {
+  function resumeTarget(localScope = null) {
+    if (localScope) {
+      const matches = [...localScope.querySelectorAll("input[type='file']")].filter(el => localScope.contains(el) && !el.disabled && !el.matches(':disabled') && !unrelatedControl(el)
+        && (visible(el) || visible(wrapper(el))) && isResumeLabel(localFixedLabel(el,localScope)));
+      return matches.length === 1 ? {el: matches[0], wrapper: wrapper(matches[0])} : null;
+    }
     if (workdayPage()) {
       const scopes = workdayResumeScopes();
       if (scopes.length !== 1) return null;
@@ -690,11 +720,12 @@
       && [...item.querySelectorAll('[data-automation-id="file-upload-item-name"]')].some(el => visible(el) && el.textContent.trim())
       && [...item.querySelectorAll('[data-automation-id="file-upload-successful"]')].some(visible));
   }
-  async function attachResume(resume, guard) {
+  async function attachResume(resume, guard, localScope = null) {
     if (!guard()) return {status:'not-requested',message:'No file was selected because the active application changed.'};
     // Workday can remove its file input once the explicit résumé item succeeds.
     if (workdayPage() && hasExistingWorkdayResume()) return {status:'already-attached',message:'An existing attachment was preserved.'};
-    const target = resumeTarget();
+    if (localScope && renderedResume(localScope, resume?.metadata?.name)) return {status:'already-attached',message:'An existing attachment was preserved.'};
+    const target = resumeTarget(localScope);
     if (!target) return {status:'no-target',message:'No unique résumé upload field found. Attach the file manually.'};
     if (target.el.files?.length || target.el.value || attachedText(target.wrapper)) return {status:'already-attached',message:'An existing attachment was preserved.'};
     if (!resume?.dataUrl || !resume?.metadata?.name) return {status:'failed',message:'Choose a résumé with a local file first.'};
@@ -714,7 +745,7 @@
       for (let attempt=0; attempt<16; attempt++) {
         await pause(150);
         if (!guard()) return interrupted();
-        const scope = target.wrapper?.isConnected ? target.wrapper : resumeTarget()?.wrapper, text = scope?.innerText || '';
+        const scope = target.wrapper?.isConnected ? target.wrapper : resumeTarget(localScope)?.wrapper, text = scope?.innerText || '';
         if (workdayPage() && [...(scope?.querySelectorAll('[data-automation-id="file-upload-failed"]') || [])].some(visible)) return {status:'failed',filename,message:'The form reported an upload error. Review the page.'};
         const alerts = [...(scope?.querySelectorAll("[role='alert'], .error, [class*='Error'], [class*='error']") || [])].filter(visible).map(el => el.textContent).join(' ');
         if (/failed|invalid|too large|unsupported|not (allowed|accepted)|error|unable/i.test(alerts)) return {status:'failed',filename,message:'The form reported an upload error. Review the page.'};
@@ -722,6 +753,7 @@
           && [...(scope?.querySelectorAll('[data-automation-id="file-upload-successful"]') || [])].some(visible)
           && [...(scope?.querySelectorAll('[data-automation-id="file-upload-item-name"]') || [])].some(el => visible(el) && el.textContent.trim() === filename);
         if (accepted && text.includes(filename) && !/uploading|processing|please wait/i.test(text)) return {status:'accepted',filename,message:'The form displays this résumé attachment. Review it before submitting.'};
+        if (localScope && renderedResume(localScope, filename)) return {status:'accepted',filename,message:'The form displays this résumé attachment. Review it before submitting.'};
       }
       return {status:'prepared',filename,message:'File selected; the form has not confirmed acceptance. Check the attachment on the page.'};
     } catch (error) { return {status:'failed',filename,message:error.message || 'The file could not be attached. Upload it manually.'}; }
@@ -756,12 +788,91 @@
     }
     return el.value === String(rule.value);
   }
+  const ashbyApplicationRoute = () => {
+    try {
+      const url = new URL(location.href), parts = url.pathname.split('/').filter(Boolean);
+      return url.protocol === 'https:' && !url.username && !url.password && !url.port && window.self === window.top
+        && location.hostname === 'jobs.ashbyhq.com' && parts.length === 3 && !!parts[0] && !!parts[1] && parts[2] === 'application';
+    } catch { return false; }
+  };
+  function localFixedLabel(el, scope) {
+    if (!el || !scope || !scope.contains(el)) return '';
+    const entry = el.closest('.ashby-application-form-field-entry');
+    if (!entry || !scope.contains(entry)) return '';
+    const title = entry.querySelector('.ashby-application-form-question-title');
+    if (title && scope.contains(title)) {
+      const copy = title.cloneNode(true);
+      copy.querySelectorAll('input, textarea, select, button, [role="combobox"], [role="listbox"]').forEach(node => node.remove());
+      const text = copy.textContent.trim().replace(/\s+/g, ' ');
+      if (text) return text;
+    }
+    const associated = [...(el.labels || [])].filter(node => visible(node) && scope.contains(node) && (!el.id || node.htmlFor === el.id));
+    if (associated.length !== 1) return '';
+    return labelText(associated[0]).trim().replace(/\s+/g, ' ');
+  }
+  const isResumeLabel = value => /^(resume(?: cv)?|cv|curriculum vitae)$/.test(norm(String(value || '').replace(/\s*required\s*$/i,'')));
+  function localAshbyForm() {
+    if (!ashbyApplicationRoute()) return null;
+    const roots = [...document.querySelectorAll('.ashby-application-form-container')].filter(visible);
+    if (roots.length !== 1) return null;
+    const root = roots[0];
+    if (root.closest('form, [role="form"]') || root.querySelector('form, [role="form"]')) return null;
+    if ([...root.querySelectorAll('input, textarea, select, button')].some(el => el.form && !root.contains(el.form))) return null;
+    for (const radio of root.querySelectorAll('input[type="radio"][name]')) {
+      if ([...document.querySelectorAll('input[type="radio"]')].some(other => other.name === radio.name && other.form === radio.form && !root.contains(other))) return null;
+    }
+    const scopes = applicationScopes();
+    if (scopes.length && !(scopes.length === 1 && scopes[0] === root)) return null;
+    const entries = [...root.querySelectorAll('.ashby-application-form-field-entry')].filter(visible);
+    const titleOf = entry => norm(labelText(entry.querySelector('.ashby-application-form-question-title')).replace(/\s*required\s*$/i, ''));
+    const resumes = entries.filter(entry => isResumeLabel(titleOf(entry)));
+    if (resumes.length !== 1) return null;
+    const fixed = [...root.querySelectorAll('input, textarea, select')].filter(el => !el.disabled && visible(el))
+      .map(el => norm(localFixedLabel(el, root).replace(/\s*required\s*$/i, '')));
+    const count=(pattern)=>fixed.filter(label=>pattern.test(label)).length;
+    if (!(count(/^(name|full name)$/)===1 || count(/^first name$/)===1 && count(/^last name$/)===1)
+      || count(/^(email|email address)$/)!==1 || resumes[0].querySelectorAll('input[type="file"]').length>1) return null;
+    return {root, resumeRegion: resumes[0]};
+  }
+  function renderedResume(scope, exactFilename) {
+    const name = String(exactFilename || '');
+    if (!scope?.isConnected || !name) return null;
+    const labels=[...scope.querySelectorAll('label,legend,span,p,div,h3,h4,[class*="label"]')].filter(node=>visible(node) && isResumeLabel(labelText(node)));
+    const markerParents=new Set(), walker=document.createTreeWalker(scope,NodeFilter.SHOW_TEXT);
+    for(let node=walker.nextNode();node;node=walker.nextNode()) if(node.textContent.trim()===name && visible(node.parentElement)) markerParents.add(node.parentElement);
+    if(markerParents.size!==1) return null;
+    const marker=[...markerParents][0];
+    for(let region=marker.parentElement;region && region!==scope;region=region.parentElement) {
+      if(!labels.some(label=>region.contains(label))) continue;
+      const text=region.innerText || '';
+      if (/cover letter|uploading|processing|please wait|loading/i.test(text)) return null;
+      const alerts=[...region.querySelectorAll('[role="alert"],.error,[class*="Error"],[class*="error"]')].filter(visible).map(el=>el.textContent).join(' ');
+      if (/failed|invalid|too large|unsupported|not (allowed|accepted)|error|unable/i.test(alerts)) return null;
+      return region;
+    }
+    return null;
+  }
+  function localBulkRule(el, scope, profile) {
+    const fixed = norm(localFixedLabel(el, scope).replace(/\s*required\s*$/i, ''));
+    if (combo(el) && !/^(current location|location|location city|your location)$/.test(fixed)) return {reason:'Only the verified location dropdown is eligible for local bulk fill'};
+    const full = [profile.first_name, profile.last_name].filter(Boolean).join(' ');
+    const table = [
+      ['full_name', /^(full name|your name|applicant name|name)$/, full],
+      ['first_name', /^first name$/, profile.first_name],
+      ['last_name', /^last name$/, profile.last_name],
+      ['email', /^(email|e mail|email address)$/, profile.email],
+      ['linkedin_url', /^(linkedin|linkedin profile|linkedin url)$/, profile.linkedin_url],
+      ['location', /^(current location|location|location city|your location)$/, [profile.city, profile.state].filter(Boolean).join(', ')],
+    ];
+    const found = table.find(([, re]) => re.test(fixed));
+    return found ? {key: found[0], value: found[2] || ''} : {reason: 'No verified local mapping for this question'};
+  }
   // Re-injecting the script must not let a second click race an existing run.
   const runtime = globalThis.__jobpilotAutofillRuntime ||= {running:false};
   // Isolated-world helpers for the job-bound local controller. DOM objects and
   // applicant values are never sent through this internal interface to a page.
-  globalThis.__jobpilotLocalTools = {inventory, applicationScopes, labels, visible, selectedCombo};
-  globalThis.__jobpilotRun = async ({action='inspect',profile={},resume=null,securityCode='',requireVisible=false,expectedWorkdayStep='',disclosureOnly=false,localGuard=null}={}) => {
+  globalThis.__jobpilotLocalTools = {inventory, applicationScopes, labels, visible, selectedCombo, localAshbyForm, localFixedLabel, renderedResume};
+  globalThis.__jobpilotRun = async ({action='inspect',profile={},resume=null,securityCode='',requireVisible=false,expectedWorkdayStep='',disclosureOnly=false,localGuard=null,localScope=null}={}) => {
     if (!['inspect','details','resume','security-code'].includes(action)) throw new Error('Unknown JobPilot action');
     const workday = workdayPage();
     const report = {action,status:'complete',warnings:[],filled:[],skipped:[],failed:[],required:[],resume:{status:'not-requested',message:''},securityCode:{status:'not-requested',message:''},provider:workday ? 'Workday' : location.hostname.includes('greenhouse') ? 'Greenhouse' : location.hostname.includes('lever') ? 'Lever' : location.hostname.includes('ashby') ? 'Ashby' : 'Unsupported',pageUrl:location.href};
@@ -791,7 +902,8 @@
       return false;
     };
     if (runtime.running) { report.status='interrupted'; warn('Autofill is already running on this page. Wait for its report before retrying.'); return report; }
-    if (action !== 'inspect' && applicationScopes().length > 1) { report.status='interrupted'; warn('Several application forms are visible in this document. Open the intended form separately before autofilling.'); return report; }
+    if (localScope && (typeof localGuard!=='function' || localAshbyForm()?.root!==localScope)) {report.status='interrupted';warn('The bound Ashby application scope could not be verified.');return report;}
+    if (!localScope && action !== 'inspect' && applicationScopes().length > 1) { report.status='interrupted'; warn('Several application forms are visible in this document. Open the intended form separately before autofilling.'); return report; }
     runtime.running=true;
     let workdayObserver;
     if (action !== 'inspect') {
@@ -813,7 +925,7 @@
         let quietSince=Date.now();
         while (Date.now() < deadline) {
           if (!guard()) break;
-          const entries = inventory(warn);
+          const entries = inventory(warn, localScope);
           let pending;
           for (const entry of entries) {
             try {
@@ -831,7 +943,7 @@
           attempts.set(token,(attempts.get(token)||0)+1);
           try {
             // Resolve immediately before writing: React can replace any input.
-            const live=inventory(warn).filter(item => fieldToken(item,profile)===token);
+            const live=inventory(warn, localScope).filter(item => fieldToken(item,profile)===token);
             if (live.length !== 1) { record(token,'failed',{label,reason:'This field changed or is ambiguous. Review it manually.'}); continue; }
             const current=live[0], {el}=current, disclosure=disclosureRule(current,profile);
             if (disclosure?.label) label=disclosure.label;
@@ -844,7 +956,7 @@
             if (type === 'radio' || current.disabilityQuestion ? current.answered : answered(el)) { record(token,'skipped',{label,reason:'Your existing answer was preserved'}); continue; }
             if (combo(el) && !workdaySelect(el) && String(el.value || '').trim()) { record(token,'skipped',{label,reason:'An existing dropdown search was preserved. Choose its option on the page.'}); continue; }
             if (onlyDisclosures && !disclosure) { record(token,'skipped',{label,reason:DISCLOSURE_MANUAL}); continue; }
-            const rule=disclosure || ruleFor(el,profile);
+            const rule=disclosure || (localScope ? localBulkRule(el,localScope,profile) : ruleFor(el,profile));
             if (rule.reason) { record(token,'skipped',{label,reason:rule.reason}); continue; }
             if (!rule.value) { record(token,'skipped',{label,reason:'No saved profile value'}); continue; }
             const mutationGuard=rule.disclosure ? () => {
@@ -881,7 +993,9 @@
               if (!mutationGuard()) break;
               option.el.click(); await pause(100);
             } else if (type==='combobox') {
-              const result=await fillCombo(el,rule,profile,mutationGuard);
+              const result=await fillCombo(el,rule,profile,mutationGuard,localScope,diagnostic=>{
+                if(diagnostic.associatedMenu || !report.locationChoices) report.locationChoices=diagnostic;
+              });
               if (result==='interrupted') break;
               if (result==='preserved') { record(token,'skipped',{label,reason:'Your dropdown answer or search changed during autofill and was preserved.'}); continue; }
               if (result==='unconfirmed') { record(token,'failed',{label,reason:'The form did not retain a valid, unambiguous match. Review this field.'}); continue; }
@@ -889,20 +1003,20 @@
             }
             else { setText(el,rule.value,mutationGuard); await pause(100); }
             if (!mutationGuard()) break;
-            const after=inventory(warn).filter(item => fieldToken(item,profile)===token);
+            const after=inventory(warn, localScope).filter(item => fieldToken(item,profile)===token);
             if (after.length===1 && acceptedValue(after[0].el,rule,profile)) record(token,'filled',{label,key:rule.key},rule);
             else record(token,'failed',{label,reason:'The form did not retain a valid, unambiguous match. Review this field.'},rule,!el.isConnected && after.length===1 && !after[0].answered);
           } catch (_) { record(token,'failed',{label,reason:'This control could not be filled. Other supported fields were still checked.'}); }
         }
         if (Date.now() >= deadline) { report.status='interrupted'; warn('The form kept changing or took too long. Review progress and retry remaining empty fields.'); }
-        const finalEntries=guard() ? inventory(warn) : [];
+        const finalEntries=guard() ? inventory(warn, localScope) : [];
         for (const [token,outcome] of cancelled ? [] : outcomes) {
           if (outcome.kind==='filled') {
             const matches=finalEntries.filter(item => fieldToken(item,profile)===token);
             if (matches.length!==1 || !acceptedValue(matches[0].el,outcome.rule,profile)) record(token,'failed',{label:outcome.item.label,reason:'The form changed after filling this field. Review its current value.'});
           }
         }
-      } else if (action==='resume') report.resume=await attachResume(resume,guard);
+      } else if (action==='resume') report.resume=await attachResume(resume,guard,localScope);
       else if (action==='security-code') {
         report.securityCode=await fillSecurityCode(securityCode,guard);
         if (report.securityCode.status==='filled') {
@@ -913,7 +1027,7 @@
           report.failed.push({label:'Security code',reason:report.securityCode.message});
         }
       }
-      if (action==='inspect' || guard()) report.required=inventory(warn).filter(item => item.required && !item.answered).map(({label,type})=>({label,type}));
+      if (action==='inspect' || guard()) report.required=inventory(warn, localScope).filter(item => item.required && !item.answered).map(({label,type})=>({label,type}));
     } catch (_) {
       report.status='interrupted'; warn('Autofill was interrupted. Review the preserved progress and inspect the form before retrying.');
     } finally {

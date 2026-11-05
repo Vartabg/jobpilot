@@ -9,7 +9,7 @@ after(async()=>{await browser?.close();});
 const url='https://jobs.ashbyhq.com/example/req-123/application';
 async function fixture(body,fn) {
   const context=await browser.newContext(), page=await context.newPage();
-  await page.route('**/*',route=>route.request().isNavigationRequest()?route.fulfill({contentType:'text/html',body}):route.abort());
+  await page.route('**/*',route=>route.request().isNavigationRequest()?route.fulfill({contentType:'text/html; charset=utf-8',body}):route.abort());
   await page.goto(url);
   for (const content of scripts) await page.addScriptTag({content});
   try {await fn(page);} finally {await context.close();}
@@ -218,14 +218,135 @@ test('submit checks required values, CAPTCHA, ambiguity, nonce and duplicate att
   });
 });
 
-test('receipt needs narrow visible confirmation with no remaining application form',async()=>{
+test('Ashby receipt needs a new visible confirmation after a bound click and no remaining form',async()=>{
   await fixture(base+'<h2>Thank you for applying!</h2><h3 hidden>Application submitted</h3>',async page=>{
     assert.equal((await run(page,'receipt')).confirmed,false);
-    await page.locator('form').evaluate(el=>el.remove());
+    await page.locator('input').fill('Alex');
+    await page.evaluate(()=>document.querySelector('form').onsubmit=e=>{e.preventDefault();e.target.remove();});
+    const info=await inspect(page), prepared=await run(page,'prepare-submit',{snapshot:info.snapshot});
+    await run(page,'submit',{snapshot:info.snapshot,nonce:prepared.nonce,confirm:true});
+    assert.equal((await run(page,'receipt')).confirmed,false);
+    await page.evaluate(()=>document.body.insertAdjacentHTML('beforeend','<h2>Application submitted!</h2>'));
     assert.equal((await run(page,'receipt')).confirmed,true);
-    await page.locator('h2').evaluate(el=>el.textContent='Your application is processing');
+    await page.evaluate(()=>document.body.insertAdjacentHTML('beforeend','<div class="ashby-application-form-container">Processing</div>'));
     assert.equal((await run(page,'receipt')).confirmed,false);
   });
+});
+
+test('verify-only binds the exact rendered résumé after upload input replacement and rechecks it before click',async()=>{
+  await fixture('<form id="application"><label>Name<input value="Alex" required></label><div class="field"><label>Résumé/CV</label><span id="filename">Fixture.pdf</span><button type="button">Remove</button></div><button type="submit">Submit application</button></form>',async page=>{
+    await page.evaluate(()=>{window.submits=0;document.querySelector('form').onsubmit=e=>{e.preventDefault();window.submits++;};});
+    const resume={metadata:{name:'Fixture.pdf',verifyOnly:true},dataUrl:'data:application/pdf;base64,JVBERi0='};
+    let info=await inspect(page);
+    assert.equal((await run(page,'resume',{snapshot:info.snapshot,resume})).report.resume.status,'accepted');
+    info=await inspect(page);
+    const prepared=await run(page,'prepare-submit',{snapshot:info.snapshot});
+    await page.locator('#filename').evaluate(el=>el.textContent='Different.pdf');
+    await assert.rejects(run(page,'submit',{snapshot:info.snapshot,nonce:prepared.nonce,confirm:true}),/current verified acceptance/);
+    assert.equal(await page.evaluate(()=>window.submits),0);
+  });
+});
+
+test('passive invisible badge permits ordinary preparation but an active CAPTCHA frame still holds',async()=>{
+  await fixture(base+'<div class="grecaptcha-badge"><div class="grecaptcha-logo"><iframe title="reCAPTCHA" src="https://www.google.com/recaptcha/api2/anchor?size=invisible"></iframe></div><div class="grecaptcha-error"></div></div>',async page=>{
+    await page.locator('input').fill('Alex');
+    const info=await inspect(page);
+    assert.ok(info.diagnostics.challenges.every(item=>item.type==='invisible-recaptcha-badge'));
+    assert.equal((await run(page,'prepare-submit',{snapshot:info.snapshot})).prepared,true);
+    await page.locator('.grecaptcha-error').evaluate(el=>el.textContent='Verification unavailable');
+    await assert.rejects(run(page,'prepare-submit',{snapshot:info.snapshot}),/CAPTCHA or security challenge/);
+    await page.locator('.grecaptcha-error').evaluate(el=>el.textContent='');
+    await page.evaluate(()=>document.body.insertAdjacentHTML('beforeend','<iframe title="reCAPTCHA challenge" src="https://www.google.com/recaptcha/api2/bframe"></iframe>'));
+    await assert.rejects(run(page,'prepare-submit',{snapshot:info.snapshot}),/CAPTCHA or security challenge/);
+    await page.locator('iframe[title="reCAPTCHA challenge"]').evaluate(el=>el.remove());
+    await page.locator('.grecaptcha-logo iframe').evaluate(el=>el.src='https://www.google.com.example/recaptcha/api2/anchor?size=invisible');
+    await assert.rejects(run(page,'prepare-submit',{snapshot:info.snapshot}),/CAPTCHA or security challenge/);
+  });
+});
+
+const ashbyField=(label,control)=>`<div class="ashby-application-form-field-entry"><label class="ashby-application-form-question-title">${label}</label>${control}</div>`;
+const ashbyContainer=`<main class="ashby-application-form-container">${ashbyField('Name','<input id="app-name" required>')}${ashbyField('Email','<input type="email" required>')}${ashbyField('Résumé','<input type="file" required><span id="upload"></span>')}${ashbyField('Location','<input id="location" role="combobox" aria-controls="locations" aria-expanded="false">')}<button type="button">Submit application</button></main>`;
+const samplePdf={metadata:{name:'Fixture.pdf',type:'application/pdf',size:16},dataUrl:'data:application/pdf;base64,JVBERi0xLjQgZml4dHVyZQ=='};
+
+test('one verified Ashby container fills scoped fields, retains live résumé proof and confirms one submission',async()=>{
+  await fixture('<label>Name<input id="outside"></label>'+ashbyContainer+'<div id="locations" role="listbox" hidden><div role="option">New York City, New York, United States</div></div>',async page=>{
+    await page.evaluate(()=>{
+      const input=document.querySelector('#location'),list=document.querySelector('#locations');
+      input.oninput=()=>{list.hidden=false;input.setAttribute('aria-expanded','true');};
+      list.firstElementChild.onclick=()=>{input.value='New York City, New York, United States';input.setAttribute('aria-expanded','false');list.hidden=true;};
+      document.querySelector('[type=file]').onchange=e=>{document.querySelector('#upload').textContent=e.target.files[0].name;e.target.remove();};
+      document.querySelector('main button').onclick=()=>{window.clicks=(window.clicks||0)+1;document.querySelector('main').remove();document.body.insertAdjacentHTML('beforeend','<h2>Application submitted!</h2>');};
+    });
+    let info=await inspect(page);
+    assert.equal(info.questions.length,4);
+    assert.ok(info.snapshot);
+    const details=await run(page,'details',{snapshot:info.snapshot,profile:{first_name:'Alex',email:'test@example.org',city:'New York',state:'NY',country:'United States'}});
+    assert.ok(details.report.filled.some(field=>field.key==='location'),JSON.stringify(details.report));
+    assert.equal(await page.locator('#outside').inputValue(),'');
+    info=await inspect(page);
+    const attachment=await run(page,'resume',{snapshot:info.snapshot,resume:samplePdf});
+    assert.equal(attachment.report.resume.status,'accepted');
+    info=await inspect(page);
+    const ready=await run(page,'prepare-submit',{snapshot:info.snapshot});
+    assert.equal((await run(page,'submit',{snapshot:info.snapshot,nonce:ready.nonce,confirm:true})).attempted,true);
+    assert.equal((await run(page,'receipt')).confirmed,true);
+    assert.equal(await page.evaluate(()=>window.clicks),1);
+  });
+});
+
+test('scoped location holds a replaced option before further mouse events',async()=>{
+  await fixture(ashbyContainer+'<div id="locations" role="listbox" hidden><div role="option">New York, NY, United States</div></div>',async page=>{
+    await page.evaluate(()=>{
+      window.clicks=0;
+      const input=document.querySelector('#location'),list=document.querySelector('#locations');
+      input.oninput=()=>{list.hidden=false;input.setAttribute('aria-expanded','true');};
+      list.firstElementChild.onmousedown=e=>{const replacement=e.target.cloneNode(true);replacement.onclick=()=>window.clicks++;e.target.replaceWith(replacement);};
+      list.firstElementChild.onclick=()=>window.clicks++;
+    });
+    const info=await inspect(page);
+    const result=await run(page,'details',{snapshot:info.snapshot,profile:{city:'New York',state:'NY',country:'United States'}});
+    assert.ok(result.report.failed.some(item=>item.label==='Location'));
+    assert.equal(await page.evaluate(()=>window.clicks),0);
+  });
+});
+
+test('exact Ashby footer is bound to one parent and cannot substitute a duplicate or external form action',async t=>{
+  const fields=ashbyContainer.replace('<button type="button">Submit application</button>','');
+  const footer='<button class="ashby-application-form-submit-button" type="button">Submit Application</button>';
+  for(const kind of ['valid','moved-parent','duplicate','external-owner','body-parent']) await t.test(kind,async()=>{
+    const footerHTML=kind==='external-owner'?footer.replace('type="button"','type="submit" form="outside-form"'):footer;
+    const content=kind==='body-parent'?fields+footerHTML:`<section id="app-shell">${fields}${footerHTML}</section>`;
+    await fixture(content+'<form id="outside-form"></form>',async page=>{
+      await page.evaluate(()=>{
+        window.clicks=0;
+        document.querySelector('#app-name').value='Alex';document.querySelector('input[type=email]').value='test@example.org';
+        document.querySelector('input[type=file]').remove();document.querySelector('#upload').textContent='Fixture.pdf';
+        document.querySelector('.ashby-application-form-submit-button').onclick=()=>window.clicks++;
+      });
+      let info=await inspect(page);
+      const resume={...samplePdf,metadata:{...samplePdf.metadata,verifyOnly:true}};
+      assert.equal((await run(page,'resume',{snapshot:info.snapshot,resume})).report.resume.status,'accepted');
+      if(kind==='duplicate') await page.evaluate(()=>document.querySelector('main').insertAdjacentHTML('beforeend','<button type="button">Submit application</button>'));
+      info=await inspect(page);
+      if(['duplicate','external-owner','body-parent'].includes(kind)) {
+        await assert.rejects(run(page,'prepare-submit',{snapshot:info.snapshot}),/unique final/);
+      } else {
+        const ready=await run(page,'prepare-submit',{snapshot:info.snapshot});
+        if(kind==='moved-parent') {
+          await page.evaluate(()=>{const next=document.createElement('section');document.body.append(next);next.append(...document.querySelector('#app-shell').children);});
+          await assert.rejects(run(page,'submit',{snapshot:info.snapshot,nonce:ready.nonce,confirm:true}),/changed/);
+        } else assert.equal((await run(page,'submit',{snapshot:info.snapshot,nonce:ready.nonce,confirm:true})).attempted,true);
+      }
+      assert.equal(await page.evaluate(()=>window.clicks),kind==='valid'?1:0);
+    });
+  });
+});
+
+test('Ashby container ambiguity, outside form owners and shared radio groups produce no mutation snapshot',async()=>{
+  for(const html of [ashbyContainer+ashbyContainer,ashbyContainer.replace('id="app-name"','id="app-name" form="outside"')+'<form id="outside"></form>',ashbyContainer.replace('</main>',ashbyField('Choice','<input type="radio" name="choice">')+'</main>')+'<input type="radio" name="choice">']) {
+    await fixture(html,async page=>assert.equal((await inspect(page)).snapshot,''));
+  }
+  await fixture(ashbyContainer+base,async page=>await assert.rejects(inspect(page),/Several application scopes/));
 });
 
 test('prepared file bytes do not satisfy accepted résumé evidence',async()=>{
