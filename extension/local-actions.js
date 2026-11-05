@@ -47,6 +47,8 @@ async function checkedTab(request) {
     throw new Error('The requested tab or application URL changed. Inspect the intended page again.');
   }
   if (tab.status === 'loading' || tab.pendingUrl && tab.pendingUrl !== current.url) throw new Error('The application tab is navigating. Wait and inspect it again.');
+  if (tab.discarded === true || tab.status === 'unloaded') throw new Error('Chrome has unloaded this application tab. Open the application tab and let it load before inspecting it.');
+  if (tab.frozen === true) throw new Error('Chrome has frozen this application tab. Open the application tab before inspecting it.');
   beforeDeadline(request);
   return current;
 }
@@ -88,10 +90,12 @@ function pagePayload(request) {
 export async function routeLocalRequest(request) {
   beforeDeadline(request);
   if (request.op === 'tabs') {
-    const tabs = await chrome.tabs.query({});
+    const tabs = await chrome.tabs.query(request.active === true ? {active:true,lastFocusedWindow:true} : {});
     return {tabs: tabs.flatMap(tab => {
       const job = localJob(tab.url);
-      return Number.isInteger(tab.id) && job ? [{tabId: tab.id, ...job}] : [];
+      return Number.isInteger(tab.id) && job ? [{tabId: tab.id, ...job,active:tab.active===true,
+        status:['loading','complete','unloaded'].includes(tab.status)?tab.status:'unknown',discarded:tab.discarded===true,
+        ...(typeof tab.frozen==='boolean'?{frozen:tab.frozen}:{})}] : [];
     })};
   }
   if (request.op === 'open') {

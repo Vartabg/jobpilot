@@ -172,6 +172,19 @@
     const match=nodes.map(node=>clean(node.textContent)).find(text=>/^(?:thank you for applying[!.]?|thanks for applying[!.]?|application (?:successfully )?submitted[!.]?|your application has been (?:successfully )?submitted[!.]?|we have received your application[!.]?)$/i.test(text));
     return {confirmed:!!match && scopes.length===0,confirmation:scopes.length===0 ? match || '' : '',evidenceType:'visible_employer_confirmation',pageUrl:location.href,observedAt:new Date().toISOString()};
   }
+  function inspectionDiagnostics(current) {
+    const flags=['valid','valueMissing','typeMismatch','patternMismatch','badInput','customError','tooLong','tooShort','rangeUnderflow','rangeOverflow','stepMismatch'];
+    return {visible:document.visibilityState==='visible',focused:document.hasFocus(),controls:current.entries.map(({el})=>{
+      const listIds=[el.getAttribute('aria-controls'),el.getAttribute('aria-owns')].filter(Boolean).flatMap(value=>value.split(/\s+/));
+      const lists=[...new Set(listIds.map(value=>document.getElementById(value)).filter(Boolean))];
+      return {questionId:id(el),tag:el.tagName,role:el.getAttribute('role')==='combobox'?'combobox':'',
+        disabled:el.disabled===true,readOnly:el.readOnly===true,expanded:el.getAttribute('aria-expanded')==='true',
+        selectedIndicatorPresent:!!tools().selectedCombo(el),associatedListCount:lists.length,
+        visibleOptionCount:lists.reduce((count,list)=>count+[...list.querySelectorAll('[role="option"]')].filter(tools().visible).length,0),
+        validation:{willValidate:el.willValidate===true,ariaInvalid:el.getAttribute('aria-invalid')==='true',
+          ...Object.fromEntries(flags.map(flag=>[flag,el.validity ? el.validity[flag]===true : null]))}};
+    })};
+  }
   globalThis.__jobpilotLocalRun=async request=>{
     if (!request || request.expectedUrl !== location.href) throw new Error('The application URL changed.');
     if (state.busy) throw new Error('A local form action is already running.');
@@ -181,7 +194,7 @@
       if (request.op==='inspect') {
         const current=context(), snapshot=crypto.randomUUID(); state.prepared=null;
         state.snapshot={...current,id:snapshot,expiresAt:Date.now()+300000};
-        return {snapshot,expiresAt:state.snapshot.expiresAt,questions:current.questions,pageUrl:location.href,
+        return {snapshot,expiresAt:state.snapshot.expiresAt,questions:current.questions,pageUrl:location.href,diagnostics:inspectionDiagnostics(current),
           source:{url:location.href,capturedAt:new Date().toISOString(),evidenceType:'live_extension_control_inventory',wording:'exact_fixed_label',scope:'visible_top_document_application_form'}};
       }
       const current=verify(request.snapshot);

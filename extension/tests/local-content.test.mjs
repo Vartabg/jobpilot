@@ -18,6 +18,22 @@ const run=(page,op,extra={})=>page.evaluate(request=>globalThis.__jobpilotLocalR
 const inspect=page=>run(page,'inspect');
 const base='<form id="application"><label>First name<input name="first_name" required></label><button type="submit">Submit application</button></form>';
 
+test('read-only diagnostics expose validation state without opening menus or exposing answers',async()=>{
+  await fixture('<form id="application"><label for="country">Country*</label><input id="country" role="combobox" required aria-controls="countries" aria-expanded="false" value="PRIVATE_COUNTRY"><label for="gender">Gender</label><input id="gender" role="combobox" aria-invalid="true" value="PRIVATE_GENDER"><div id="countries" role="listbox" hidden><div role="option">PRIVATE_CHOICE</div></div></form>',async page=>{
+    await page.evaluate(()=>{window.changes=0;for(const el of document.querySelectorAll('input'))for(const event of ['click','input','change','focus','invalid'])el.addEventListener(event,()=>window.changes++);document.querySelector('#gender').setCustomValidity('PRIVATE_VALIDATION_MESSAGE');});
+    const result=await inspect(page), raw=JSON.stringify(result);
+    assert.equal(raw.includes('PRIVATE_'),false);
+    assert.equal(typeof result.diagnostics.visible,'boolean');
+    assert.equal(result.diagnostics.controls[0].associatedListCount,1);
+    assert.equal(result.diagnostics.controls[0].visibleOptionCount,0);
+    assert.equal(result.diagnostics.controls[1].validation.customError,true);
+    assert.equal(result.diagnostics.controls[1].validation.ariaInvalid,true);
+    assert.equal(await page.evaluate(()=>window.changes),0);
+    assert.equal(await page.locator('#countries').isHidden(),true);
+    assert.equal(await page.locator('#gender').inputValue(),'PRIVATE_GENDER');
+  });
+});
+
 test('inventory exports exact fixed labels, choices and constraints, never entered values',async()=>{
   await fixture(`<form id="application"><label for="name">Full name</label><input id="name" value="PRIVATE_NAME" required maxlength="80">
     <label for="location">Preferred office</label><input id="location" role="combobox" aria-label="Preferred office PRIVATE_CITY" value="PRIVATE_CITY">

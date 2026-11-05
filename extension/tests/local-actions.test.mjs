@@ -105,7 +105,7 @@ test('tabs discloses only supported job identifiers; open rejects arbitrary URLs
   const result = await routeLocalRequest(request('tabs'));
   assert.deepEqual(result.tabs.map(item => item.tabId), [7, 11]);
   assert.equal(JSON.stringify(result).includes('Private'), false);
-  assert.ok(result.tabs.every(item => Object.keys(item).sort().join() === 'identity,provider,tabId,url'));
+  assert.ok(result.tabs.every(item => Object.keys(item).sort().join() === 'active,discarded,identity,provider,status,tabId,url'));
   await assert.rejects(routeLocalRequest(request('open', {url: 'https://example.org'})), /supported HTTPS/);
   const opened = await routeLocalRequest(request('open', {url}));
   assert.equal(opened.tabId, 9); assert.deepEqual(calls[0].create, {url, active: false});
@@ -116,4 +116,21 @@ test('script loading and page permission failures have distinct static recovery 
   await assert.rejects(routeLocalRequest(request('inspect')),error=>/Reload JobPilot/.test(error.message) && !error.message.includes('PRIVATE_DETAIL'));
   chrome.scripting.executeScript=async()=>{throw new Error('Cannot access contents of the page. PRIVATE_URL');};
   await assert.rejects(routeLocalRequest(request('inspect')),error=>/toolbar icon/.test(error.message) && !error.message.includes('PRIVATE_URL'));
+});
+
+test('active-only tab lookup uses the last focused Chrome window without exposing unrelated tabs',async()=>{
+  let query;
+  chrome.tabs.query=async options=>{query=options;return [{...tab,active:true,status:'complete',discarded:false},{id:200,url:'https://bank.example/private',active:true,title:'PRIVATE'}];};
+  const result=await routeLocalRequest(request('tabs',{active:true}));
+  assert.deepEqual(query,{active:true,lastFocusedWindow:true});
+  assert.equal(result.tabs.length,1);assert.equal(result.tabs[0].active,true);
+  assert.equal(result.tabs[0].status,'complete');assert.equal(JSON.stringify(result).includes('PRIVATE'),false);
+});
+
+test('unloaded, discarded and frozen tabs return explicit holds before injection',async()=>{
+  for(const state of [{discarded:true},{status:'unloaded'},{frozen:true}]) {
+    const original={...tab};Object.assign(tab,state);
+    try {await assert.rejects(routeLocalRequest(request('inspect')),/unloaded|frozen/);assert.equal(calls.length,0);}
+    finally {for(const key of Object.keys(tab))delete tab[key];Object.assign(tab,original);}
+  }
 });

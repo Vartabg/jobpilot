@@ -10,7 +10,7 @@ export function installLocalBridge({route = routeLocalRequest, now = Date.now} =
   let port = null, operations = Promise.resolve(), pending = 0;
   let lastError = '';
   const preparations = new Map();
-  const status = () => ({connected: !!port, extensionId: chrome.runtime.id, host: LOCAL_HOST, pending, ...(lastError ? {error: lastError} : {})});
+  const status = () => ({connected: !!port, extensionId: chrome.runtime.id, version:chrome.runtime.getManifest?.().version || '', host: LOCAL_HOST, pending, ...(lastError ? {error: lastError} : {})});
 
   async function attempted(identity) {
     const saved = await chrome.storage.local.get(ATTEMPTS_KEY);

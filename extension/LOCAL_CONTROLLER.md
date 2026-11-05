@@ -32,6 +32,11 @@ python3 scripts/jobpilot_local.py status
 
 The status command checks the socket; a successful `op: status` request verifies
 the Chrome connection and returns the actual extension ID.
+The native status also reports the loaded extension version. A `tabs` request
+with `active: true` returns only the active supported job in Chrome's last-focused
+window. Tab metadata includes loading, discarded and frozen state; unloaded tabs
+are held until the applicant opens them. The controller never activates them
+automatically.
 
 ## Commands
 
@@ -117,6 +122,10 @@ requiredness, types and constraints; `source` includes timestamp, URL and eviden
 method. Unverified custom labels are marked explicitly. Entered applicant values
 and selected answers are excluded; `answered` records only a boolean. Snapshot
 comparison state stays in the isolated document and is not exported.
+Inspection also returns a separate `diagnostics` object with document visibility
+and control-validation booleans/counts. It never opens menus or returns entered
+values, selected labels or validation messages. Remove this operational supplement
+from the sanitized research copy before importing it into the article ledger.
 
 Import sanitized observations into the research ledger with employer/role,
 category, exact wording, requiredness, evidence JSON pointer, source URL, date,
