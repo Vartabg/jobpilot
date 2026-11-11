@@ -174,6 +174,72 @@ test("numbered history sections use verified row numbers, preserve manual titles
   });
 });
 
+test("labelled history tables ignore headers and hidden templates while preserving edits", async () => {
+  const saved = { ...profile, work_history: [
+    { company: "Current Co", title: "Current title", start_date: "2025-01", end_date: "2026-09", current: false },
+    { company: "Previous Co", title: "Previous title", start_date: "2022-03", end_date: "2024-12", current: false },
+  ], education: [{ school: "Example School", degree: "Certificate", field: "Computer Science", start_date: "2020", end_date: "2021" }] };
+  await fixture(`
+    <table aria-label="Work history"><thead><tr><th>Company</th><th>Title</th><th>Start</th><th>End</th></tr></thead><tbody>
+      <tr data-template><td><label>Company<input id="template-company"></label></td></tr>
+      <tr aria-hidden="true"><td><label>Company<input id="hidden-company"></label></td></tr>
+      <tr><td><label for="table-company-1">Company</label><input id="table-company-1"></td><td><label for="table-title-1">Job title</label><input id="table-title-1"></td><td><label for="table-start-1">Start date</label><input type="month" id="table-start-1"></td><td><label for="table-end-1">End date</label><input type="month" id="table-end-1"></td></tr>
+      <tr><td><label for="table-company-2">Company</label><input id="table-company-2"></td><td><label for="table-title-2">Job title</label><input id="table-title-2" value="Manual title"></td><td><label for="table-start-2">Start date</label><input type="month" id="table-start-2"></td><td><label for="table-end-2">End date</label><input type="month" id="table-end-2"></td></tr>
+    </tbody></table>
+    <table aria-label="Education"><tbody><tr><td><label for="table-school">School</label><input id="table-school"></td><td><label for="table-degree">Degree</label><input id="table-degree"></td></tr></tbody></table>`, async page => {
+    const result = await execute(page, "details", { profile: saved });
+    for (const [id, value] of [
+      ["table-company-1", "Current Co"], ["table-title-1", "Current title"], ["table-start-1", "2025-01"], ["table-end-1", "2026-09"],
+      ["table-company-2", "Previous Co"], ["table-title-2", "Manual title"], ["table-start-2", "2022-03"], ["table-end-2", "2024-12"],
+      ["table-school", "Example School"], ["table-degree", "Certificate"],
+      ["template-company", ""], ["hidden-company", ""],
+    ]) assert.equal(await page.locator("#" + id).inputValue(), value, id);
+    assert.equal(result.failed.length, 0);
+  });
+});
+
+test("an inner unrelated fieldset does not hide the outer numbered history group", async () => {
+  const saved = { ...profile, work_history: [{ company: "Current Co", title: "Current title", start_date: "2025-01", end_date: "2026-09", current: false }] };
+  await fixture(`<fieldset><legend>Work experience 1</legend><label>Company<input id="nested-company"></label>
+    <fieldset><legend>Dates</legend><label>Start date<input type="month" id="nested-start"></label><label>End date<input type="month" id="nested-end"></label></fieldset></fieldset>`, async page => {
+    await execute(page, "details", { profile: saved });
+    assert.equal(await page.locator("#nested-company").inputValue(), "Current Co");
+    assert.equal(await page.locator("#nested-start").inputValue(), "2025-01");
+    assert.equal(await page.locator("#nested-end").inputValue(), "2026-09");
+  });
+});
+
+test("ambiguous tables and duplicate row numbers leave history fields untouched", async () => {
+  const saved = { ...profile, work_history: [{ company: "Current Co", title: "Current title", start_date: "2025-01", end_date: "2026-09", current: false }] };
+  await fixture(`
+    <table aria-label="Work history"><tbody><tr><td><label>Company<input id="ambiguous-table-1"></label></td></tr></tbody></table>
+    <table aria-label="Work history"><tbody><tr><td><label>Company<input id="ambiguous-table-2"></label></td></tr></tbody></table>
+    <table><tbody><tr><td><label>Company<input id="unlabelled-table"></label></td></tr></tbody></table>
+    <fieldset><legend>Work experience 1</legend><label>Company<input id="duplicate-group-1"></label></fieldset>
+    <fieldset><legend>Work experience 1</legend><label>Company<input id="duplicate-group-2"></label></fieldset>`, async page => {
+    const result = await execute(page, "details", { profile: saved });
+    for (const id of ["ambiguous-table-1", "ambiguous-table-2", "unlabelled-table", "duplicate-group-1", "duplicate-group-2"]) {
+      assert.equal(await page.locator("#" + id).inputValue(), "", id);
+    }
+    assert.equal(result.filled.filter(field => field.key?.startsWith("work_history")).length, 0);
+  });
+});
+
+test("ARIA grid column headers do not shift history row numbering", async () => {
+  const saved = { ...profile, work_history: [
+    { company: "Current Co", title: "Current title", start_date: "2025-01", end_date: "2026-09", current: false },
+    { company: "Previous Co", title: "Previous title", start_date: "2022-03", end_date: "2024-12", current: false },
+  ] };
+  await fixture(`<div role="grid" aria-label="Work history">
+    <div role="row"><div role="columnheader">Company</div></div>
+    <div role="row"><label for="grid-company-1">Company</label><input id="grid-company-1"></div>
+    <div role="row"><label for="grid-company-2">Company</label><input id="grid-company-2"></div></div>`, async page => {
+    await execute(page, "details", { profile: saved });
+    assert.equal(await page.locator("#grid-company-1").inputValue(), "Current Co");
+    assert.equal(await page.locator("#grid-company-2").inputValue(), "Previous Co");
+  });
+});
+
 test("job capture reads JSON-LD as data and does not execute description HTML", async () => {
   await fixture(`<h1>Fallback heading</h1>
     <script type="application/ld+json">not valid json</script>

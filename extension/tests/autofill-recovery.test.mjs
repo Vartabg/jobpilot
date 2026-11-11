@@ -22,8 +22,8 @@ async function fixture(html, run) {
   await page.addScriptTag({ content: script });
   try { return await run(page); } finally { await context.close(); }
 }
-const execute = (page, action = 'details') => page.evaluate(
-  options => globalThis.__jobpilotRun(options), { action, profile },
+const execute = (page, action = 'details', overrides = {}) => page.evaluate(
+  options => globalThis.__jobpilotRun(options), { action, profile: { ...profile, ...overrides } },
 );
 
 function selectControl({ id, label, options = '', extra = '' }) {
@@ -101,6 +101,20 @@ test('phone country matches a unique country plus dial prefix and preserves the 
     assert.equal(await page.locator('.select__single-value').textContent(), 'United States +1');
     assert.equal(await page.locator('#phone').inputValue(), '512-555-9999');
     assert.equal(result.failed.length, 0);
+  });
+});
+
+test('a generic Country control in a shared phone container fills the code and national number', async () => {
+  await fixture(`<div class="phone-input">${selectControl({
+    id: 'country', label: 'Country *',
+    options: '<div role="option">United States +1</div><div role="option">Canada +1</div>',
+  })}<label>Phone<input id="phone" type="tel"></label></div>
+    <script>${selectionHandler('country')}</script>`, async page => {
+    const result = await execute(page);
+    assert.equal(await page.locator('.select__single-value').textContent(), 'United States +1');
+    assert.equal(await page.locator('#phone').inputValue(), '512 555 0100');
+    assert.ok(result.filled.some(field => field.key === 'phone_country_code'));
+    assert.ok(result.filled.some(field => field.key === 'phone'));
   });
 });
 
@@ -253,5 +267,215 @@ test('a phone value rejected by the native pattern is reported as needing review
     assert.equal(result.filled.length, 0);
     assert.equal(result.status, 'partial');
     assert.ok(result.failed.some(field => /phone/i.test(field.label)));
+  });
+});
+
+const nativeSplitPhone = (options = '<option value="us">+1</option><option value="gb">+44</option>') => `
+  <div class="phone-input"><label>Country code<select id="country-code" autocomplete="tel-country-code">
+    <option value="">Choose</option>${options}</select></label>
+    <label>Phone<input id="phone" type="tel" autocomplete="tel-national" required></label></div>`;
+
+test('a dedicated Greenhouse country code and national phone fill from one explicit international number', async () => {
+  await fixture(nativeSplitPhone(), async page => {
+    const result = await execute(page);
+    assert.equal(await page.locator('#country-code').inputValue(), 'us');
+    assert.equal(await page.locator('#phone').inputValue(), '512 555 0100');
+    assert.ok(result.filled.some(field => field.key === 'phone_country_code'));
+    assert.ok(result.filled.some(field => field.key === 'phone'));
+    assert.equal(result.failed.length, 0);
+  });
+});
+
+test('the split-phone parser supports a clearly separated multi-digit prefix', async () => {
+  await fixture(nativeSplitPhone(), async page => {
+    const result = await execute(page, 'details', { phone: '+44 20 7946 0100', country: 'United Kingdom' });
+    assert.equal(await page.locator('#country-code').inputValue(), 'gb');
+    assert.equal(await page.locator('#phone').inputValue(), '20 7946 0100');
+    assert.equal(result.failed.length, 0);
+  });
+});
+
+test('ambiguous or unsupported split-phone formats write neither part', async () => {
+  for (const phone of ['512 555 0100', '+4420 7946 0100', '+1 512 555 0100 ext 9']) {
+    await fixture(nativeSplitPhone(), async page => {
+      const result = await execute(page, 'details', { phone });
+      assert.equal(await page.locator('#country-code').inputValue(), '', phone);
+      assert.equal(await page.locator('#phone').inputValue(), '', phone);
+      assert.equal(result.filled.some(field => field.key === 'phone'), false);
+      assert.equal(result.filled.some(field => field.key === 'phone_country_code'), false);
+    });
+  }
+});
+
+test('a named phone-country combobox requires both the saved country and dial prefix', async () => {
+  await fixture(selectControl({
+    id: 'phone-country', label: 'Phone country code *',
+    options: '<div role="option">United States (+1)</div><div role="option">Canada (+1)</div><div role="option">United States (+44)</div>',
+    extra: `<script>${selectionHandler('phone-country')}</script>`,
+  }) + '<label>Phone<input id="phone" type="tel" autocomplete="tel-national"></label>', async page => {
+    const result = await execute(page);
+    assert.equal(await page.locator('.select__single-value').textContent(), 'United States (+1)');
+    assert.equal(await page.locator('#phone').inputValue(), '512 555 0100');
+    assert.ok(result.filled.some(field => field.key === 'phone_country_code'));
+    assert.equal(result.failed.length, 0);
+  });
+});
+
+test('a generic Country control in the shared phone container rejects a wrong prefix', async () => {
+  await fixture(`<div class="phone-input">${selectControl({
+    id: 'country', label: 'Country *',
+    options: '<div role="option">United States +44</div><div role="option">Canada +1</div>',
+  })}<label>Phone<input id="phone" type="tel"></label></div>
+    <script>${selectionHandler('country')}</script>`, async page => {
+    const result = await execute(page);
+    assert.equal(await page.locator('.select__single-value').textContent(), '');
+    assert.equal(result.filled.some(field => field.key === 'phone_country_code'), false);
+    assert.equal(result.filled.some(field => field.key === 'country'), false);
+  });
+});
+
+test('duplicate code-only options remain ambiguous and unselected', async () => {
+  await fixture(nativeSplitPhone('<option value="us">+1</option><option value="ca">+1</option>'), async page => {
+    const result = await execute(page);
+    assert.equal(await page.locator('#country-code').inputValue(), '');
+    assert.equal(result.filled.some(field => field.key === 'phone_country_code'), false);
+    assert.ok(result.failed.some(field => /country code/i.test(field.label)));
+  });
+});
+
+test('phone formatter equivalence accepts identical digits but rejects changed digits and extensions', async () => {
+  for (const [actual, accepted] of [['(555) 010-1200', true], ['(555) 010-1201', false], ['(555) 010-1200 ext 9', false]]) {
+    await fixture(`<label>Phone<input id="phone" type="tel"></label><script>
+      document.querySelector('#phone').addEventListener('input', event => { event.target.value = ${JSON.stringify(actual)}; });
+    </script>`, async page => {
+      const result = await execute(page, 'details', { phone: '5550101200' });
+      assert.equal(await page.locator('#phone').inputValue(), actual);
+      assert.equal(result.filled.some(field => field.key === 'phone'), accepted, actual);
+      assert.equal(result.failed.some(field => /phone/i.test(field.label)), !accepted, actual);
+    });
+  }
+});
+
+test('clearing an already filled connected phone field is preserved during a delayed lookup', async () => {
+  await fixture(`<label>Phone<input id="phone" type="tel"></label>${selectControl({
+    id: 'candidate-location', label: 'Location (City) *',
+    extra: `<script>${selectionHandler('candidate-location')}
+      document.querySelector('#candidate-location').addEventListener('input', () => {
+        setTimeout(() => {
+          document.querySelector('#react-select-candidate-location-listbox').innerHTML = '<div role="option">Austin, Texas, United States</div>';
+        }, 1000);
+      });
+    </script>`,
+  })}`, async page => {
+    const run = execute(page);
+    await page.waitForFunction(() => document.querySelector('#phone').value !== '');
+    await page.locator('#phone').fill('');
+    const result = await run;
+    assert.equal(await page.locator('#phone').inputValue(), '');
+    assert.ok(result.failed.some(field => /phone/i.test(field.label)));
+  });
+});
+
+test('same-URL step replacement interrupts autofill without touching the later step', async () => {
+  await fixture(`<form id="step-one">${selectControl({
+    id: 'candidate-location', label: 'Location (City) *',
+    extra: `<script>${selectionHandler('candidate-location')}
+      document.querySelector('#candidate-location').addEventListener('input', () => {
+        setTimeout(() => {
+          const replacement = document.createElement('form');
+          replacement.id = 'step-two';
+          replacement.innerHTML = '<label>Last name<input id="later-last-name"></label>';
+          document.querySelector('#step-one').replaceWith(replacement);
+        }, 400);
+      });
+    </script>`,
+  })}</form>`, async page => {
+    const result = await execute(page);
+    assert.equal(result.status, 'interrupted');
+    assert.equal(await page.locator('#later-last-name').inputValue(), '');
+    assert.ok(result.warnings.some(message => /step changed/i.test(message)));
+  });
+});
+
+test('inert and aria-hidden inactive steps are not inventoried or filled', async () => {
+  await fixture(`<form><label>First name<input id="visible-first-name"></label>
+    <div aria-hidden="true"><label>Phone<input id="hidden-phone" type="tel"></label></div>
+    <div inert><label>Last name<input id="inert-last-name"></label></div></form>`, async page => {
+    const result = await execute(page);
+    assert.equal(await page.locator('#visible-first-name').inputValue(), 'Alex');
+    assert.equal(await page.locator('#hidden-phone').inputValue(), '');
+    assert.equal(await page.locator('#inert-last-name').inputValue(), '');
+    assert.equal(result.filled.length, 1);
+  });
+});
+
+test('an ordinary Country and Phone contact fieldset retains residence country and full phone behavior', async () => {
+  await fixture(`<fieldset><legend>Contact</legend>
+    <label>Country<select id="country"><option value="">Choose</option><option value="us">United States</option></select></label>
+    <label>Phone<input id="phone" type="tel"></label></fieldset>`, async page => {
+    const result = await execute(page);
+    assert.equal(await page.locator('#country').inputValue(), 'us');
+    assert.equal(await page.locator('#phone').inputValue(), '+1 512 555 0100');
+    assert.ok(result.filled.some(field => field.key === 'country'));
+    assert.ok(result.filled.some(field => field.key === 'phone'));
+    assert.equal(result.failed.length, 0);
+  });
+});
+
+test('replacement of one application form is detected even when another form remains', async () => {
+  await fixture(`<form id="retained"><label>First name<input id="retained-first-name" value="Manual"></label></form>
+    <form id="application-step">${selectControl({
+      id: 'candidate-location', label: 'Location (City) *',
+      extra: `<script>${selectionHandler('candidate-location')}
+        document.querySelector('#candidate-location').addEventListener('input', () => {
+          setTimeout(() => {
+            const replacement = document.createElement('form');
+            replacement.id = 'later-step';
+            replacement.innerHTML = '<label>Last name<input id="two-form-later-last-name"></label>';
+            document.querySelector('#application-step').replaceWith(replacement);
+          }, 400);
+        });
+      </script>`,
+    })}</form>`, async page => {
+    const result = await execute(page);
+    assert.equal(result.status, 'interrupted');
+    assert.equal(await page.locator('#two-form-later-last-name').inputValue(), '');
+    assert.ok(result.warnings.some(message => /step changed/i.test(message)));
+  });
+});
+
+test('exact retained phone extensions or letters still fail the ordinary-phone contract', async () => {
+  for (const phone of ['555-010-1200 ext 9', 'not a phone']) {
+    await fixture('<label>Phone<input id="phone" type="tel"></label>', async page => {
+      const result = await execute(page, 'details', { phone });
+      assert.equal(await page.locator('#phone').inputValue(), phone);
+      assert.equal(result.filled.some(field => field.key === 'phone'), false);
+      assert.ok(result.failed.some(field => /phone/i.test(field.label)));
+    });
+  }
+});
+
+test('a successfully filled phone can retry after positive replacement evidence', async () => {
+  await fixture(`<label>Phone<input id="phone" type="tel"></label>${selectControl({
+    id: 'candidate-location', label: 'Location (City) *',
+    extra: `<script>${selectionHandler('candidate-location')}
+      document.querySelector('#phone').addEventListener('input', () => {
+        setTimeout(() => {
+          const original = document.querySelector('#phone');
+          const replacement = original.cloneNode();
+          replacement.value = '';
+          original.replaceWith(replacement);
+        }, 200);
+      }, { once: true });
+      document.querySelector('#candidate-location').addEventListener('input', () => {
+        setTimeout(() => {
+          document.querySelector('#react-select-candidate-location-listbox').innerHTML = '<div role="option">Austin, Texas, United States</div>';
+        }, 1000);
+      });
+    </script>`,
+  })}`, async page => {
+    const result = await execute(page);
+    assert.equal(await page.locator('#phone').inputValue(), '+1 512 555 0100');
+    assert.ok(result.filled.some(field => field.key === 'phone'));
   });
 });

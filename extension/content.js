@@ -7,7 +7,7 @@
     if (!el?.getClientRects().length) return false;
     for (let node=el; node?.nodeType===1; node=node.parentElement) {
       const style=getComputedStyle(node);
-      if (style.display==='none' || style.visibility==='hidden' || style.opacity==='0') return false;
+      if (node.inert || node.getAttribute('aria-hidden')==='true' || style.display==='none' || style.visibility==='hidden' || style.opacity==='0') return false;
     }
     return true;
   };
@@ -71,18 +71,79 @@
     } catch (_) { onError('A form control could not be inspected. Review the page.'); return []; } });
   }
   const DENY = /\breferr|\breferred\b|pronoun|citizen|nationality|ethnic|race\b|racial|gender|sex\b|disabil|veteran|consent|agree|certif|signature|privacy|salary|compensation|desired pay|relocat|how.*hear|years.*experience|how many years|why\b|describe|explain|tell (us|me)|cover letter|reason for leaving|emergency|spouse|recruiter|employee (id|number|name)|sponsorship.*type|type.*sponsorship|not authorized/;
-  function historyContext(el, profile) {
-    const groups = [...document.querySelectorAll('fieldset, [data-jobpilot-section]')];
-    const classify = group => {
-      const title = norm(group.getAttribute('data-jobpilot-section') || group.querySelector(':scope > legend, :scope > h2, :scope > h3')?.textContent);
-      return /^(work experience|employment history|work history|professional experience)(\s+\d+)?$/.test(title) ? 'work_history' : /^(education|education history)(\s+\d+)?$/.test(title) ? 'education' : null;
-    };
-    const group = el.closest('fieldset, [data-jobpilot-section]');
-    const type = group && classify(group);
+  const historyType = value => {
+    const title = norm(value);
+    return /^(work experience|employment history|work history|professional experience)(\s+\d+)?$/.test(title) ? 'work_history' : /^(education|education history)(\s+\d+)?$/.test(title) ? 'education' : null;
+  };
+  const historyTitle = group => group.getAttribute('data-jobpilot-section') || group.getAttribute('aria-label') || group.querySelector(':scope > legend, :scope > h2, :scope > h3')?.textContent || '';
+  const historyNumber = value => norm(value).match(/\s(\d+)$/);
+  function tableHistoryContext(el, profile) {
+    const row = el.closest('tr, [role="row"]'), table = row?.closest('table, [role="table"], [role="grid"]');
+    if (!row || !table || row.closest('template, [data-template]') || !visible(row)) return null;
+    const caption = table.querySelector(':scope > caption')?.textContent || '';
+    const labelledBy = (table.getAttribute('aria-labelledby') || '').split(/\s+/).map(id => labelText(document.getElementById(id))).join(' ');
+    const type = historyType(table.getAttribute('aria-label') || labelledBy || caption);
     if (!type) return null;
-    const explicitNumber = norm(group.getAttribute('data-jobpilot-section') || group.querySelector(':scope > legend, :scope > h2, :scope > h3')?.textContent).match(/\s(\d+)$/);
-    const index = explicitNumber ? Number(explicitNumber[1]) - 1 : groups.filter(g => classify(g) === type).indexOf(group);
-    return {type,index,row:profile[type]?.[index]};
+    const tables = [...document.querySelectorAll('table, [role="table"], [role="grid"]')].filter(candidate => {
+      if (!visible(candidate)) return false;
+      const candidateCaption = candidate.querySelector(':scope > caption')?.textContent || '';
+      const candidateLabels = (candidate.getAttribute('aria-labelledby') || '').split(/\s+/).map(id => labelText(document.getElementById(id))).join(' ');
+      return historyType(candidate.getAttribute('aria-label') || candidateLabels || candidateCaption) === type;
+    });
+    if (tables.length !== 1) return null;
+    const rows = [...table.querySelectorAll('tr, [role="row"]')].filter(candidate => {
+      if (!visible(candidate) || candidate.closest('template, [data-template]')) return false;
+      return !candidate.querySelector('th, [role="columnheader"], [role="rowheader"]') || candidate.querySelector('input, textarea, select, [role="combobox"]');
+    });
+    const index = rows.indexOf(row);
+    return index < 0 ? null : {type,index,row:profile[type]?.[index]};
+  }
+  function historyContext(el, profile) {
+    const table = tableHistoryContext(el, profile);
+    if (table) return table;
+    let group = null, type = null, title = '';
+    for (let node=el.parentElement; node; node=node.parentElement) {
+      if (!node.matches('fieldset, [data-jobpilot-section], [role="group"]')) continue;
+      const candidateTitle = historyTitle(node), candidateType = historyType(candidateTitle);
+      if (candidateType) { group=node; type=candidateType; title=candidateTitle; break; }
+    }
+    if (!group || !visible(group) || group.closest('template, [data-template]')) return null;
+    const explicitNumber = historyNumber(title);
+    const groups = [...document.querySelectorAll('fieldset, [data-jobpilot-section], [role="group"]')].filter(candidate => visible(candidate) && !candidate.closest('template, [data-template]') && historyType(historyTitle(candidate)) === type);
+    if (explicitNumber) {
+      if (groups.filter(candidate => historyNumber(historyTitle(candidate))?.[1] === explicitNumber[1]).length !== 1) return null;
+      const index = Number(explicitNumber[1]) - 1;
+      return {type,index,row:profile[type]?.[index]};
+    }
+    if (groups.some(candidate => historyNumber(historyTitle(candidate)))) return null;
+    const index = groups.indexOf(group);
+    return index < 0 ? null : {type,index,row:profile[type]?.[index]};
+  }
+  function splitPhone(profile) {
+    const match = /^\+(\d{1,3})\s+(\d[\d\s().-]*)$/.exec(String(profile.phone || '').trim());
+    return match ? {dialCode:`+${match[1]}`,national:match[2].trim()} : null;
+  }
+  function phoneContainer(el) {
+    return el.closest('.phone-input, .phone-field, [data-phone]') || wrapper(el);
+  }
+  function phoneInputs(container) {
+    return [...(container?.querySelectorAll("input[type='tel'], input[autocomplete='tel'], input[autocomplete='tel-national']") || [])].filter(visible);
+  }
+  function dialingCodeControl(el) {
+    const ids = identifiers(el).map(id => id.replace(/\s+required$/, ''));
+    if (ids.some(id => /^(tel country code|country code|phone country code|phone country|mobile country code|dialing code|dialling code|dial code|calling code)$/.test(id))) return true;
+    if (!ids.some(id => /^country$/.test(id))) return false;
+    const container = el.closest('.phone-input, .phone-field, [data-phone]');
+    if (!container) return false;
+    const phones = phoneInputs(container);
+    return phones.length === 1 && phones[0] !== el;
+  }
+  function nationalPhoneInput(el) {
+    if (el.getAttribute('autocomplete') === 'tel-national') return true;
+    const container = phoneContainer(el), phones = phoneInputs(container);
+    if (phones.length !== 1 || phones[0] !== el) return false;
+    const controls = [...container.querySelectorAll("input, select, [role='combobox']")].filter(other => other !== el && dialingCodeControl(other));
+    return controls.length === 1;
   }
   function ruleFor(el, profile) {
     const ids = identifiers(el);
@@ -101,6 +162,12 @@
       if (/date$/.test(key) && ((el.type === 'date' && !/^\d{4}-\d{2}-\d{2}$/.test(value)) || (el.type === 'month' && !/^\d{4}-\d{2}$/.test(value)))) return {reason:'Saved date does not match this field format'};
       return {key:`${history.type}.${history.index}.${key}`,value};
     }
+    const phone = splitPhone(profile);
+    if (dialingCodeControl(el)) return phone
+      ? {key:'phone_country_code',value:phone.dialCode}
+      : {reason:'Save the phone as +country-code followed by the national number'};
+    const nationalPhone = nationalPhoneInput(el);
+    if (nationalPhone && !phone) return {reason:'Save the phone as +country-code followed by the national number'};
     if (ids.some(id => /company|employer|school|university|institution|education|start date|end date|graduation/.test(id))) return {reason:'History context is not clear'};
     const usProfile = /^(us|u s|usa|united states|united states of america)$/.test(norm(profile.country));
     if (exact(/^are you (currently )?located in (the )?(united states|us|u s|usa)$/)) return {key:'located_in_us',value:profile.country ? (usProfile ? 'Yes' : 'No') : ''};
@@ -111,7 +178,7 @@
     const rules = [
       ['preferred_name',/^(what is your )?preferred name$/,profile.preferred_name],
       ['first_name',/^(first name|given name|firstname|givenname)$/,profile.first_name],['last_name',/^(last name|family name|surname|lastname|familyname)$/,profile.last_name],['full_name',/^(full name|your name|applicant name|name|name full|(what is your )?(legal )?first and last name)$/,full],
-      ['email',/^(email|e mail|email address)$/,profile.email],['phone',/^(what is your )?(phone|phone number|mobile|mobile number|cell phone|telephone|tel)$/,profile.phone],
+      ['email',/^(email|e mail|email address)$/,profile.email],['phone',/^(what is your )?(phone|phone number|mobile|mobile number|cell phone|telephone|tel)$/,nationalPhone ? phone.national : profile.phone],
       ['address_line1',/^(address line 1|address line1|street address|address line one|what is the first line of your address)$/,profile.address_line1],
       ['address_line2',/^(address line 2|address line2|address line two|what is the second line of your address( if relevant)?)$/,profile.address_line2],
       ['city',/^(city|current city|address level2)$/,profile.city],['state',/^(state|state region|state province|province|address level1)$/,profile.state],['postal_code',/^(zip|zip code|postal code|post code|postcode|zipcode)$/,profile.postal_code],
@@ -126,6 +193,13 @@
   const sameCountry = (a,b) => norm(a) === norm(b) || (usCountry(a) && usCountry(b));
   const stateValue = value => norm(stateNames[String(value || '').toUpperCase()] || value);
   function optionMatches(text, rule, profile) {
+    if (rule.key === 'phone_country_code') {
+      const value = String(text || '').trim();
+      const codeOnly = /^\(?\s*(\+\d{1,3})\s*\)?$/.exec(value);
+      if (codeOnly) return codeOnly[1] === rule.value;
+      const named = /^(.*?)(?:\s*\(\s*(\+\d{1,3})\s*\)|\s+(\+\d{1,3}))\s*$/.exec(value);
+      return !!named && (named[2] || named[3]) === rule.value && sameCountry(named[1],profile.country);
+    }
     if (rule.key === 'country') return sameCountry(text.replace(/\s*\+\s*\d+\s*$/, ''),rule.value);
     if (rule.key === 'state') return stateValue(text) === stateValue(rule.value);
     if (rule.key === 'location') {
@@ -231,6 +305,12 @@
     if ((el.validity && !el.validity.valid) || el.getAttribute('aria-invalid') === 'true') return false;
     if (el.tagName === 'SELECT') return !placeholderOption(el.selectedOptions[0]) && optionMatches(el.selectedOptions[0].textContent,rule,profile);
     if (combo(el)) return el.getAttribute('aria-expanded')!=='true' && optionMatches(selectedReact(el) || (!reactControl(el) ? el.value || el.textContent : ''),rule,profile);
+    if (rule.key === 'phone_country_code') return String(el.value || '').trim() === rule.value;
+    if (rule.key === 'phone') {
+      const actual = String(el.value || '').trim(), expected = String(rule.value || '').trim();
+      const ordinaryPhone = value => /^\+?[\d\s().-]+$/.test(value) && /\d/.test(value);
+      return ordinaryPhone(actual) && ordinaryPhone(expected) && actual.replace(/\D/g,'') === expected.replace(/\D/g,'');
+    }
     return el.value === String(rule.value);
   }
   // Re-injecting the script must not let a second click race an existing run.
@@ -243,19 +323,27 @@
     if (runtime.running) { report.status='interrupted'; warn('Autofill is already running on this page. Wait for its report before retrying.'); return report; }
     runtime.running=true;
     const outcomes = new Map(), attempts = new Map();
-    const record = (token,kind,item,rule=null,retryable=false) => outcomes.set(token,{kind,item,rule,retryable});
+    const record = (token,kind,item,rule=null,retryable=false,element=null) => outcomes.set(token,{kind,item,rule,retryable,element});
     try {
       if (action === 'details') {
+        const initialEntries = inventory(warn), initialElements = initialEntries.map(entry => entry.el);
+        const initialRoots = [...new Set(initialEntries.map(entry => entry.el.closest('[data-step], [role="tabpanel"], form')).filter(Boolean))];
+        const stepChanged = entries => {
+          if (initialRoots.some(root => !root.isConnected || !visible(root))) return true;
+          return initialElements.length > 0 && initialElements.every(el => !el.isConnected) && entries.some(entry => !initialElements.includes(entry.el));
+        };
         const deadline = Date.now()+20000;
         let quietSince=Date.now();
         while (Date.now() < deadline) {
           if (location.href !== report.pageUrl) { report.status='interrupted'; warn('The application page changed. Review the fields already filled, then inspect the new page.'); break; }
           const entries = inventory(warn);
+          if (stepChanged(entries)) { report.status='interrupted'; warn('The application step changed. Review the current step before running JobPilot again.'); break; }
           let pending;
           for (const entry of entries) {
             try {
               const token=fieldToken(entry,profile), previous=outcomes.get(token);
-              if (!previous || ((previous.kind==='filled' || previous.retryable) && !entry.answered && (attempts.get(token)||0)<2)) { pending={entry,token}; break; }
+              const rerendered = previous?.kind === 'filled' && previous.element && !previous.element.isConnected && previous.element !== entry.el;
+              if (!previous || ((rerendered || previous.retryable) && !entry.answered && (attempts.get(token)||0)<2)) { pending={entry,token}; break; }
             } catch (_) { warn('A field could not be identified. Review the page.'); }
           }
           if (!pending) {
@@ -284,7 +372,7 @@
             }
             else { setText(el,rule.value); await pause(100); }
             const after=inventory(warn).filter(item => fieldToken(item,profile)===token);
-            if (after.length===1 && acceptedValue(after[0].el,rule,profile)) record(token,'filled',{label,key:rule.key},rule);
+            if (after.length===1 && acceptedValue(after[0].el,rule,profile)) record(token,'filled',{label,key:rule.key},rule,false,after[0].el);
             else record(token,'failed',{label,reason:'The form did not retain a valid, unambiguous match. Review this field.'},rule,!el.isConnected && after.length===1 && !after[0].answered);
           } catch (_) { record(token,'failed',{label,reason:'This control could not be filled. Other supported fields were still checked.'}); }
         }

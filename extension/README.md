@@ -26,7 +26,9 @@ The extension never presses the employer's submit button. Review every answer an
 
 Automatic form filling supports the allowed Greenhouse, Lever, and Ashby hosts listed in `manifest.json`. Other sites use manual profile copying and application tracking; they do not get an automatic-fill success message.
 
-Existing answers and attachments are preserved. Work and education fields fill only when a clearly labelled, numbered section can be matched to the same verified profile row. Ambiguous or unsupported repeaters require manual copying. The extension does not add missing work-history rows or navigate multi-step application forms.
+Existing answers and attachments are preserved. Work and education fields fill only when a clearly labelled, numbered section or semantic table row can be matched to the same verified profile row. Table headers and cell positions alone are not field mappings; hidden/template rows and ambiguous or unsupported repeaters require manual copying. The extension does not add missing work-history rows or navigate multi-step application forms.
+
+Split-phone fields require the saved phone in `+country-code national-number` form with a space between the parts, such as `+1 512 555 0100`. Named options must match both the saved country and dialing prefix; duplicate code-only choices remain manual. Equivalent phone punctuation is accepted, but changed digits and extensions are not. JobPilot fills only the retained visible step, excludes inactive content, and stops for review if that step is replaced. Click Next/Continue yourself, then inspect and run JobPilot again on the new step.
 
 Version 0.8.1 rechecks the live form between fields, handles delayed Greenhouse location suggestions and country/state aliases, and discovers fields revealed by earlier selections. It waits up to 3.5 seconds for an associated dropdown and limits a details action to about 20 seconds. A changing, ambiguous, or rejected control appears in the review report rather than stopping every other supported field. User edits made during autofill are preserved.
 
