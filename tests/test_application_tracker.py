@@ -37,11 +37,19 @@ class TestMarkAndQuery:
         tracker.mark_started("https://linkedin.com/jobs/view/99?ref=feed", "Job", "Co")
         assert tracker.has_applied("https://linkedin.com/jobs/view/99") is True
 
-    def test_duplicate_start_updates(self, tracker: ApplicationTracker):
+    def test_duplicate_start_preserves_submitted_status(
+        self, tracker: ApplicationTracker
+    ):
         tracker.mark_started("https://linkedin.com/jobs/view/5", "Old Title", "Old Co")
         tracker.mark_submitted("https://linkedin.com/jobs/view/5")
         tracker.mark_started("https://linkedin.com/jobs/view/5", "New Title", "New Co")
-        assert tracker.get_status("https://linkedin.com/jobs/view/5") == "started"
+        assert tracker.get_status("https://linkedin.com/jobs/view/5") == "submitted"
+
+    def test_abandoned_start_resumes_application(self, tracker: ApplicationTracker):
+        tracker.mark_started("https://linkedin.com/jobs/view/6", "PM", "Corp")
+        tracker.mark_abandoned("https://linkedin.com/jobs/view/6", step_reached=3)
+        tracker.mark_started("https://linkedin.com/jobs/view/6", "PM", "Corp")
+        assert tracker.get_status("https://linkedin.com/jobs/view/6") == "started"
 
     def test_log_application_without_url_uses_synthetic_url(
         self, tracker: ApplicationTracker

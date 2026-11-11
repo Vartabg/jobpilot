@@ -305,7 +305,7 @@ class ApplicationTracker:
         )
 
     def mark_started(self, url: str, title: str = "", company: str = ""):
-        """Record that an application was started."""
+        """Record a start without downgrading an existing application outcome."""
         normalized = self._normalize_url(url)
         now = datetime.now().isoformat()
         conn = self._get_conn()
@@ -316,7 +316,10 @@ class ApplicationTracker:
             ON CONFLICT(job_url) DO UPDATE SET
                 job_title = excluded.job_title,
                 company = excluded.company,
-                status = 'started',
+                status = CASE
+                    WHEN applications.status = 'abandoned' THEN 'started'
+                    ELSE applications.status
+                END,
                 updated_at = excluded.updated_at
         """,
             (normalized, title, company, now, now),
