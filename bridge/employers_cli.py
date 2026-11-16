@@ -18,11 +18,13 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from jobpilot.bridge import sources
 from jobpilot.bridge.cli import board_targets
 from jobpilot.bridge.employer_importers import (
     EmployerImportReport,
     import_all_sources,
     read_opportunities,
+    read_status_opportunities,
 )
 from jobpilot.core.atomic_io import atomic_write_text
 from jobpilot.core.config import DATA_DIR
@@ -31,9 +33,16 @@ from jobpilot.engine.adapters.sqlite_employers import (
     EMPLOYERS_FILENAME,
     SQLiteEmployerStore,
 )
+from jobpilot.engine.adapters.toml_settings import SETTINGS_FILENAME, TomlSettings
 from jobpilot.engine.domain import (
+    PUBLIC_API_PROVIDERS,
+    BoardTarget,
     EmployerSummary,
     GateKind,
+    OutreachSender,
+    QueueRoute,
+    SettingsError,
+    build_action_queue,
     normalize_employer_key,
     summarize_employer,
     utc_now,
@@ -252,6 +261,20 @@ def collect_forms(
             help="Sample 1 posting per enabled portals.json board missing from opportunities.",
         ),
     ] = True,
+    one_per_employer: Annotated[
+        bool,
+        typer.Option(
+            "--one-per-employer/--all-roles",
+            help="Collect at most one live/inferred role per company across this pass.",
+        ),
+    ] = False,
+    from_store_boards: Annotated[
+        bool,
+        typer.Option(
+            "--from-store-boards/--no-from-store-boards",
+            help="Also sample 1 posting per unsnapshotted board token already in employers.db.",
+        ),
+    ] = False,
 ) -> None:
     """Fetch public ATS application schemas (Greenhouse, Ashby, Lever) and record portal gates."""
     store_path = store or DATA_DIR / EMPLOYERS_FILENAME
@@ -260,25 +283,56 @@ def collect_forms(
 
     opps = read_opportunities(ledger_path)
     board_warnings: list[str] = []
+    prov_filter = (provider or "").strip().lower()
+    comp_filter = normalize_employer_key(company or "")
+    extra_targets: list[BoardTarget] = []
+    seen_board_keys: set[str] = set()
+
+    if from_store_boards and store_path.exists():
+        with SQLiteEmployerStore(store_path) as ro_store:
+            ok_employers = {
+                s.employer_key for s in ro_store.snapshots() if s.status == "ok"
+            }
+            for emp in ro_store.employers():
+                if emp.employer_key in ok_employers:
+                    continue
+                if comp_filter and emp.employer_key != comp_filter:
+                    continue
+                for bt in emp.board_tokens:
+                    if ":" not in bt:
+                        continue
+                    b_prov, b_tok = bt.split(":", 1)
+                    if b_prov not in PUBLIC_API_PROVIDERS or not b_tok:
+                        continue
+                    if prov_filter and b_prov != prov_filter:
+                        continue
+                    bk = f"{b_prov}:{b_tok}".lower()
+                    if bk not in seen_board_keys:
+                        seen_board_keys.add(bk)
+                        extra_targets.append(
+                            BoardTarget(b_prov, b_tok, emp.display_name)
+                        )
 
     if sample_boards and portals_path.exists():
         known_boards = {
             f"{o.provider}:{o.tenant}".lower() for o in opps if o.provider and o.tenant
         }
-        prov_filter = (provider or "").strip().lower()
-        comp_filter = normalize_employer_key(company or "")
-        targets = [
-            t
-            for t in board_targets(portals_path)
-            if f"{t.provider}:{t.token}".lower() not in known_boards
-            and (not prov_filter or t.provider == prov_filter)
-            and (not comp_filter or normalize_employer_key(t.name) == comp_filter)
-        ]
-        if targets:
-            sampled, board_warnings = sample_board_opportunities(
-                _make_boards(), targets, per_board=1
-            )
-            opps.extend(sampled)
+        for t in board_targets(portals_path):
+            bk = f"{t.provider}:{t.token}".lower()
+            if bk in known_boards or bk in seen_board_keys:
+                continue
+            if prov_filter and t.provider != prov_filter:
+                continue
+            if comp_filter and normalize_employer_key(t.name) != comp_filter:
+                continue
+            seen_board_keys.add(bk)
+            extra_targets.append(t)
+
+    if extra_targets:
+        sampled, board_warnings = sample_board_opportunities(
+            _make_boards(), extra_targets, per_board=1
+        )
+        opps = [*sampled, *opps]
 
     with _store_for(store_path, dry_run) as emp_store:
         report: CollectReport = collect_employer_schemas(
@@ -290,6 +344,7 @@ def collect_forms(
             provider=provider,
             company=company,
             refresh_existing=refresh_existing,
+            one_per_employer=one_per_employer,
             extra_targets=opps,
         )
 
@@ -707,3 +762,380 @@ def export_intel(
     _write_private_export(target_dir / "EMPLOYERS.md", "\n".join(lines) + "\n")
 
     console.print(f"[green]Exported employer intelligence to {target_dir}[/green]")
+
+
+def _read_private_profile(path: Path) -> dict:
+    """Read the gitignored applicant profile (data/profile.json); {} when absent or unreadable."""
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _text(profile: dict, key: str) -> str:
+    return str(profile.get(key) or "").strip()
+
+
+def _outreach_sender(profile: dict) -> OutreachSender:
+    """Outreach signature and location note, read at runtime from the private profile.
+
+    ``outreach_availability`` (optional) is used verbatim. Otherwise the note
+    is built from ``city``/``state`` and ``open_to_relocation``.
+    """
+    name = " ".join(
+        p for p in (_text(profile, "first_name"), _text(profile, "last_name")) if p
+    )
+    contact_line = " | ".join(
+        p for p in (_text(profile, "phone"), _text(profile, "email")) if p
+    )
+    availability = _text(profile, "outreach_availability")
+    if not availability:
+        place = ", ".join(
+            p for p in (_text(profile, "city"), _text(profile, "state")) if p
+        )
+        parts = [f"based in {place}"] if place else []
+        if profile.get("open_to_relocation") is True:
+            parts.append("open to relocation")
+        availability = "; ".join(parts)
+    return OutreachSender(
+        name=name, contact_line=contact_line, availability=availability
+    )
+
+
+@app.command("plan-queue")
+def plan_queue(
+    store: Annotated[
+        Path | None,
+        typer.Option(help="Employer store file (default: data/employers.db)."),
+    ] = None,
+    ledger: Annotated[
+        list[Path] | None,
+        typer.Option(help="Opportunities DB(s) to read read-only (repeatable)."),
+    ] = None,
+    status_md: Annotated[
+        list[Path] | None,
+        typer.Option(
+            help="Campaign STATUS.md tables with blocked/held roles (repeatable)."
+        ),
+    ] = None,
+    tracker: Annotated[
+        Path | None,
+        typer.Option(
+            help="Applications DB to exclude already-applied companies (default: data/applications.db)."
+        ),
+    ] = None,
+    profile_json: Annotated[
+        Path | None,
+        typer.Option(
+            help="Optional canonical-profile.json path for standing policy metadata."
+        ),
+    ] = None,
+    settings: Annotated[
+        Path | None,
+        typer.Option(help="Optional jobpilot.toml path for company exclusions."),
+    ] = None,
+    applicant_profile: Annotated[
+        Path | None,
+        typer.Option(
+            help="Private, gitignored profile.json for outreach signature and location (default: data/profile.json)."
+        ),
+    ] = None,
+    out_dir: Annotated[
+        Path | None,
+        typer.Option(help="Output directory (default: data/employer-intel)."),
+    ] = None,
+) -> None:
+    """Build standing-policy.json, 1-per-company ACTION-QUEUE.md/json, and LINKEDIN-PART2-BRIEF.md."""
+    store_path = store or DATA_DIR / EMPLOYERS_FILENAME
+    if not store_path.exists():
+        console.print("No employer store yet. Run `jobpilot employers import` first.")
+        raise typer.Exit(1)
+
+    target_dir = out_dir or DATA_DIR / "employer-intel"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    tracker_path = tracker or DATA_DIR / "applications.db"
+    settings_path = settings or DATA_DIR / SETTINGS_FILENAME
+    ledger_paths = ledger or [DATA_DIR / "opportunities.db"]
+
+    # 1. Load summaries from employers.db
+    with SQLiteEmployerStore(store_path) as emp_store:
+        summaries_list = _summaries(emp_store)
+        contacts = emp_store.contacts()
+        obs = emp_store.observations()
+        snaps = emp_store.snapshots()
+
+    summary_map = {s.employer.employer_key: s for s in summaries_list}
+
+    # 2. Load candidate opportunities read-only
+    opps = []
+    for lpath in ledger_paths:
+        opps.extend(read_opportunities(lpath))
+    for md_path in status_md or ():
+        opps.extend(read_status_opportunities(md_path))
+
+    # 3. Load applied and excluded companies
+    applied: set[str] = set()
+    if tracker_path.exists():
+        for row in sources.read_tracker(tracker_path):
+            if str(row.get("status") or "").lower() in {"submitted", "applied"}:
+                k = normalize_employer_key(str(row.get("company") or ""))
+                if k:
+                    applied.add(k)
+
+    excluded: set[str] = set()
+    if settings_path.exists():
+        try:
+            loaded_settings, _ = TomlSettings(settings_path).load()
+            for comp in loaded_settings.rules.companies.exclude:
+                k = normalize_employer_key(comp)
+                if k:
+                    excluded.add(k)
+        except (OSError, SettingsError):
+            pass
+
+    # Signature and location come from the private profile at runtime, never from source.
+    private_profile = _read_private_profile(
+        applicant_profile or DATA_DIR / "profile.json"
+    )
+    queue_items = build_action_queue(
+        opps,
+        summary_map,
+        applied_companies=frozenset(applied),
+        excluded_companies=frozenset(excluded),
+        sender=_outreach_sender(private_profile),
+    )
+
+    # 4. Write standing-policy.json (no street address, phone, email, or clearance).
+    # Outreach drafts in action-queue.json do carry the profile's signature.
+    current_city_state = ", ".join(
+        p
+        for p in (_text(private_profile, "city"), _text(private_profile, "state"))
+        if p
+    )
+    relocation_note = (
+        "open to relocation"
+        if private_profile.get("open_to_relocation") is True
+        else "not open to relocation"
+    )
+    if profile_json and profile_json.exists():
+        try:
+            prof = json.loads(profile_json.read_text(encoding="utf-8"))
+            pol = (prof.get("location") or {}).get("policy") or {}
+            if pol.get("open_to"):
+                relocation_note = str(pol["open_to"])
+        except (OSError, ValueError):
+            pass
+
+    standing_policy = {
+        "generated_at": utc_now(),
+        "rules": {
+            "work_authorization": {
+                "authorized_to_work_us": True,
+                "requires_sponsorship": False,
+                "citizenship": "U.S. citizen",
+            },
+            "location_schedule": {
+                "current_city_state": current_city_state,
+                "policy": relocation_note,
+                "open_to_nights_weekends_holidays": True,
+                "max_travel_percent": 80,
+                "employer_paid_relocation_required": False,
+            },
+            "compensation": {
+                "floor_usd": None,
+                "free_text": "Negotiable based on the role and total compensation",
+                "numeric_when_forced": "posted_range_midpoint_only_else_hold",
+            },
+            "availability": {
+                "earliest_start": "Approx. 2 weeks / immediate to confirm",
+            },
+            "ai_policy": {
+                "disclose_ai_workflow_work_since": "2024-12",
+                "never_fabricate_years_or_narrative": True,
+            },
+            "privacy_legal_consent": {
+                "auto_accept_standard_applicant_privacy_ack": True,
+                "hold_separate_nda_or_claims_release_or_marketing": True,
+            },
+            "eeo_self_identification": {
+                "veteran": "I identify as a protected veteran",
+                "gender": "Prefer not to say",
+                "race_ethnicity": "Decline to answer",
+                "disability": "per_form_prompt",
+            },
+            "rate_pacing": {
+                "max_roles_per_company": 1,
+                "exclude_sales_sdr_bdr": True,
+                "exclude_senior_staff_principal_manager": True,
+            },
+        },
+        "manual_hold_triggers": [
+            "nyc_street_address_and_zip_unconfirmed",
+            "years_of_experience_blank_by_rule",
+            "disability_per_form_choice",
+            "never_surface_clearance_specifics",
+            "interactive_captcha",
+            "audio_or_video_recording",
+        ],
+    }
+    _write_private_export(
+        target_dir / "standing-policy.json",
+        json.dumps(standing_policy, indent=2, ensure_ascii=False) + "\n",
+    )
+
+    # 5. Write action-queue.json & ACTION-QUEUE.md
+    auto_items = [i for i in queue_items if i.route is QueueRoute.AUTO_APPLY_READY]
+    bypass_items = [i for i in queue_items if i.route is QueueRoute.RECRUITER_BYPASS]
+    dead_items = [i for i in queue_items if i.route is QueueRoute.GATED_DEAD_LETTER]
+
+    queue_payload = {
+        "generated_at": utc_now(),
+        "counts": {
+            "auto_apply_ready": len(auto_items),
+            "recruiter_bypass": len(bypass_items),
+            "gated_dead_letter": len(dead_items),
+        },
+        "recruiter_bypass": [
+            {
+                "employer_key": i.employer_key,
+                "company": i.company,
+                "title": i.title,
+                "url": i.url,
+                "location": i.location,
+                "provider": i.provider,
+                "lane": i.lane.value,
+                "resume_variant": i.resume_variant,
+                "gates": [g.value for g in i.gates],
+                "to_contacts": [
+                    {
+                        "name": c.display_name,
+                        "email": c.email,
+                        "channel": c.channel_kind.value,
+                    }
+                    for c in i.replyable_contacts
+                ],
+                "outreach_subject": i.outreach_subject,
+                "outreach_body": i.outreach_body,
+            }
+            for i in bypass_items
+        ],
+        "auto_apply_ready": [
+            {
+                "employer_key": i.employer_key,
+                "company": i.company,
+                "title": i.title,
+                "url": i.url,
+                "location": i.location,
+                "provider": i.provider,
+                "lane": i.lane.value,
+                "score": i.score,
+                "resume_variant": i.resume_variant,
+                "friction_tier": i.friction_tier.value,
+                "needs_manual_fields": list(i.needs_manual_fields),
+            }
+            for i in auto_items
+        ],
+    }
+    _write_private_export(
+        target_dir / "action-queue.json",
+        json.dumps(queue_payload, indent=2, ensure_ascii=False) + "\n",
+    )
+
+    q_lines = [
+        "# Autonomous Action Queue & Warm-HR Bypass Packets",
+        "",
+        f"Generated: {utc_now()} | Auto-Apply Ready: **{len(auto_items)}** | Warm-HR Bypass: **{len(bypass_items)}** | Gated Dead-Letter: **{len(dead_items)}**",
+        "",
+        "## 1. Warm / Direct HR Bypass Packets (Portal-Blocked High-Fit Roles)",
+        "",
+    ]
+    for i in bypass_items:
+        to_str = ", ".join(
+            f"{c.display_name} <{c.email}>" if c.display_name else c.email
+            for c in i.replyable_contacts[:3]
+        )
+        gates_str = ", ".join(g.value for g in i.gates) or "gated"
+        q_lines.extend(
+            [
+                f"### {i.company} — {i.title}",
+                f"- **Lane:** `{i.lane.value}` | **Resume:** `{i.resume_variant}` | **Gates:** `{gates_str}`",
+                f"- **To:** {to_str}",
+                f"- **Role URL:** {i.url}",
+                f"- **Subject:** `{i.outreach_subject}`",
+                "",
+                "```text",
+                i.outreach_body,
+                "```",
+                "",
+            ]
+        )
+
+    q_lines.extend(
+        [
+            "## 2. Auto-Apply Ready Queue (1 Best Role per Company)",
+            "",
+            "| Score | Lane | Company | Role | ATS | Tier | Resume | Manual Holds |",
+            "| ---: | --- | --- | --- | --- | --- | --- | --- |",
+        ]
+    )
+    for i in auto_items[:80]:
+        holds = ", ".join(i.needs_manual_fields) or "none"
+        q_lines.append(
+            f"| {i.score} | `{i.lane.value}` | {i.company} | [{i.title}]({i.url}) | {i.provider or '—'} | `{i.friction_tier.value}` | `{i.resume_variant}` | {holds} |"
+        )
+    _write_private_export(target_dir / "ACTION-QUEUE.md", "\n".join(q_lines) + "\n")
+
+    # 6. Write LINKEDIN-PART2-BRIEF.md from live employers.db numbers
+    tier_counts = Counter(s.friction_tier.value for s in summaries_list)
+    gate_counts = Counter(
+        g.value for s in summaries_list for g in s.gates if g is not GateKind.NONE
+    )
+    replyable_cnt = sum(1 for c in contacts if c.is_replyable)
+    ok_snaps = sum(1 for s in snaps if s.status == "ok")
+    beyond_counts = Counter(
+        o.category.value
+        for o in obs
+        if o.is_beyond_standard and o.requiredness != "optional"
+    )
+    b_lines = [
+        "# LinkedIn Part 2 Data Brief: Mapping Pre-Submit Friction Across 1,200+ Employers",
+        "",
+        f"Generated: {utc_now()} | Grounded strictly in local `employers.db` and live public ATS snapshots.",
+        "",
+        "## Headline Dataset Metrics",
+        "",
+        f"- **Tracked employers:** {len(summaries_list)}",
+        f"- **Live `ok` ATS form-schema snapshots:** {ok_snaps}",
+        f"- **Total pre-submit requirement observations:** {len(obs)}",
+        f"- **HR / ATS sender records:** {len(contacts)} (`{replyable_cnt}` replyable human/team contacts)",
+        f"- **Friction split:** `{tier_counts.get('low_friction', 0)}` low-friction, `{tier_counts.get('custom_questions', 0)}` custom-questions, `{tier_counts.get('gated', 0)}` gated",
+        "",
+        "## Blocking Gate Breakdown (Unique Companies)",
+        "",
+        "| Gate | Companies |",
+        "| --- | ---: |",
+    ]
+    for g_name, g_cnt in gate_counts.most_common():
+        b_lines.append(f"| `{g_name}` | {g_cnt} |")
+    b_lines.extend(
+        [
+            "",
+            "## Top Beyond-Standard Required Ask Categories",
+            "",
+            "| Category | Observations |",
+            "| --- | ---: |",
+        ]
+    )
+    for cat_name, cnt in beyond_counts.most_common(12):
+        b_lines.append(f"| `{cat_name}` | {cnt} |")
+    _write_private_export(
+        target_dir / "LINKEDIN-PART2-BRIEF.md", "\n".join(b_lines) + "\n"
+    )
+
+    console.print(
+        f"[green]Queue planned: auto_apply_ready={len(auto_items)}, "
+        f"recruiter_bypass={len(bypass_items)}, gated_dead_letter={len(dead_items)} -> {target_dir}[/green]"
+    )

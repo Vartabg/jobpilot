@@ -276,6 +276,10 @@ Every subcommand uses `Annotated[..., typer.Option(...)]` and resolves `--store`
 - `jobpilot employers list`: `--store`, `--gate`, `--provider`, `--tier`, `--has-direct-hr`, `--limit`.
 - `jobpilot employers show <company>`: `--store`.
 - `jobpilot employers export`: `--store`, `--out-dir` (default resolved inside command as `DATA_DIR / "employer-intel"`). Writes `EMPLOYERS.md`, `employers.json`, `requirements.csv`, `hr-contacts.csv` via `core.atomic_io.atomic_write_text` (`0o600`), prefixing CSV cells beginning with `=`, `+`, `-`, `@`, `\t`, `\r` with `'`.
+- **Phase 2 additions (`is_replyable`, store-board sweep, `plan-queue`):**
+  - `HrContact.is_replyable` filters out no-reply relays and automated scheduling bots (`rex@`, `olivia@`) and handles unbracketed sender headers cleanly.
+  - `collect` adds `--one-per-employer` and `--from-store-boards` to sweep unsnapshotted `employers.db` board tokens 1 posting per company.
+  - `jobpilot employers plan-queue` wires `employers.db` + read-only `opportunities.db` / `STATUS.md` + `applications.db` into `standing-policy.json`, `action-queue.json`, `ACTION-QUEUE.md` (1-per-company `auto_apply_ready` queue + `recruiter_bypass` warm-HR drafts with zero year-counts/clearance leaks), and `LINKEDIN-PART2-BRIEF.md`.
 
 ---
 

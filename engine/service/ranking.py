@@ -37,14 +37,14 @@ def rank_opportunities(
             continue
         fit_assessment = ledger.latest_assessment(opportunity.id, FIT)
         fit = (
-            Fit.from_dict(fit_assessment.result)
-            if fit_assessment is not None
-            else None
+            Fit.from_dict(fit_assessment.result) if fit_assessment is not None else None
         )
         ranked.append(build_ranked(opportunity, screening, fit))
     # Stable sorts, least significant first. Judged beats unjudged (even a
     # judged off-target role), then score, then recency, then company/title.
-    ranked.sort(key=lambda row: (row.opportunity.company.lower(), row.opportunity.title.lower()))
+    ranked.sort(
+        key=lambda row: (row.opportunity.company.lower(), row.opportunity.title.lower())
+    )
     ranked.sort(key=lambda row: row.opportunity.last_seen, reverse=True)
     ranked.sort(key=lambda row: row.score, reverse=True)
     ranked.sort(key=lambda row: row.judged, reverse=True)

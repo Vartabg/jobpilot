@@ -85,6 +85,7 @@ def collect_employer_schemas(
     provider: str | None = None,
     company: str | None = None,
     refresh_existing: bool = False,
+    one_per_employer: bool = False,
     extra_targets: Iterable[Opportunity] = (),
 ) -> CollectReport:
     """Collect public ATS form schemas for tracked roles and persist them into EmployerStore."""
@@ -97,12 +98,18 @@ def collect_employer_schemas(
         candidates.extend(ledger.opportunities(Lane.JOB))
     candidates.extend(extra_targets)
 
+    seen_employers: set[str] = set()
+    if one_per_employer and not refresh_existing:
+        seen_employers = {s.employer_key for s in store.snapshots() if s.status == "ok"}
+
     seen_role_keys: set[str] = set()
     for opp in candidates:
         emp_key = normalize_employer_key(opp.company)
         if not emp_key:
             continue
         if comp_filter and emp_key != comp_filter:
+            continue
+        if one_per_employer and emp_key in seen_employers:
             continue
 
         inferred_prov, inferred_tenant, inferred_job_id, _ = (
@@ -159,11 +166,15 @@ def collect_employer_schemas(
                 snapshot.role_key, "live_ats_form", observations
             )
             report.observations_added += added
+            if one_per_employer:
+                seen_employers.add(emp_key)
         elif snapshot.status == "inferred_gate":
             report.inferred_gates += 1
             for obs in observations:
                 if store.record_observation(obs):
                     report.observations_added += 1
+            if one_per_employer:
+                seen_employers.add(emp_key)
         elif snapshot.status == "unsupported":
             report.unsupported += 1
         elif snapshot.status == "error":

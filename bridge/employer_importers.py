@@ -1114,3 +1114,68 @@ def import_all_sources(
         )
 
     return report
+
+
+def read_status_opportunities(path: Path) -> list[Opportunity]:
+    """Extract non-confirmed, non-closed openings from campaign Markdown tables."""
+    if not path.exists():
+        return []
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return []
+
+    out: list[Opportunity] = []
+    for line in text.splitlines():
+        if not line.startswith("|") or "---" in line:
+            continue
+        cells = [c.strip() for c in line.strip("|").split("|")]
+        if len(cells) < 4 or cells[0].lower() in {"#", "employer"}:
+            continue
+        m = _MD_LINK_RE.match(cells[1])
+        if not m:
+            continue
+        label_text, url = m.group(1), m.group(2)
+        parts = [p.strip() for p in label_text.split("·", 1)]
+        company = parts[0]
+        title = parts[1] if len(parts) > 1 else ""
+        outcome_low = cells[2].lower()
+        if any(
+            skip in outcome_low
+            for skip in (
+                "confirmed",
+                "posting closed",
+                "outside current approval",
+                "included in another",
+            )
+        ):
+            continue
+        if not company or not title:
+            continue
+        prov, tenant, job_id, _ = infer_ats_provider_and_gate(url)
+        key = build_role_key(
+            employer_key=normalize_employer_key(company) or company.lower(),
+            role_title=title,
+            role_url=url,
+            provider=prov,
+            tenant=tenant,
+            provider_job_id=job_id,
+            source_kind="status_md",
+        )
+        out.append(
+            Opportunity(
+                id=f"status:{cells[0]}:{key[:24]}",
+                identity_key=key,
+                lane=Lane.JOB,
+                company=company,
+                title=title,
+                url=url,
+                location="",
+                provider=prov,
+                tenant=tenant,
+                provider_job_id=job_id,
+                first_seen="",
+                last_seen="",
+            )
+        )
+    return out

@@ -72,7 +72,9 @@ def _reasons(fit: Fit | None, screening: Screening) -> tuple[str, ...]:
             reasons.append(f"biggest gap: {fit.biggest_gap}")
     unsure = len(screening.unknowns)
     if unsure:
-        reasons.append(f"{unsure} rule check{'s' if unsure > 1 else ''} unsure — worth a look")
+        reasons.append(
+            f"{unsure} rule check{'s' if unsure > 1 else ''} unsure — worth a look"
+        )
     return tuple(reasons)
 
 

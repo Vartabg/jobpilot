@@ -20,6 +20,7 @@ from jobpilot.engine.domain.identity import (
     canonicalize_role_url,
     identify_role,
 )
+from jobpilot.engine.domain.opportunity import Opportunity
 
 
 class GateKind(StrEnum):
@@ -175,63 +176,95 @@ RECOGNIZED_PROVIDERS: frozenset[str] = PUBLIC_API_PROVIDERS | frozenset(
 
 _ATS_RELAY_DOMAINS: frozenset[str] = frozenset(
     {
+        "adp.com",
+        "alert.refer.io",
+        "applytojob.com",
+        "appreview.gem.com",
         "ashbyhq.com",
+        "bamboohr.com",
+        "brassring.com",
+        "breezy-mail.com",
+        "clearcompany.com",
+        "comeet-notifications.com",
         "greenhouse-mail.io",
         "greenhouse.io",
         "hire.lever.co",
-        "lever.co",
-        "myworkday.com",
-        "smartrecruiters.com",
-        "workablemail.com",
-        "workable.com",
-        "jobvite.com",
-        "comeet-notifications.com",
         "icims.com",
-        "applytojob.com",
-        "bamboohr.com",
-        "paylocity.com",
-        "rippling.com",
-        "pinpointhq.com",
         "indeed.com",
         "indeedemail.com",
+        "jobvite.com",
+        "lever.co",
+        "myworkday.com",
+        "oraclecloud.com",
+        "paradox.ai",
+        "paycomonline.com",
+        "paylocity.com",
+        "pinpoint.email",
+        "pinpointhq.com",
+        "refer.io",
+        "rippling.com",
+        "smartrecruiters.com",
+        "successfactors.com",
+        "talemetryservice.com",
         "talentnest.com",
+        "teamtailor-mail.com",
+        "workable.com",
+        "workablemail.com",
     }
 )
 
 _COMPANY_ROLE_LOCAL_PARTS: frozenset[str] = frozenset(
     {
+        "apply",
+        "askanything",
+        "candidate.services",
+        "career",
         "careers",
-        "jobs",
-        "talent",
-        "recruiting",
-        "recruitment",
-        "hr",
+        "connect",
+        "do-not-reply",
+        "do_not_reply",
+        "donotreply",
+        "hello",
         "hiring",
-        "people",
+        "hr",
+        "humanresources",
+        "info",
+        "jobs",
+        "mailer",
         "no-reply",
         "noreply",
-        "do-not-reply",
-        "donotreply",
-        "notifications",
         "notification",
+        "notifications",
+        "olivia",
+        "people",
+        "recruiting",
+        "recruitment",
+        "rex",
+        "submit",
+        "support",
+        "system",
+        "talent",
         "team",
-        "info",
-        "apply",
+        "website",
     }
 )
 
 _NON_JOB_DOMAINS: frozenset[str] = frozenset(
     {
-        "em.target.com",
-        "targetnews",
-        "nvidia.com",
+        "afvclub.com",
+        "cal.com",
         "concourseproject.com",
+        "em.target.com",
+        "email.microsoft.com",
+        "inceptionlabs.ai",
         "lowcostvet.org",
         "match.indeed.com",
         "militaryhire.com",
-        "inceptionlabs.ai",
-        "email.microsoft.com",
-        "afvclub.com",
+        "nvidia.com",
+        "read.ai",
+        "shsu.edu",
+        "targetnews",
+        "upwork.com",
     }
 )
 
@@ -901,6 +934,31 @@ class HrContact:
         )
         object.__setattr__(self, "contact_id", cid)
 
+    @property
+    def is_replyable(self) -> bool:
+        """True when this sender reaches a human or recruiting inbox rather than a no-reply/bot relay."""
+        if self.channel_kind not in {
+            ChannelKind.DIRECT_PERSON,
+            ChannelKind.COMPANY_RECRUITING,
+        }:
+            return False
+        local = self.email.split("@", 1)[0]
+        if local in {"rex", "olivia", "website", "mailer", "system", "hello"}:
+            return False
+        return not any(
+            tok in self.email
+            for tok in (
+                "no-reply",
+                "noreply",
+                "donotreply",
+                "do-not-reply",
+                "do_not_reply",
+                "notification",
+                "alert",
+                "bounce",
+            )
+        )
+
 
 @dataclass(frozen=True)
 class RequirementObservation:
@@ -1086,6 +1144,10 @@ _GH_SEC_CODE_RE = re.compile(
 )
 _SUBJ_COMPANY_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"security code for your application to\s+(.+)$", re.IGNORECASE),
+    re.compile(
+        r"(?:application|applying)\s+(?:to|for)\s+.+?\s+at\s+([A-Z0-9][^,!–|]+)$",
+        re.IGNORECASE,
+    ),
     re.compile(r"thank you for your interest in\s+([A-Z0-9][^,!–|]+)", re.IGNORECASE),
     re.compile(
         r"(?:thank you|thanks)\s+for\s+(?:applying|your application)\s+(?:to|at|with)\s+([A-Z0-9][^,!–|]+)",
@@ -1113,6 +1175,33 @@ def _match_alias(raw_name: str, alias_map: Mapping[str, str] | None) -> str:
     return key
 
 
+def _parse_sender_header(
+    from_header: str,
+    reply_to_header: str,
+    candidate_emails: frozenset[str],
+) -> tuple[str, str]:
+    """Extract clean ``(display_name, email)`` even from unbracketed headers."""
+    for raw in (from_header or "", reply_to_header or ""):
+        for disp, raw_addr in getaddresses([raw]):
+            low = raw_addr.strip().lower()
+            if (
+                low
+                and "@" in low
+                and " " not in low
+                and '"' not in low
+                and low not in candidate_emails
+            ):
+                return disp.strip(" \"'"), low
+        m = _EMAIL_RE.search(raw)
+        if m:
+            low = m.group(0).strip().lower()
+            if low not in candidate_emails:
+                disp = raw[: m.start()].strip(" \"<>'")
+                return disp, low
+    disp, raw_addr = parseaddr(from_header or "")
+    return disp.strip(" \"'"), raw_addr.strip().lower()
+
+
 def extract_hr_contact(
     from_header: str,
     *,
@@ -1126,18 +1215,10 @@ def extract_hr_contact(
 
     Only consumes sender headers, subject, and timestamp; never accepts body or snippet.
     """
-    candidates = getaddresses([from_header or "", reply_to_header or ""])
-    display_name, addr = ("", "")
-    for disp, raw_addr in candidates:
-        low = raw_addr.strip().lower()
-        if low and "@" in low and low not in candidate_emails:
-            display_name, addr = disp.strip(), low
-            break
-    if not addr:
-        disp, raw_addr = parseaddr(from_header or "")
-        addr = raw_addr.strip().lower()
-        display_name = disp.strip()
-    if not addr or "@" not in addr or addr in candidate_emails:
+    display_name, addr = _parse_sender_header(
+        from_header, reply_to_header, candidate_emails
+    )
+    if not addr or "@" not in addr or " " in addr or addr in candidate_emails:
         return None, None, ""
 
     local, domain = addr.split("@", 1)
@@ -1240,3 +1321,359 @@ def extract_hr_contact(
         sample_subject=subj_clean[:160],
     )
     return contact, detected_gate, employer_key
+
+
+class TargetLane(StrEnum):
+    """High-fit role archetypes aligned to verified candidate experience."""
+
+    FIELD_HARDWARE = "field_hardware"
+    FDE_SOLUTIONS = "fde_solutions"
+    TECHNICAL_SUPPORT = "technical_support"
+    JUNIOR_PRODUCT_SWE = "junior_product_swe"
+
+
+class QueueRoute(StrEnum):
+    """Actionable route determined by combining role fit, friction tier, and HR contacts."""
+
+    AUTO_APPLY_READY = "auto_apply_ready"
+    RECRUITER_BYPASS = "recruiter_bypass"
+    GATED_DEAD_LETTER = "gated_dead_letter"
+
+
+@dataclass(frozen=True)
+class ActionQueueItem:
+    """One deduplicated per-company role routed for auto-apply, HR bypass, or dead-letter."""
+
+    employer_key: str
+    company: str
+    title: str
+    url: str
+    location: str
+    provider: str
+    lane: TargetLane
+    route: QueueRoute
+    score: int
+    resume_variant: str
+    friction_tier: FrictionTier
+    gates: tuple[GateKind, ...]
+    beyond_standard_categories: tuple[str, ...]
+    needs_manual_fields: tuple[str, ...]
+    replyable_contacts: tuple[HrContact, ...]
+    outreach_subject: str = ""
+    outreach_body: str = ""
+
+
+@dataclass(frozen=True)
+class OutreachSender:
+    """Who signs recruiter outreach. Built at runtime from the private profile.
+
+    Contact details never live in source: the bridge loads them from the
+    gitignored ``data/profile.json``. Empty fields are left out of the draft.
+    """
+
+    name: str = ""
+    contact_line: str = ""
+    availability: str = ""
+
+
+_NO_SENDER = OutreachSender()
+
+
+_EXCLUDED_ROLE_RE = re.compile(
+    r"(?:sales development|business development|\bsdr\b|\bbdr\b|"
+    r"account executive|account manager|recruiter|counsel|nurse|therapist|"
+    r"accountant|controller|\bsenior\b|\bsr\.?\b|\bstaff\b|\bprincipal\b|"
+    r"\bdirector\b|\bvp\b|vice president|head of|\bintern\b|\binternship\b|"
+    r"(?:engineering|sales|product|account|marketing|program)\s+manager)",
+    re.IGNORECASE,
+)
+
+_LANE_RULES: tuple[tuple[TargetLane, int, str, tuple[str, ...]], ...] = (
+    (
+        TargetLane.FIELD_HARDWARE,
+        95,
+        "field_service",
+        (
+            "field service",
+            "field engineer",
+            "field technician",
+            "commissioning",
+            "electro-mechanical",
+            "equipment technician",
+            "equipment maintenance",
+            "hardware test",
+            "av technician",
+            "data center",
+            "critical facilities",
+            "install engineer",
+            "installation technician",
+            "service engineer",
+            "service technician",
+            "maintenance technician",
+        ),
+    ),
+    (
+        TargetLane.FDE_SOLUTIONS,
+        90,
+        "software_engineer",
+        (
+            "forward deployed",
+            "forward-deployed",
+            "implementation engineer",
+            "implementation specialist",
+            "solutions engineer",
+            "integration engineer",
+            "integrations operations",
+            "deployment engineer",
+            "deployment strategist",
+            "customer engineer",
+            "onboarding specialist",
+        ),
+    ),
+    (
+        TargetLane.TECHNICAL_SUPPORT,
+        82,
+        "software_engineer",
+        (
+            "technical support",
+            "support engineer",
+            "customer support engineer",
+            "service desk",
+            "helpdesk",
+            "it support",
+            "it operations",
+            "support operations",
+            "product support",
+        ),
+    ),
+    (
+        TargetLane.JUNIOR_PRODUCT_SWE,
+        75,
+        "software_engineer",
+        (
+            "associate software",
+            "junior software",
+            "software engineer i",
+            "product engineer",
+            "developer tools",
+            "frontend engineer",
+            "front end",
+            "full stack",
+            "full-stack",
+            "web developer",
+            "software developer",
+            "apprentice",
+        ),
+    ),
+)
+
+_ALLOWED_LOC_RE = re.compile(
+    r"(?:remote|united states|\bus\b|\busa\b|new york|\bnyc\b|\bny\b|brooklyn|"
+    r"manhattan|austin|\btx\b|texas|seattle|bellevue|\bwa\b|san francisco|\bsf\b|"
+    r"bay area|palo alto|mountain view|san jose|oakland|portland|\bor\b)",
+    re.IGNORECASE,
+)
+
+_MANUAL_HOLD_CATEGORIES: Mapping[str, str] = {
+    "address": "street_address_zip",
+    "media_voice_video": "audio_or_video_recording",
+    "work_sample_portfolio": "separate_portfolio_file",
+    "references": "named_references",
+    "citizenship_export": "export_control_attestation",
+}
+
+
+def classify_target_lane(title: str) -> tuple[TargetLane | None, int, str]:
+    """Map an open role title to a high-fit lane, score, and resume variant."""
+    raw = (title or "").strip()
+    if not raw or _EXCLUDED_ROLE_RE.search(raw):
+        return None, 0, ""
+    low = raw.lower()
+    for lane, score, default_resume, keywords in _LANE_RULES:
+        if any(kw in low for kw in keywords):
+            resume = default_resume
+            if lane is TargetLane.TECHNICAL_SUPPORT and any(
+                hw in low
+                for hw in ("service desk", "it ", "desktop", "hardware", "helpdesk")
+            ):
+                resume = "field_service"
+            return lane, score, resume
+    return None, 0, ""
+
+
+def location_allowed(location: str) -> bool:
+    """True when location is empty/unknown or inside approved US remote/hub markets."""
+    loc = (location or "").strip()
+    if not loc:
+        return True
+    return bool(_ALLOWED_LOC_RE.search(loc))
+
+
+def _first_name_greeting(company: str, contact: HrContact) -> str:
+    if contact.channel_kind is ChannelKind.DIRECT_PERSON and contact.display_name:
+        disp = contact.display_name.strip()
+        if "," in disp:
+            parts = [p.strip() for p in disp.split(",", 1)]
+            first = parts[1].split()[0] if len(parts) > 1 and parts[1] else ""
+        else:
+            first = disp.split()[0] if disp.split() else ""
+        if (
+            first
+            and first.isalpha()
+            and len(first) >= 2
+            and first.lower() not in {"hr", "talent", "team"}
+        ):
+            return f"Hello {first},"
+    return f"Hello {company} Recruiting Team,"
+
+
+def draft_recruiter_outreach(
+    company: str,
+    title: str,
+    lane: TargetLane,
+    contact: HrContact,
+    sender: OutreachSender = _NO_SENDER,
+) -> tuple[str, str]:
+    """Draft a plain, factual recruiter email grounded in verified profile facts (no year-counts)."""
+    name = sender.name.strip()
+    subject = f"Application follow-up: {title}" + (f" — {name}" if name else "")
+    greeting = _first_name_greeting(company, contact)
+    if lane is TargetLane.FIELD_HARDWARE:
+        bg = (
+            "My background combines hands-on electronics troubleshooting as a U.S. Navy "
+            "submarine technician with customer-site field engineering at View, Inc. and "
+            "Christie Digital, along with active OSHA-30 and aerial/scissor lift certifications."
+        )
+    else:
+        bg = (
+            "My background pairs customer-site field engineering and technical escalation at "
+            "View, Inc. and Christie Digital (after U.S. Navy submarine electronics service) "
+            "with building Python and TypeScript integration and workflow tooling."
+        )
+    availability = (
+        f" ({sender.availability.strip()})" if sender.availability.strip() else ""
+    )
+    signature = "\n".join(
+        line for line in ("Thank you,", name, sender.contact_line.strip()) if line
+    )
+    body = (
+        f"{greeting}\n\n"
+        f"I am reaching out regarding the {title} opening at {company}, as the online "
+        f"application portal requires account/verification steps that paused my direct submission. "
+        f"{bg}\n\n"
+        f"I have attached my resume and am available immediately for an introductory conversation"
+        f"{availability}.\n\n"
+        f"{signature}"
+    )
+    return subject, body
+
+
+def build_action_queue(
+    opportunities: Iterable[Opportunity],
+    summaries: Mapping[str, EmployerSummary],
+    *,
+    applied_companies: frozenset[str] = frozenset(),
+    excluded_companies: frozenset[str] = frozenset(),
+    sender: OutreachSender = _NO_SENDER,
+) -> list[ActionQueueItem]:
+    """Select one highest-fit role per employer and route to auto-apply, HR bypass, or dead-letter."""
+    best_by_employer: dict[str, tuple[int, Opportunity, TargetLane, str]] = {}
+    for opp in opportunities:
+        emp_key = normalize_employer_key(opp.company)
+        if not emp_key or emp_key in excluded_companies:
+            continue
+        if not location_allowed(opp.location):
+            continue
+        lane, score, resume = classify_target_lane(opp.title)
+        if lane is None:
+            continue
+        prev = best_by_employer.get(emp_key)
+        candidate = (score, opp, lane, resume)
+        if prev is None or (candidate[0], opp.last_seen) > (prev[0], prev[1].last_seen):
+            best_by_employer[emp_key] = candidate
+
+    items: list[ActionQueueItem] = []
+    for emp_key, (score, opp, lane, resume) in best_by_employer.items():
+        summary = summaries.get(emp_key)
+        tier = summary.friction_tier if summary else FrictionTier.LOW_FRICTION
+        gates = summary.gates if summary else ()
+        beyond_cats = summary.beyond_standard_categories if summary else ()
+        prov, _, _, default_gate = infer_ats_provider_and_gate(
+            opp.url, opp.provider, opp.tenant, opp.provider_job_id
+        )
+        if default_gate and default_gate not in gates:
+            gates = tuple(sorted({*gates, default_gate}, key=lambda g: g.value))
+            if default_gate in BLOCKING_GATES:
+                tier = FrictionTier.GATED
+
+        all_contacts = (
+            (*summary.direct_contacts, *summary.team_contacts) if summary else ()
+        )
+        replyable = tuple(c for c in all_contacts if c.is_replyable)
+
+        if tier is FrictionTier.GATED:
+            if replyable:
+                subj, body = draft_recruiter_outreach(
+                    opp.company.strip() or emp_key,
+                    opp.title,
+                    lane,
+                    replyable[0],
+                    sender,
+                )
+                route = QueueRoute.RECRUITER_BYPASS
+            else:
+                if emp_key in applied_companies:
+                    continue
+                subj, body = "", ""
+                route = QueueRoute.GATED_DEAD_LETTER
+        else:
+            if emp_key in applied_companies:
+                continue
+            subj, body = "", ""
+            route = QueueRoute.AUTO_APPLY_READY
+
+        manual_needs = tuple(
+            sorted(
+                {
+                    _MANUAL_HOLD_CATEGORIES[c]
+                    for c in beyond_cats
+                    if c in _MANUAL_HOLD_CATEGORIES
+                }
+            )
+        )
+        items.append(
+            ActionQueueItem(
+                employer_key=emp_key,
+                company=opp.company.strip() or emp_key,
+                title=opp.title.strip(),
+                url=sanitize_role_url(opp.url, prov),
+                location=opp.location.strip(),
+                provider=prov,
+                lane=lane,
+                route=route,
+                score=score,
+                resume_variant=resume,
+                friction_tier=tier,
+                gates=gates,
+                beyond_standard_categories=beyond_cats,
+                needs_manual_fields=manual_needs,
+                replyable_contacts=replyable,
+                outreach_subject=subj,
+                outreach_body=body,
+            )
+        )
+
+    route_rank = {
+        QueueRoute.RECRUITER_BYPASS: 0,
+        QueueRoute.AUTO_APPLY_READY: 1,
+        QueueRoute.GATED_DEAD_LETTER: 2,
+    }
+    items.sort(
+        key=lambda it: (
+            route_rank[it.route],
+            len(it.needs_manual_fields),
+            -it.score,
+            it.company.lower(),
+        )
+    )
+    return items

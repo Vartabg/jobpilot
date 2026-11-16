@@ -6,9 +6,16 @@ from jobpilot.engine.domain import (
     FormSnapshot,
     FrictionTier,
     GateKind,
+    HrContact,
+    OutreachSender,
+    QueueRoute,
     RequirementCategory,
     RequirementObservation,
+    TargetLane,
+    build_action_queue,
     classify_requirement,
+    classify_target_lane,
+    draft_recruiter_outreach,
     extract_hr_contact,
     infer_ats_provider_and_gate,
     normalize_employer_key,
@@ -16,6 +23,7 @@ from jobpilot.engine.domain import (
     sanitize_role_url,
     summarize_employer,
 )
+from jobpilot.engine.domain.opportunity import Lane, Opportunity
 
 
 def test_normalize_employer_key_preserves_distinct_brands():
@@ -198,3 +206,163 @@ def test_extract_hr_contact_and_greenhouse_security_code():
 
     with pytest.raises(ValueError):
         EmployerRecord("   ", "Blank")
+
+
+def test_unbracketed_header_replyable_and_action_queue_routing():
+    cand = frozenset({"applicant@example.com"})
+    unbr, _, emp_u = extract_hr_contact(
+        '"BetaCo" no-reply@careers.beta.example.com',
+        subject="Thank you for applying",
+        candidate_emails=cand,
+    )
+    assert unbr is not None
+    assert unbr.email == "no-reply@careers.beta.example.com"
+    assert unbr.is_replyable is False
+    assert emp_u == "betaco"
+
+    bot = HrContact(
+        "asml",
+        "rex@asml.example.com",
+        "Rex from ASML",
+        channel_kind=ChannelKind.DIRECT_PERSON,
+    )
+    assert bot.is_replyable is False
+
+    human = HrContact(
+        "kla",
+        "sarah.recruiter@kla.example.com",
+        "Recruiter, Sarah",
+        channel_kind=ChannelKind.DIRECT_PERSON,
+    )
+    assert human.is_replyable is True
+
+    assert classify_target_lane("Sales Development Representative") == (None, 0, "")
+    assert classify_target_lane("Senior Staff Engineer") == (None, 0, "")
+    assert (
+        classify_target_lane("Tech Support Engineer")[0] is TargetLane.TECHNICAL_SUPPORT
+    )
+    assert (
+        classify_target_lane("Field Service Engineer")[0] is TargetLane.FIELD_HARDWARE
+    )
+
+    kla_emp = EmployerRecord("kla", "KLA", providers=("workday",))
+    kla_obs = RequirementObservation(
+        "kla",
+        "KLA",
+        "workday:kla:1",
+        gate_kind=GateKind.ACCOUNT_REQUIRED,
+        is_beyond_standard=True,
+        source_kind="status",
+    )
+    kla_sum = summarize_employer(kla_emp, [human], [kla_obs], [])
+
+    acme_emp = EmployerRecord(
+        "acme", "Acme", providers=("ashby",), board_tokens=("ashby:acme",)
+    )
+    acme_snap = FormSnapshot(
+        "ashby:acme:1",
+        "acme",
+        "ashby",
+        "FDE",
+        "https://jobs.ashbyhq.com/acme/1",
+        "ok",
+        field_count=4,
+    )
+    acme_sum = summarize_employer(acme_emp, [], [], [acme_snap])
+
+    opps = [
+        Opportunity(
+            "1",
+            "k1",
+            Lane.JOB,
+            "KLA",
+            "Tech Support Engineer",
+            "https://kla.wd1.myworkdayjobs.com/Search/job/Austin/TSE_1/apply",
+            "Austin, TX",
+            "workday",
+            "kla",
+            "1",
+            "",
+            "",
+        ),
+        Opportunity(
+            "2",
+            "k2",
+            Lane.JOB,
+            "Acme",
+            "Forward Deployed Engineer",
+            "https://jobs.ashbyhq.com/acme/1",
+            "Remote - US",
+            "ashby",
+            "acme",
+            "1",
+            "",
+            "",
+        ),
+        Opportunity(
+            "3",
+            "k3",
+            Lane.JOB,
+            "Acme",
+            "Product Engineer",
+            "https://jobs.ashbyhq.com/acme/2",
+            "Remote - US",
+            "ashby",
+            "acme",
+            "2",
+            "",
+            "",
+        ),
+        Opportunity(
+            "4",
+            "k4",
+            Lane.JOB,
+            "Acme",
+            "Sales Development Representative",
+            "https://jobs.ashbyhq.com/acme/3",
+            "Remote - US",
+            "ashby",
+            "acme",
+            "3",
+            "",
+            "",
+        ),
+    ]
+    queue = build_action_queue(opps, {"kla": kla_sum, "acme": acme_sum})
+    assert len(queue) == 2
+    bypass = [q for q in queue if q.route is QueueRoute.RECRUITER_BYPASS]
+    ready = [q for q in queue if q.route is QueueRoute.AUTO_APPLY_READY]
+    assert len(bypass) == 1 and bypass[0].company == "KLA"
+    assert "Hello Sarah," in bypass[0].outreach_body
+    assert "years" not in bypass[0].outreach_body.lower()
+    # No sender passed: the draft carries no contact details or location.
+    assert "@" not in bypass[0].outreach_body
+    assert "based in" not in bypass[0].outreach_body
+    assert len(ready) == 1 and ready[0].title == "Forward Deployed Engineer"
+
+
+def test_outreach_signature_and_location_come_from_sender():
+    contact = HrContact(
+        "acme",
+        "pat.recruiter@acme.example.com",
+        "Pat Recruiter",
+        channel_kind=ChannelKind.DIRECT_PERSON,
+    )
+    sender = OutreachSender(
+        name="Ada Applicant",
+        contact_line="555-0100 | applicant@example.com",
+        availability="based in Springfield, IL",
+    )
+    subject, body = draft_recruiter_outreach(
+        "Acme", "Support Engineer", TargetLane.TECHNICAL_SUPPORT, contact, sender
+    )
+    assert subject == "Application follow-up: Support Engineer — Ada Applicant"
+    assert "introductory conversation (based in Springfield, IL).\n\n" in body
+    assert body.endswith("Thank you,\nAda Applicant\n555-0100 | applicant@example.com")
+
+    bare_subject, bare_body = draft_recruiter_outreach(
+        "Acme", "Support Engineer", TargetLane.TECHNICAL_SUPPORT, contact
+    )
+    assert bare_subject == "Application follow-up: Support Engineer"
+    assert "introductory conversation.\n\n" in bare_body
+    assert bare_body.endswith("Thank you,")

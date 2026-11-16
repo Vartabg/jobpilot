@@ -35,7 +35,17 @@ def _setup_fixture_dirs(tmp_path):
         )
     )
     (data_dir / "profile.json").write_text(
-        json.dumps({"email": "applicant@example.com"})
+        json.dumps(
+            {
+                "first_name": "Ada",
+                "last_name": "Applicant",
+                "email": "applicant@example.com",
+                "phone": "555-0100",
+                "city": "Springfield",
+                "state": "IL",
+                "open_to_relocation": False,
+            }
+        )
     )
 
     with sqlite3.connect(data_dir / "applications.db") as db:
@@ -296,6 +306,94 @@ def test_employers_cli_import_collect_status_list_show_export(tmp_path, monkeypa
         rows = list(csv.DictReader(f))
     titles = [r["role_title"] for r in rows]
     assert any(t.startswith("'=SUM(1,2)") for t in titles)
+
+    # Test collect --one-per-employer --from-store-boards + plan-queue
+    col2 = runner.invoke(
+        employers_cli.app,
+        [
+            "collect",
+            "--store",
+            str(store_path),
+            "--ledger",
+            str(data_dir / "opportunities.db"),
+            "--portals",
+            str(data_dir / "portals.json"),
+            "--one-per-employer",
+            "--from-store-boards",
+            "--refresh-existing",
+        ],
+    )
+    assert col2.exit_code == 0, col2.stdout
+
+    pq = runner.invoke(
+        employers_cli.app,
+        [
+            "plan-queue",
+            "--store",
+            str(store_path),
+            "--ledger",
+            str(data_dir / "opportunities.db"),
+            "--status-md",
+            str(js / "nyc-100-2026-11-11" / "STATUS.md"),
+            "--tracker",
+            str(data_dir / "applications.db"),
+            "--applicant-profile",
+            str(data_dir / "profile.json"),
+            "--out-dir",
+            str(out_dir),
+        ],
+    )
+    assert pq.exit_code == 0, pq.stdout
+    for fname in (
+        "standing-policy.json",
+        "action-queue.json",
+        "ACTION-QUEUE.md",
+        "LINKEDIN-PART2-BRIEF.md",
+    ):
+        fpath = out_dir / fname
+        assert fpath.exists()
+        if os.name == "posix":
+            assert (fpath.stat().st_mode & 0o777) == 0o600
+    assert "Link" in (out_dir / "ACTION-QUEUE.md").read_text(
+        encoding="utf-8"
+    ) or "Action Queue" in (out_dir / "ACTION-QUEUE.md").read_text(encoding="utf-8")
+    assert "applicant@example.com" not in (out_dir / "standing-policy.json").read_text(
+        encoding="utf-8"
+    )
+    policy = json.loads((out_dir / "standing-policy.json").read_text(encoding="utf-8"))
+    loc = policy["rules"]["location_schedule"]
+    assert loc["current_city_state"] == "Springfield, IL"
+    assert loc["policy"] == "not open to relocation"
+    assert "555-0100" not in json.dumps(policy)
+
+
+def test_outreach_sender_reads_private_profile(tmp_path):
+    prof = tmp_path / "profile.json"
+    prof.write_text(
+        json.dumps(
+            {
+                "first_name": "Ada",
+                "last_name": "Applicant",
+                "email": "applicant@example.com",
+                "phone": "555-0100",
+                "city": "Springfield",
+                "state": "IL",
+                "open_to_relocation": True,
+            }
+        )
+    )
+    sender = employers_cli._outreach_sender(employers_cli._read_private_profile(prof))
+    assert sender.name == "Ada Applicant"
+    assert sender.contact_line == "555-0100 | applicant@example.com"
+    assert sender.availability == "based in Springfield, IL; open to relocation"
+
+    prof.write_text(json.dumps({"outreach_availability": "remote or on-site"}))
+    sender = employers_cli._outreach_sender(employers_cli._read_private_profile(prof))
+    assert sender == employers_cli.OutreachSender(availability="remote or on-site")
+
+    missing = employers_cli._read_private_profile(tmp_path / "absent.json")
+    assert missing == {}
+    assert employers_cli._outreach_sender(missing) == employers_cli.OutreachSender()
 
 
 def test_import_exits_nonzero_on_missing_explicit_gmail_jsonl(tmp_path):
