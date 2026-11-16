@@ -1825,6 +1825,14 @@ app.add_typer(
     help="Your settings file (rules, targets, profile): create it once, then check it",
 )
 
+from jobpilot.bridge.employers_cli import app as employers_app
+
+app.add_typer(
+    employers_app,
+    name="employers",
+    help="Employer, HR team, and pre-submit application requirement intelligence",
+)
+
 
 def _answers_dir() -> Path:
     """Root for stored answers: projects/jobpilot/data/answers/."""

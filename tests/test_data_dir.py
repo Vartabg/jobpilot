@@ -19,6 +19,7 @@ from jobpilot.core import (
     analytics, application_tracker, config, cover_letter_gen,
     interview_prep, logger, resume_tailor,
 )
+from jobpilot.engine.adapters.sqlite_employers import SQLiteEmployerStore
 from jobpilot.gigs.core import paths
 
 print(json.dumps({
@@ -26,6 +27,7 @@ print(json.dumps({
     "settings": str(config.SETTINGS_FILE),
     "log": str(logger.LOG_FILE),
     "tracker": str(application_tracker.DB_DIR),
+    "employers": str(SQLiteEmployerStore.in_data_dir(config.DATA_DIR).path),
     "analytics": str(analytics.DATA_DIR),
     "cover_letters": str(cover_letter_gen.DATA_DIR),
     "resumes": str(resume_tailor.OUTPUT_DIR),

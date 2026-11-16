@@ -230,6 +230,60 @@ PARSERS: dict[str, Callable[[Any, BoardTarget], list[Posting]]] = {
 }
 
 
+def read_bounded_response(
+    session: requests.Session,
+    url: str,
+    *,
+    method: str = "GET",
+    json_body: Any = None,
+    timeout: int | None = None,
+    max_bytes: int | None = None,
+    allow_status: Callable[[int], bool] | None = None,
+) -> tuple[int, bytes]:
+    """Perform a bounded, non-redirecting HTTP request and stream up to max_bytes."""
+    eff_timeout = TIMEOUT_SECONDS if timeout is None else timeout
+    eff_max_bytes = MAX_BYTES if max_bytes is None else max_bytes
+    try:
+        if method == "POST":
+            response = session.post(
+                url,
+                json=json_body,
+                timeout=eff_timeout,
+                allow_redirects=False,
+                stream=True,
+            )
+        else:
+            response = session.get(
+                url,
+                timeout=eff_timeout,
+                allow_redirects=False,
+                stream=True,
+            )
+    except requests.RequestException:
+        raise BoardError("the board is unreachable") from None
+    try:
+        if 300 <= response.status_code < 400:
+            raise BoardError("the board redirected; it may have moved")
+        ok = (
+            allow_status(response.status_code)
+            if allow_status is not None
+            else response.status_code == 200
+        )
+        if not ok:
+            raise BoardError(f"the board answered HTTP {response.status_code}")
+        body = bytearray()
+        try:
+            for chunk in response.iter_content(chunk_size=65536):
+                body += chunk
+                if len(body) > eff_max_bytes:
+                    raise BoardError("the board's response was too large")
+        except requests.RequestException:
+            raise BoardError("the board stopped responding") from None
+        return response.status_code, bytes(body)
+    finally:
+        response.close()
+
+
 class HttpBoards:
     """Boards read over HTTPS from each provider's public API."""
 
@@ -255,28 +309,8 @@ class HttpBoards:
         return BoardResult(target, tuple(postings))
 
     def _get_json(self, url: str) -> Any:
+        _, raw = read_bounded_response(self.session, url)
         try:
-            response = self.session.get(
-                url, timeout=TIMEOUT_SECONDS, allow_redirects=False, stream=True
-            )
-        except requests.RequestException:
-            raise BoardError("the board is unreachable") from None
-        try:
-            if 300 <= response.status_code < 400:
-                raise BoardError("the board redirected; it may have moved")
-            if response.status_code != 200:
-                raise BoardError(f"the board answered HTTP {response.status_code}")
-            body = bytearray()
-            try:
-                for chunk in response.iter_content(chunk_size=65536):
-                    body += chunk
-                    if len(body) > MAX_BYTES:
-                        raise BoardError("the board's response was too large")
-            except requests.RequestException:
-                raise BoardError("the board stopped responding") from None
-            try:
-                return json.loads(bytes(body))
-            except ValueError:
-                raise BoardError("the board didn't answer with JSON") from None
-        finally:
-            response.close()
+            return json.loads(raw)
+        except ValueError:
+            raise BoardError("the board didn't answer with JSON") from None
