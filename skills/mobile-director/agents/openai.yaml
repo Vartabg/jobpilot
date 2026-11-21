@@ -1,0 +1,4 @@
+interface:
+  display_name: "Mobile Director"
+  short_description: "Direct work and review results from your phone"
+  default_prompt: "Use $mobile-director to show me what needs my judgment, with evidence and a clear next action."
